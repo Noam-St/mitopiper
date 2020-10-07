@@ -99,8 +99,14 @@ def ref_maker(org_name):
   """
   """
   ID = org_df.loc[org_name, 'RefSeq']
-  handle = Entrez.efetch(db = 'nucleotide', id = ID, rettype = 'gb', retmode = 'text')
-  record = SeqIO.read(handle, 'genbank')
+  filename = f'{path}{slash}{ID}.gbk'
+  if not os.path.isfile(filename):
+    net_handle = Entrez.efetch(db = 'nucleotide', id = ID, rettype = 'gb', retmode = 'text')
+    out_handle = open(filename, 'w')
+    out_handle.write(net_handle.read())
+    net_handle.close()
+    out_handle.close()
+  record = SeqIO.read(filename, 'genbank')
   seq = str(record.seq)
   with open(f'{path}{slash}mtDNA_ref{slash}{org_name}.fa', 'w') as ref:
     ref.write('>MT\n')
@@ -119,7 +125,7 @@ org_name = tsv_df['scientific_name'][0]
 change = int(input('Enter 1 to change pipeline\n Enter 2 to change settings\n Enter 0 to continue'))
 work_on = input('Choose which lines of the tsv to process with the current pipeline.\nenter a single row number (i.e 2), a range (i.e 2-3) or 0 for all rows')
 
-if not os.path.exists(f'{path}{slash}DNA_ref{slash}{org_name}'):
+if not os.path.exists(f'{path}{slash}mtDNA_ref{slash}{org_name}'):
   ref_maker(org_name)
 
 #%%
