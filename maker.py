@@ -51,18 +51,6 @@ def file_creator(filename, format_dict):
       file.write(f'{k}={v}\n')
   return
 
-def settings():
-  """
-  """
-  finished = False
-  while not finished:
-    print("Welcome to the settings menu\nTo change ")
-    break
-
-def pipeline():
-  """
-  """
-  pass
 def dir_checker(dirname):
   """
   """
@@ -87,6 +75,7 @@ dir_checker('fastq')
 dir_checker('mtDNA_ref')
 dir_checker('error_output')
 dir_checker('std_output')
+dir_checker('Genbank_DB')
  
 if not os.path.exists(f'{path}{slash}pipeline.txt'):
   file_creator('pipeline', default_pipe)
@@ -99,7 +88,7 @@ def ref_maker(org_name):
   """
   """
   ID = org_df.loc[org_name, 'RefSeq']
-  filename = f'{path}{slash}{ID}.gbk'
+  filename = f'{path}{slash}Genbank_DB{slash}{ID}.gbk'
   if not os.path.isfile(filename):
     net_handle = Entrez.efetch(db = 'nucleotide', id = ID, rettype = 'gb', retmode = 'text')
     out_handle = open(filename, 'w')
@@ -108,31 +97,42 @@ def ref_maker(org_name):
     out_handle.close()
   record = SeqIO.read(filename, 'genbank')
   seq = str(record.seq)
-  with open(f'{path}{slash}mtDNA_ref{slash}{org_name}.fa', 'w') as ref:
+  with open(f'{path}{slash}mtDNA_ref{slash}{org_name.replace(' ','_')}.fa', 'w') as ref:
     ref.write('>MT\n')
     ref.write(seq)
 
+def menu():
+  """
+  """
+  pass
+def settings():
+  """
+  """
+  finished = False
+  while not finished:
+    print("Welcome to the settings menu\nTo change ")
+    break
+
+def pipeline():
+  """
+  """
+  pass
 #%%
 
-tsv_name = input(""" Please enter TSV file name (without extension).
-IMPORTANT: The tsv must be in the same folder as this code, and in the following format:\n
-study_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\n
-The format is available for download from the EBI website\n""")
+tsv_name = input('Please enter TSV file name (without extension).\nIMPORTANT: The tsv must be in the same folder as this code, and in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website')
 tsv_path = path + slash + tsv_name + '.tsv'
 tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
 org_name = tsv_df['scientific_name'][0]
 
-change = int(input('Enter 1 to change pipeline\n Enter 2 to change settings\n Enter 0 to continue'))
+change = int(input('Please enter 1 to change the settings or pipeline.\nEnter 0 to continue'))
+if change:
+  menu()
 work_on = input('Choose which lines of the tsv to process with the current pipeline.\nenter a single row number (i.e 2), a range (i.e 2-3) or 0 for all rows')
 
 if not os.path.exists(f'{path}{slash}mtDNA_ref{slash}{org_name}'):
   ref_maker(org_name)
 
 #%%
-if change == 2:
-  settings()
-elif change == 1:
-  pipeline()
 
 cur_pipe = file_reader('pipeline')
 cur_settings = file_reader('settings')
@@ -144,7 +144,7 @@ def csh_maker(cur_pipe, cur_settings, work_on, tsv_df):
     file.write('#!/bin/csh\n')
     file.write(f'#$ -o {path}{slash}std_output\n')
     file.write(f'#$ -e {path}{slash}error_output\n')
-    file.write(f'#$ -cwd\n')
+    file.write(f'#$ -wd {path}\n')
     file.write(f'#$ -N {tsv_df.study_accession[0]}\n')
     file.write(f'#$ -q bioinfo.q\n')
     if '-' in work_on:
