@@ -11,10 +11,10 @@ the settings for each of the pipeline programs used, and the paths of the progra
 #%%
 import pandas as pd
 import sys, os
-path = os.getcwd()
+PATH = os.getcwd()
 from Bio import SeqIO
 from Bio import Entrez
-
+from textwrap import wrap
 
 
 if sys.platform != 'win32':
@@ -22,7 +22,7 @@ if sys.platform != 'win32':
 else:
     slash = '\\'
 try:
-  org_df = pd.read_csv(f'{path}{slash}final.csv')
+  org_df = pd.read_csv(f'{PATH}{slash}final.csv')
   org_df.organism = org_df.organism.str.replace(' ','_')
   org_df = org_df.set_index('organism')
 except FileNotFoundError: raise FileNotFoundError('final.csv is required in the same folder for the program to operate.')
@@ -32,8 +32,8 @@ def file_reader(filename):
 
   Parameters
   ----------
-  filepath : str
-    path to txt file in the expected format
+  filePATH : str
+    PATH to txt file in the expected format
   
   Returns
   -------
@@ -41,7 +41,7 @@ def file_reader(filename):
     Dictionary with the left side of the equal sign as key and right side as value
   """
   format_dict = {}
-  with open(f'{path}{slash}{filename}.txt', 'r') as file:
+  with open(f'{PATH}{slash}{filename}.txt', 'r') as file:
     for line in file:
       line = line.rstrip('\n')
       line = line.split('=')
@@ -60,19 +60,25 @@ def file_creator(filename, format_dict):
   format_dict : dict
     Dictionary by-which to write the file in this format: key=value
   """
-  with open(f'{path}{slash}{filename}.txt','w') as file:
+  with open(f'{PATH}{slash}{filename}.txt','w') as file:
     for k,v in format_dict.items():
       file.write(f'{k}={v}\n')
   return
 
 def dir_checker(dirname):
   """
+  check if a directory exists, if it does not, create it.
+
+  Parameters
+  ----------
+  dirname : str
+    Name of the directory to be checked
   """
-  if not os.path.isdir(f'{path}{slash}{dirname}'):
-    os.mkdir(f'{path}{slash}{dirname}')
+  if not os.path.isdir(f'{PATH}{slash}{dirname}'):
+    os.mkdir(f'{PATH}{slash}{dirname}')
 
 
-if not os.path.exists(f'{path}{slash}credentials.txt'):
+if not os.path.exists(f'{PATH}{slash}credentials.txt'):
   EMAIL = input('Please enter your NCBI account email:')
   API = input('Please enter your NCBI API (can be found in NCBI account page)')
   file_creator('credentials', {'Email':EMAIL, 'API':API})
@@ -83,8 +89,19 @@ Entrez.email = creds['Email']
 Entrez.api_key = creds['API']
 
 
-default_pipe = {'wget' : 1, 'fastqc_pre' : 1, 'trim' : 1, 'align+index' : 1, 'mpileup' : 1, 'depth' : 0}
-default_settings = {}
+default_pipe =\
+{
+'wget' : 1,
+'fastqc_pre' : 1,
+'trim' : 1,
+'align+index' : 1,
+'mpileup' : 1,
+'depth' : 0
+}
+default_settings =\
+{
+
+}
 default_paths =\
 {
   'fastqc' : r'fastqc',
@@ -100,18 +117,32 @@ dir_checker('std_output')
 dir_checker('Genbank_DB')
 dir_checker('fastqc_pre')
 dir_checker('fastqc_post')
+dir_checker('post_trim')
 
 configs = ['pipeline', 'settings', 'paths']
 for i,config in enumerate(configs):
-  if not os.path.exists(f'{path}{slash}{config}.txt'):
+  if not os.path.exists(f'{PATH}{slash}{config}.txt'):
     file_creator(config, defaults[i])
 
-
+def fasta_wrap(seq):
+  """
+  """
+  return '\n'.join(wrap(seq, 60))
 def ref_maker(org_name):
   """
+  Create a fasta file for indexing purposes.
+
+  Parameters
+  ----------
+  org_name : str
+    Name of the organism to name the file.
+  
+  Returns
+  -------
+    Absolute path to the fasta file created.
   """
   ID = org_df.loc[org_name, 'RefSeq']
-  filename = f'{path}{slash}genbank_DB{slash}{ID}.gbk'
+  filename = f'{PATH}{slash}genbank_DB{slash}{ID}.gbk'
   if not os.path.isfile(filename):
     net_handle = Entrez.efetch(db = 'nucleotide', id = ID, rettype = 'gb', retmode = 'text')
     out_handle = open(filename, 'w')
@@ -120,9 +151,36 @@ def ref_maker(org_name):
     out_handle.close()
   record = SeqIO.read(filename, 'genbank')
   seq = str(record.seq)
-  with open(f'{path}{slash}mtDNA_ref{slash}{org_name}.fa', 'w') as ref:
+  fasta = f'{PATH}{slash}mtDNA_ref{slash}{org_name}{slash}{org_name}.fasta'
+  with open(fasta, 'w') as ref:
     ref.write('>MT\n')
-    ref.write(seq)
+    ref.write(fasta_wrap(seq))
+  return fasta
+
+def ref_main(org_name):
+  """
+  """
+  choice = True
+  while choice:
+    print('It seems an reference fasta does not exist in the default location\nTo create one automatically, press 1\nTo enter an index path, press 2\n')
+    choice = input()
+    try: choice = int(choice)
+    except ValueError: print('Please enter 1 or 2 only')
+    if choice == 1:
+      dir_checker(f'mtDNA_ref{slash}{org_name}')
+      fasta = ref_maker(org_name)
+      add_to_csh = f'samtools faidx {fasta}\nbwa index {fasta}\n'
+      return fasta, add_to_csh
+    elif choice == 2:
+      print('Please enter the full path to the reference fasta\n')
+      fasta = input()
+      return fasta, ''
+    else:
+      print('Please enter 1 or 2 only')
+
+
+
+
 def settings():
   """
   """
@@ -155,12 +213,6 @@ def pipeline():
   file_creator('pipeline', pipeline)
   return
 
-
-
-
-
-
-
 def paths():
   """
   """
@@ -180,6 +232,8 @@ def menu():
       pipeline()
     elif choice == 2:
       settings()
+    elif choice == 3:
+      paths()
     elif not choice:
       pass
     else: print("Please enter either 1, 2, 3 or 0!")
@@ -188,11 +242,8 @@ def menu():
 
 
 
-tsv_name = input('Please enter TSV file name (without extension).\n\
-IMPORTANT: The tsv must be in the same folder as this code, and in the following format:\n\
-study_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\n\
-The format is available for download from the EBI website\n')
-tsv_path = path + slash + tsv_name + '.tsv'
+tsv_name = input('Please enter TSV file name (without extension).\nIMPORTANT: The tsv must be in the same folder as this code, and in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
+tsv_path = PATH + slash + tsv_name + '.tsv'
 tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
 tsv_df.scientific_name = tsv_df.scientific_name.str.replace(' ','_')
 org_name = tsv_df['scientific_name'][0]
@@ -200,12 +251,10 @@ org_name = tsv_df['scientific_name'][0]
 change = int(input('Please enter 1 to change the settings or pipeline.\nEnter 0 to continue\n'))
 if change:
   menu()
-print(f'Choose which lines of the tsv to process with the current pipeline.\n\
-Enter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\n')
+print(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\n')
 [print(f'{ind}\t{samp}') for ind,samp in zip(tsv_df.index,tsv_df.sample_accession)]
 work_on = input()
-if not os.path.exists(f'{path}{slash}mtDNA_ref{slash}{org_name}'):
-  ref_maker(org_name)
+
 
 
 
@@ -218,8 +267,8 @@ def csh_maker(cur_pipe, cur_settings, work_on, tsv_df):
   """
   with open('run.csh', 'w') as file:
     file.write('#!/bin/csh\n')
-    file.write(f'#$ -o {path}{slash}std_output\n')
-    file.write(f'#$ -e {path}{slash}error_output\n')
+    file.write(f'#$ -o {PATH}{slash}std_output\n')
+    file.write(f'#$ -e {PATH}{slash}error_output\n')
     file.write(f'#$ -cwd\n')
     file.write(f'#$ -N {tsv_df.study_accession[0]}\n')
     file.write(f'#$ -q bioinfo.q\n')
@@ -248,19 +297,32 @@ def csh_maker(cur_pipe, cur_settings, work_on, tsv_df):
         else: ind = ''
         if cur_pipe['wget']:
           file.write(f'echo \"Running wget on {sample}{ind}\"\n')
-          file.write(f'wget -nH -nd -O {path}{slash}fastq{slash}{sample}{ind}.fastq.gz {ftp}\n')
+          file.write(f'wget -nH -nd -O {PATH}{slash}fastq{slash}{sample}{ind}.fastq.gz {ftp}\n')
         if cur_pipe['fastqc_pre']:
           file.write(f'echo \"Running fastqc on {sample}{ind}\"\n')
-          file.write(f'{cur_path["fastqc"]} --outdir {path}{slash}fastqc_pre {path}{slash}fastq{slash}{sample}{ind}.fastq.gz\n')
+          file.write(f'{cur_path["fastqc"]} --outdir {PATH}{slash}fastqc_pre {PATH}{slash}fastq{slash}{sample}{ind}.fastq.gz\n')
     for _,row in tsv_df.iloc[start:end,:].iterrows():
+      org_name = row.scientific_name
       sample = row.sample_accession
+      fasta = f'{PATH}{slash}{org_name}{slash}{org_name}.fasta'
       file.write(f'echo \"Running TrimGalore on {sample}\"\n')
       if cur_pipe['trim']:
         if PAIRED:
-          file.write(f'{cur_path["trim"]} --paired --fastqc_args \"--outdir {path}{slash}fastqc_post\" {path}{slash}fastq{slash}{sample}_1.fastq.gz {path}{slash}fastq{slash}{sample}_2.fastq.gz\n')
+          file.write(f'trim_galore -o{PATH}post_trim --paired --fastqc_args \"--outdir {PATH}{slash}fastqc_post\" {PATH}{slash}fastq{slash}{sample}_1.fastq.gz {PATH}{slash}fastq{slash}{sample}_2.fastq.gz\n')
         else:
-          file.write(f'{cur_path["trim"]} --fastqc_args \"--outdir {path}{slash}fastqc_post\" {path}{slash}fastq{slash}{sample}.fastq.gz\n')
+          file.write(f'trim_galore -o{PATH}post_trim --fastqc_args \"--outdir {PATH}{slash}fastqc_post\" {PATH}{slash}fastq{slash}{sample}.fastq.gz\n')
+      if not os.path.exists(fasta):
+        fasta, add_to_csh = ref_main(org_name)
+        file.write(add_to_csh)
+      #CONTINUE FROM HERE, next steps: 1. bwa mem command 2. samtools view to convert SAM to BAM 3. samtool index (read why) 4. pileup command
+      #5. add some settings
+
+
+
+    
+
 csh_maker(cur_pipe, cur_settings, work_on, tsv_df)
+
 # %%
 
 # %%
