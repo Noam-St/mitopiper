@@ -100,7 +100,6 @@ default_pipe =\
 default_settings =\
 { 
 }
-}
 default_paths =\
 {
   'fastqc' : r'fastqc',
