@@ -98,7 +98,11 @@ default_pipe =\
 'depth' : 0
 }
 default_settings =\
-{ 
+{
+  'trim':{
+    'quality':20,
+    'adapter':''
+  }
 }
 default_paths =\
 {
@@ -204,7 +208,7 @@ def pipeline():
     if running:
       pipeline_changes = {i:k for i,k in enumerate(pipeline.keys())}
       print('To remove or add a feature, simply enter its number\n')
-      [print(f'{i} {k}\n') for i,k in pipeline_changes.items()]
+      [print(f'{i} {k} - current setting: {v}\n') for i,k,v in zip(pipeline_changes.keys(), pipeline_changes.values(), pipeline.values())]
       to_change = pipeline_changes[int(input())]
       if pipeline[to_change]:
         pipeline[to_change] = 0
@@ -222,7 +226,7 @@ def paths():
 def menu():
   """
   """
-  choice = 10
+  choice = True
   while choice:
     print('#####################\n\nWelcome to the reconfiguration menu\nTo change the pipeline enter 1\nTo change the settings enter 2\nTo exit enter 0\n\n#####################\n')
     try:
@@ -309,9 +313,9 @@ def csh_maker(cur_pipe, cur_settings, work_on, tsv_df):
       file.write(f'echo \"Running TrimGalore on {sample}\"\n')
       if cur_pipe['trim']:
         if PAIRED:
-          file.write(f'trim_galore -o{PATH}post_trim --paired --fastqc_args \"--outdir {PATH}{slash}fastqc_post\" {PATH}{slash}fastq{slash}{sample}_1.fastq.gz {PATH}{slash}fastq{slash}{sample}_2.fastq.gz\n')
+          file.write(f'trim_galore -o {PATH}{slash}post_trim --paired --fastqc_args \"--outdir {PATH}{slash}fastqc_post\" {PATH}{slash}fastq{slash}{sample}_1.fastq.gz {PATH}{slash}fastq{slash}{sample}_2.fastq.gz\n')
         else:
-          file.write(f'trim_galore -o{PATH}post_trim --fastqc_args \"--outdir {PATH}{slash}fastqc_post\" {PATH}{slash}fastq{slash}{sample}.fastq.gz\n')
+          file.write(f'trim_galore -o {PATH}{slash}post_trim --fastqc_args \"--outdir {PATH}{slash}fastqc_post\" {PATH}{slash}fastq{slash}{sample}.fastq.gz\n')
       if not os.path.exists(fasta):
         fasta, add_to_csh = ref_main(org_name)
         file.write(add_to_csh)
@@ -319,7 +323,7 @@ def csh_maker(cur_pipe, cur_settings, work_on, tsv_df):
         if PAIRED:
           file.write(f'bwa mem {fasta} {PATH}{slash}post_trim{slash}{sample}_1_val_1.fq.gz {PATH}{slash}post_trim{slash}{sample}_2_val_2.fq.gz > {PATH}{slash}alignment{slash}{sample}.sam\n')
         else:
-          file.write(f'bwa mem {fasta} {PATH}{slash}post_trim{slash}{sample}_val.fq.gz < {PATH}{slash}alignment{slash}{sample}.sam\n')
+          file.write(f'bwa mem {fasta} {PATH}{slash}post_trim{slash}{sample}_trimmed.fq.gz < {PATH}{slash}alignment{slash}{sample}.sam\n')
         file.write(f'samtools view -h -b {PATH}{slash}alignment{slash}{sample}.sam > {PATH}{slash}alignment{slash}{sample}.bam\n')
         file.write(f'samtools index {PATH}{slash}alignment{slash}{sample}.bam\n')
       if cur_pipe['mpileup']:
