@@ -85,8 +85,7 @@ if not os.path.exists(f'{PATH}{slash}credentials.txt'):
 
 creds = file_reader('credentials')
 
-Entrez.email = creds['Email']
-Entrez.api_key = creds['API']
+
 
 
 default_pipe =\
@@ -99,8 +98,8 @@ default_pipe =\
 'depth' : 0
 }
 default_settings =\
-{
-
+{ 
+}
 }
 default_paths =\
 {
@@ -118,6 +117,7 @@ dir_checker('Genbank_DB')
 dir_checker('fastqc_pre')
 dir_checker('fastqc_post')
 dir_checker('post_trim')
+dir_checker('alignment')
 
 configs = ['pipeline', 'settings', 'paths']
 for i,config in enumerate(configs):
@@ -144,6 +144,8 @@ def ref_maker(org_name):
   ID = org_df.loc[org_name, 'RefSeq']
   filename = f'{PATH}{slash}genbank_DB{slash}{ID}.gbk'
   if not os.path.isfile(filename):
+    Entrez.email = creds['Email']
+    Entrez.api_key = creds['API']
     net_handle = Entrez.efetch(db = 'nucleotide', id = ID, rettype = 'gb', retmode = 'text')
     out_handle = open(filename, 'w')
     out_handle.write(net_handle.read())
@@ -304,7 +306,7 @@ def csh_maker(cur_pipe, cur_settings, work_on, tsv_df):
     for _,row in tsv_df.iloc[start:end,:].iterrows():
       org_name = row.scientific_name
       sample = row.sample_accession
-      fasta = f'{PATH}{slash}{org_name}{slash}{org_name}.fasta'
+      fasta = f'{PATH}{slash}mtDNA_ref{slash}{org_name}{slash}{org_name}.fasta'
       file.write(f'echo \"Running TrimGalore on {sample}\"\n')
       if cur_pipe['trim']:
         if PAIRED:
@@ -314,8 +316,16 @@ def csh_maker(cur_pipe, cur_settings, work_on, tsv_df):
       if not os.path.exists(fasta):
         fasta, add_to_csh = ref_main(org_name)
         file.write(add_to_csh)
-      #CONTINUE FROM HERE, next steps: 1. bwa mem command 2. samtools view to convert SAM to BAM 3. samtool index (read why) 4. pileup command
-      #5. add some settings
+      if cur_pipe['align+index']:
+        if PAIRED:
+          file.write(f'bwa mem {fasta} {PATH}{slash}post_trim{slash}{sample}_1_val_1.fq.gz {PATH}{slash}post_trim{slash}{sample}_2_val_2.fq.gz > {PATH}{slash}alignment{slash}{sample}.sam\n')
+        else:
+          file.write(f'bwa mem {fasta} {PATH}{slash}post_trim{slash}{sample}_val.fq.gz < {PATH}{slash}alignment{slash}{sample}.sam\n')
+        file.write(f'samtools view -h -b {PATH}{slash}alignment{slash}{sample}.sam > {PATH}{slash}alignment{slash}{sample}.bam\n')
+        file.write(f'samtools index {PATH}{slash}alignment{slash}{sample}.bam\n')
+      if cur_pipe['mpileup']:
+        file.write(f'samtools mpileup -f {fasta} -Q 30 -q 0 -a > {PATH}{slash}pileup{slash}{sample}.pileup')
+      #CONTINUE FROM HERE add some settings.
 
 
 
