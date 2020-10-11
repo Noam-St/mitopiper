@@ -100,7 +100,6 @@ default_pipe =\
 default_settings =\
 { 
 }
-}
 default_paths =\
 {
   'fastqc' : r'/gpfs0/biores/apps/FastQC_v0.11.7/fastqc',
