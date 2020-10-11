@@ -121,6 +121,7 @@ dir_checker('fastqc_pre')
 dir_checker('fastqc_post')
 dir_checker('post_trim')
 dir_checker('alignment')
+dir_checker('samples')
 
 configs = ['pipeline', 'settings', 'paths']
 for i,config in enumerate(configs):
@@ -247,8 +248,8 @@ def menu():
 
 
 
-tsv_name = input('Please enter TSV file name (without extension).\nIMPORTANT: The tsv must be in the same folder as this code, and in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
-tsv_path = PATH + slash + tsv_name + '.tsv'
+tsv_name = input('Please enter TSV file name (without extension).\nIMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: the tsv msut be in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
+tsv_path = f'{PATH}{slash}samples{slash}{tsv_name}.tsv'
 tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
 tsv_df.scientific_name = tsv_df.scientific_name.str.replace(' ','_')
 org_name = tsv_df['scientific_name'][0]
@@ -293,7 +294,7 @@ def csh_maker(cur_pipe, cur_settings, work_on, tsv_df):
       if len(row.fastq_ftp.split(';')) > 1: PAIRED = True
       else : PAIRED = False
       ftps = row.fastq_ftp.split(';')
-      sample = row.sample_accession
+      sample = row.run_accession
       file.write(f'echo \"Current organism: {row.scientific_name}\"\n')
       for ind, ftp in enumerate(ftps):
         if PAIRED:
@@ -301,16 +302,17 @@ def csh_maker(cur_pipe, cur_settings, work_on, tsv_df):
           ind = '_' + str(ind)
         else: ind = ''
         if cur_pipe['wget']:
-          file.write(f'echo \"Running wget on {sample}{ind}\"\n')
+          file.write(f'echo \"Downloading sample: {sample}{ind}\"\n')
           file.write(f'wget -nH -nd -O {PATH}{slash}fastq{slash}{sample}{ind}.fastq.gz {ftp}\n')
         if cur_pipe['fastqc_pre']:
-          file.write(f'echo \"Running fastqc on {sample}{ind}\"\n')
+          file.write(f'echo \"Checking quality of {sample}{ind}\"\n')
           file.write(f'{cur_path["fastqc"]} --outdir {PATH}{slash}fastqc_pre {PATH}{slash}fastq{slash}{sample}{ind}.fastq.gz\n')
     for _,row in tsv_df.iloc[start:end,:].iterrows():
       org_name = row.scientific_name
       sample = row.sample_accession
       fasta = f'{PATH}{slash}mtDNA_ref{slash}{org_name}{slash}{org_name}.fasta'
-      file.write(f'echo \"Running TrimGalore on {sample}\"\n')
+      file.write(f'echo \"Current organism: {row.scientific_name}\"\n')
+      file.write(f'echo \"Trimming {sample}\"\n')
       if cur_pipe['trim']:
         if PAIRED:
           file.write(f'trim_galore -o {PATH}{slash}post_trim --paired --fastqc_args \"--outdir {PATH}{slash}fastqc_post\" {PATH}{slash}fastq{slash}{sample}_1.fastq.gz {PATH}{slash}fastq{slash}{sample}_2.fastq.gz\n')
@@ -320,10 +322,12 @@ def csh_maker(cur_pipe, cur_settings, work_on, tsv_df):
         fasta, add_to_csh = ref_main(org_name)
         file.write(add_to_csh)
       if cur_pipe['align+index']:
+        file.write(f'echo \"Alignment stage start for {sample}\"\n')
         if PAIRED:
           file.write(f'bwa mem {fasta} {PATH}{slash}post_trim{slash}{sample}_1_val_1.fq.gz {PATH}{slash}post_trim{slash}{sample}_2_val_2.fq.gz > {PATH}{slash}alignment{slash}{sample}.sam\n')
         else:
           file.write(f'bwa mem {fasta} {PATH}{slash}post_trim{slash}{sample}_trimmed.fq.gz < {PATH}{slash}alignment{slash}{sample}.sam\n')
+        file.write(f'echo \"Mpileup stage start for {sample}\"\n')
         file.write(f'samtools view -h -b {PATH}{slash}alignment{slash}{sample}.sam > {PATH}{slash}alignment{slash}{sample}.bam\n')
         file.write(f'samtools index {PATH}{slash}alignment{slash}{sample}.bam\n')
       if cur_pipe['mpileup']:
