@@ -122,6 +122,7 @@ dir_checker('fastqc_post')
 dir_checker('post_trim')
 dir_checker('alignment')
 dir_checker('samples')
+dir_checker('pileup')
 
 configs = ['pipeline', 'settings', 'paths']
 for i,config in enumerate(configs):
@@ -295,25 +296,25 @@ def csh_maker(cur_pipe, cur_settings, work_on, tsv_df):
       else : PAIRED = False
       ftps = row.fastq_ftp.split(';')
       sample = row.run_accession
-      file.write(f'echo \"Current organism: {row.scientific_name}\"\n')
+      file.write(f'echo \"Current organism: {row.scientific_name}\"\n\n')
       for ind, ftp in enumerate(ftps):
         if PAIRED:
           ind+=1
           ind = '_' + str(ind)
         else: ind = ''
         if cur_pipe['wget']:
-          file.write(f'echo \"Downloading sample: {sample}{ind}\"\n')
+          file.write(f'echo \"Downloading sample: {sample}{ind}\"\n\n')
           file.write(f'wget -nH -nd -O {PATH}{slash}fastq{slash}{sample}{ind}.fastq.gz {ftp}\n')
         if cur_pipe['fastqc_pre']:
-          file.write(f'echo \"Checking quality of {sample}{ind}\"\n')
+          file.write(f'echo \"Checking quality of {sample}{ind}\"\n\n')
           file.write(f'{cur_path["fastqc"]} --outdir {PATH}{slash}fastqc_pre {PATH}{slash}fastq{slash}{sample}{ind}.fastq.gz\n')
     for _,row in tsv_df.iloc[start:end,:].iterrows():
       org_name = row.scientific_name
-      sample = row.sample_accession
+      sample = row.run_accession
       fasta = f'{PATH}{slash}mtDNA_ref{slash}{org_name}{slash}{org_name}.fasta'
-      file.write(f'echo \"Current organism: {row.scientific_name}\"\n')
-      file.write(f'echo \"Trimming {sample}\"\n')
+      file.write(f'echo \"Current organism: {row.scientific_name}\"\n\n')
       if cur_pipe['trim']:
+        file.write(f'echo \"Trimming {sample}\"\n\n')
         if PAIRED:
           file.write(f'trim_galore -o {PATH}{slash}post_trim --paired --fastqc_args \"--outdir {PATH}{slash}fastqc_post\" {PATH}{slash}fastq{slash}{sample}_1.fastq.gz {PATH}{slash}fastq{slash}{sample}_2.fastq.gz\n')
         else:
@@ -322,16 +323,17 @@ def csh_maker(cur_pipe, cur_settings, work_on, tsv_df):
         fasta, add_to_csh = ref_main(org_name)
         file.write(add_to_csh)
       if cur_pipe['align+index']:
-        file.write(f'echo \"Alignment stage start for {sample}\"\n')
+        file.write(f'echo \"Alignment stage start for {sample}\"\n\n')
         if PAIRED:
           file.write(f'bwa mem {fasta} {PATH}{slash}post_trim{slash}{sample}_1_val_1.fq.gz {PATH}{slash}post_trim{slash}{sample}_2_val_2.fq.gz > {PATH}{slash}alignment{slash}{sample}.sam\n')
         else:
           file.write(f'bwa mem {fasta} {PATH}{slash}post_trim{slash}{sample}_trimmed.fq.gz < {PATH}{slash}alignment{slash}{sample}.sam\n')
-        file.write(f'echo \"Mpileup stage start for {sample}\"\n')
+        file.write(f'echo \"Mpileup stage start for {sample}\"\n\n')
         file.write(f'samtools view -h -b {PATH}{slash}alignment{slash}{sample}.sam > {PATH}{slash}alignment{slash}{sample}.bam\n')
+        file.write(f'samtools sort {PATH}{slash}alignment{slash}{sample}.bam -o {PATH}{slash}alignment{slash}{sample}.bam\n')
         file.write(f'samtools index {PATH}{slash}alignment{slash}{sample}.bam\n')
       if cur_pipe['mpileup']:
-        file.write(f'samtools mpileup -f {fasta} -Q 30 -q 0 -a > {PATH}{slash}pileup{slash}{sample}.pileup')
+        file.write(f'samtools mpileup -f {fasta} -Q 30 -q 0 {PATH}{slash}alignment{slash}{sample}.bam > {PATH}{slash}pileup{slash}{sample}.pileup\n')
       #CONTINUE FROM HERE add some settings.
 
 
