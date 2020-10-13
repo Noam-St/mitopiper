@@ -316,9 +316,13 @@ def csh_maker(cur_pipe, cur_settings, work_on, tsv_df):
       if cur_pipe['trim']:
         file.write(f'echo \"Trimming {sample}\"\n\n')
         if PAIRED:
-          file.write(f'trim_galore -o {PATH}{slash}post_trim --paired --fastqc_args \"--outdir {PATH}{slash}fastqc_post\" {PATH}{slash}fastq{slash}{sample}_1.fastq.gz {PATH}{slash}fastq{slash}{sample}_2.fastq.gz\n')
+          file.write(f'trim_galore -o {PATH}{slash}post_trim --paired {PATH}{slash}fastq{slash}{sample}_1.fastq.gz {PATH}{slash}fastq{slash}{sample}_2.fastq.gz\n')
+          file.write(f'{cur_path["fastqc"]} --outdir {PATH}{slash}fastqc_post {PATH}{slash}post_trim{slash}{sample}_1_val_1.fq.gz\n')
+          file.write(f'{cur_path["fastqc"]} --outdir {PATH}{slash}fastqc_post {PATH}{slash}post_trim{slash}{sample}_2_val_2.fq.gz\n')
+
         else:
-          file.write(f'trim_galore -o {PATH}{slash}post_trim --fastqc_args \"--outdir {PATH}{slash}fastqc_post\" {PATH}{slash}fastq{slash}{sample}.fastq.gz\n')
+          file.write(f'trim_galore -o {PATH}{slash}post_trim {PATH}{slash}fastq{slash}{sample}.fastq.gz\n')
+          file.write(f'{cur_path["fastqc"]} --outdir {PATH}{slash}fastqc_post {PATH}{slash}post_trim{slash}{sample}_trimmed.fq.gz\n')
       if not os.path.exists(fasta):
         fasta, add_to_csh = ref_main(org_name)
         file.write(add_to_csh)
@@ -327,7 +331,7 @@ def csh_maker(cur_pipe, cur_settings, work_on, tsv_df):
         if PAIRED:
           file.write(f'bwa mem {fasta} {PATH}{slash}post_trim{slash}{sample}_1_val_1.fq.gz {PATH}{slash}post_trim{slash}{sample}_2_val_2.fq.gz > {PATH}{slash}alignment{slash}{sample}.sam\n')
         else:
-          file.write(f'bwa mem {fasta} {PATH}{slash}post_trim{slash}{sample}_trimmed.fq.gz < {PATH}{slash}alignment{slash}{sample}.sam\n')
+          file.write(f'bwa mem {fasta} {PATH}{slash}post_trim{slash}{sample}_trimmed.fq.gz > {PATH}{slash}alignment{slash}{sample}.sam\n')
         file.write(f'echo \"Mpileup stage start for {sample}\"\n\n')
         file.write(f'samtools view -h -b {PATH}{slash}alignment{slash}{sample}.sam > {PATH}{slash}alignment{slash}{sample}.bam\n')
         file.write(f'samtools sort {PATH}{slash}alignment{slash}{sample}.bam -o {PATH}{slash}alignment{slash}{sample}.bam\n')
