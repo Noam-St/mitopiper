@@ -87,50 +87,73 @@ default_pipe =\
   'key':'wget',
   'description':'Download command',
   'switch':True,
-  'path':''
+  'path':'',
+  'outdir':'fastq',
+  'output_ext':''
 },
 'trim' : {
   'key':'trim_galore',
   'description':'Trims adapters',
   'switch':True,
-  'path':r'/gpfs0/biores/apps/TrimGalore/TrimGalore-0.4.5/trim_galore'
-},
-'alignment' : {
-  'key':'bwa index',
-  'description':'Align reads to reference',
-  'switch':True,
-  'path':r'/gpfs0/biores/apps/bwa/bwa-v0.7.16'
-},
-'view':{
-  'key':'samtools view',
-  'description':'Convert sam to bam',
-  'switch':True,
-  'path':r'/gpfs0/biores/apps/samtools/samtools-1.3/bin/samtools view'
-},
-'index':{
-  'key':'samtools index',
-  'description':'Index bam for fast access via samtools',
-  'switch':True,
-  'path':r'/gpfs0/biores/apps/samtools/samtools-1.3/bin/samtools index'
-},
-'mpileup':{
-  'key':'samtools mpileup',
-  'description':'Create a readable mpileup format',
-  'switch':True,
-  'path':r'/gpfs0/biores/apps/samtools/samtools-1.3/bin/samtools mpileup'
+  'path':r'',
+  'outdir':'post_trim',
+  'output_ext':'.fq.gz'
 },
 'fastqc':{
   'key':'fastqc',
   'description':'Create a readable quality report in html format',
   'switch':True,
-  'path':r'/gpfs0/biores/apps/FastQC_v0.11.7/fastqc'
+  'path':r'/gpfs0/biores/apps/FastQC_v0.11.7/fastqc',
+  'outdir':'post_trim',
+  'output_ext':''
+},
+'alignment' : {
+  'key':'bwa index',
+  'description':'Align reads to reference',
+  'switch':True,
+  'path':r'',
+  'outdir':'alignment',
+  'output_ext':'.sam'
+},
+'view':{
+  'key':'samtools view',
+  'description':'Convert sam to bam',
+  'switch':True,
+  'path':r'',
+  'outdir':'alignment',
+  'output_ext':'.bam'
+},
+'index':{
+  'key':'samtools index',
+  'description':'Index bam for fast access via samtools',
+  'switch':True,
+  'path':r'',
+  'outdir':'',
+  'output_ext':''
+},
+'mpileup':{
+  'key':'samtools mpileup',
+  'description':'Create a readable mpileup format',
+  'switch':True,
+  'path':r'',
+  'outdir':'pileup',
+  'output_ext':'.pileup'
+},
+'sort':{
+  'key': 'samtools sort',
+  'description':'Sort reads',
+  'switch':True,
+  'path':r'',
+  'outdir':'alignment',
+  'output_ext':'.bam'
 }
 }
 
 default_settings =\
 {
   'trim':{
-    'quality':{'description':'Trim low-quality ends from reads', 'key':'-q', 'value':20, 'switch':True}
+    'quality':{'description':'Trim low-quality ends from reads', 'key':'-q', 'value':20, 'switch':True},
+    'outdir':{'description':'Choose output directory', 'key':'-o', 'value':f'{PATH}{slash}post_trim', 'switch':True}
   },
   'alignment':{
     'seed':{'description':'Minimum seed length', 'key':'-k', 'value':19, 'switch':True}
@@ -143,24 +166,21 @@ default_settings =\
   'mpileup':{
     'quality':{'description':'Minimum base quality for a base to be considered', 'key':'-Q', 'value':30, 'switch':True}
   },
-  'fastqc':{},
-
+  'fastqc':{
+    'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':f'{PATH}{slash}post_trim', 'switch':True}
+  },
 }
+default_order = ['wget','trim','fastqc','alignment','view','index','mpileup']
 
-defaults = (default_pipe, default_settings)
-dir_checker('fastq')
+defaults = (default_pipe, default_settings, default_order)
 dir_checker('mtDNA_ref')
 dir_checker('error_output')
 dir_checker('std_output')
 dir_checker('Genbank_DB')
-dir_checker('fastqc_pre')
-dir_checker('fastqc_post')
-dir_checker('post_trim')
-dir_checker('alignment')
 dir_checker('samples')
-dir_checker('pileup')
 
-configs = ['pipeline', 'settings', 'paths']
+
+configs = ['pipeline', 'settings', 'run_order']
 for i,config in enumerate(configs):
   if not os.path.exists(f'{PATH}{slash}{config}.json'):
     file_creator(config, defaults[i])
@@ -346,8 +366,42 @@ def change_menu():
     except IndexError:
       print("Please only choose one of the listed options!\n")
 
+def paired_csh(row, settings, pipeline, order, fasta):
+  """
+  """
+  csh_str = ''
+  sample = row.run_accession
 
+  for command in order:
+    command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else pipeline[command]['path']
+    command_outdir = pipeline[command]['outdir']
+    command_settings = ' '.join([\
+      f'{key} {value} ' for key,value in settings[command].items() if value['switch'] == True])
+    csh_str+= f'echo \"Running {command}: {pipeline[command]["description"]} on {sample}\"\n'
+    ftps = sample.fastq_ftp.split(';')
+    if command == 'wget':
+      for i in range(2):
+        csh_str+=f'{command_key} {command_settings} -O {PATH}{slash}{command_outdir}{slash}{sample}_{i+1}.fastq.gz {ftps[i]}\n'
+    elif command == 'fastq':
+      for i in range(2):
+        csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline[command]["trim"]["outdir"]}{slash}{sample}_{i+1}_val_{i+1}.fq.gz\n'
+    elif command == 'alignment':
+      csh_str+=f'{command_key} {command_settings} {fasta} {PATH}{slash}{pipeline[command]["trim"]["outdir"]}{slash}{sample}_1_val_1.fq.gz {PATH}{slash}{pipeline[command]["trim"]["outdir"]}{slash}{sample}_2_val_2.fq.gz > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
+    elif command == 'mpileup':
+      csh_str+=f'{command_key} -f {fasta} {command_settings} {PATH}{slash}{pipeline[command]["alignment"]["outdir"]}{slash}{sample}.bam > {PATH}{slash}{command_outdir}{slash}{sample}.pileup\n'
+    elif command == 'view':
+      csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline[command]["alignment"]["outdir"]}{slash}{sample}.sam > {PATH}{slash}{command_outdir}{slash}{sample}.bam\n'
+    elif command == 'sort':
+      csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline[command]["alignment"]["outdir"]}{slash}{sample}.bam -o {PATH}{slash}{pipeline[command]["alignment"]["outdir"]}{slash}{sample}.bam\n'
+    else:
+      csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline[command]["alignment"]["outdir"]}{slash}{sample}.bam'
 
+    #STOPPED HERE, need to find a way to not manually elif every single pipeline step..
+
+def unpaired_csh(row, settings, pipeline, order, ref):
+  """
+  """
+  pass
 
 tsv_name = input('Please enter TSV file name (without extension).\nIMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: the tsv msut be in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
 tsv_path = f'{PATH}{slash}samples{slash}{tsv_name}.tsv'
@@ -358,42 +412,38 @@ org_name = tsv_df['scientific_name'][0]
 change = int(input('Please enter 1 to enter the configuration menu.\nEnter 0 to continue\n'))
 if change:
   change_menu()
+
 print(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\n')
 [print(f'{ind}\t{samp}') for ind,samp in zip(tsv_df.index,tsv_df.sample_accession)]
 work_on = input()
 
-
-
-
-cur_pipe = file_reader('pipeline')
-cur_settings = file_reader('settings')
-cur_path = file_reader('paths')
-
-def csh_maker(cur_pipe, cur_settings, work_on, tsv_df):
+def csh_maker(work_on, tsv_df):
   """
   """
-  with open('run.csh', 'w') as file:
-    file.write('#!/bin/csh\n')
-    file.write(f'#$ -o {PATH}{slash}std_output\n')
-    file.write(f'#$ -e {PATH}{slash}error_output\n')
-    file.write(f'#$ -cwd\n')
-    file.write(f'#$ -N {tsv_df.study_accession[0]}\n')
-    file.write(f'#$ -q bioinfo.q\n')
-  
-    if '-' in work_on:
-      work_on = [int(i) for i in work_on.split('-')]
-      start = work_on[0]
-      end = work_on[1]
-    elif work_on == 'all':
-      end = len(tsv_df)
-      start = 0
-    else:
-      work_on = int(work_on)
-      start = work_on
-      end = start+1
-    for _,row in tsv_df.iloc[start:end,:].iterrows():
-      if len(row.fastq_ftp.split(';')) > 1: PAIRED = True
-      else : PAIRED = False
+  settings = file_reader('settings')
+  pipeline = file_reader('pipeline')
+  [dir_checker(i['outdir']) for i in settings.values()]
+  if '-' in work_on:
+    work_on = [int(i) for i in work_on.split('-')]
+    start = work_on[0]
+    end = work_on[1]
+  elif work_on == 'all':
+    end = len(tsv_df)
+    start = 0
+  else:
+    work_on = int(work_on)
+    start = work_on
+    end = start+1
+  for _,row in tsv_df.iloc[start:end,:].iterrows():
+    if len(row.fastq_ftp.split(';')) > 1: PAIRED = True
+    else : PAIRED = False
+    with open(f'run{i}.csh', 'w') as file:
+      file.write('#!/bin/csh\n')
+      file.write(f'#$ -o {PATH}{slash}std_output\n')
+      file.write(f'#$ -e {PATH}{slash}error_output\n')
+      file.write(f'#$ -cwd\n')
+      file.write(f'#$ -N {tsv_df.study_accession[0]}\n')
+      file.write(f'#$ -q bioinfo.q\n')
       ftps = row.fastq_ftp.split(';')
       sample = row.run_accession
       file.write(f'echo \"Current organism: {row.scientific_name}\"\n\n')
@@ -444,7 +494,7 @@ def csh_maker(cur_pipe, cur_settings, work_on, tsv_df):
 
     
 
-csh_maker(cur_pipe, cur_settings, work_on, tsv_df)
+csh_maker(work_on, tsv_df)
 
 # %%
 
