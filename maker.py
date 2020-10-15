@@ -15,7 +15,9 @@ PATH = os.getcwd()
 from Bio import SeqIO
 from Bio import Entrez
 from textwrap import wrap
-
+from ast import literal_eval
+import configparser as cp
+import json
 
 if sys.platform != 'win32':
     slash = '/'
@@ -40,18 +42,13 @@ def file_reader(filename):
   format_dict : dict
     Dictionary with the left side of the equal sign as key and right side as value
   """
-  format_dict = {}
-  with open(f'{PATH}{slash}{filename}.txt', 'r') as file:
-    for line in file:
-      line = line.rstrip('\n')
-      line = line.split('=')
-      try: line[1] = int(line[1])
-      except ValueError: pass
-      format_dict[line[0]] = line[1]
-    return format_dict
+  with open(f'{PATH}{slash}{filename}.json', 'r') as file:
+    format_dict = json.load(file)
+  return format_dict
+
 def file_creator(filename, format_dict):
   """
-  Create text files in the format: X=Y, place file in cwd
+  Create json files of the format_dict, place file in cwd
 
   Parameters
   ----------
@@ -60,10 +57,9 @@ def file_creator(filename, format_dict):
   format_dict : dict
     Dictionary by-which to write the file in this format: key=value
   """
-  with open(f'{PATH}{slash}{filename}.txt','w') as file:
-    for k,v in format_dict.items():
-      file.write(f'{k}={v}\n')
-  return
+  filepath = f'{PATH}{slash}{filename}.json'
+  with open(filepath, 'w') as file:
+    json.dump(format_dict, sort_keys = True, fp = file, indent = 1)
 
 def dir_checker(dirname):
   """
@@ -78,40 +74,80 @@ def dir_checker(dirname):
     os.mkdir(f'{PATH}{slash}{dirname}')
 
 
-if not os.path.exists(f'{PATH}{slash}credentials.txt'):
+if not os.path.exists(f'{PATH}{slash}credentials.json'):
   EMAIL = input('Please enter your NCBI account email:')
   API = input('Please enter your NCBI API (can be found in NCBI account page)')
   file_creator('credentials', {'Email':EMAIL, 'API':API})
 
 creds = file_reader('credentials')
 
-
-
-
 default_pipe =\
 {
-'wget' : 1,
-'fastqc_pre' : 1,
-'trim' : 1,
-'align+index' : 1,
-'mpileup' : 1,
-'depth' : 0
+'wget' : {
+  'key':'wget',
+  'description':'Download command',
+  'switch':True,
+  'path':''
+},
+'trim' : {
+  'key':'trim_galore',
+  'description':'Trims adapters',
+  'switch':True,
+  'path':r'trim_galore'
+},
+'alignment' : {
+  'key':'bwa index',
+  'description':'Align reads to reference',
+  'switch':True,
+  'path':r'bwa-v0.7.16'
+},
+'view':{
+  'key':'samtools view',
+  'description':'Convert sam to bam',
+  'switch':True,
+  'path':r'samtools view'
+},
+'index':{
+  'key':'samtools index',
+  'description':'Index bam for fast access via samtools',
+  'switch':True,
+  'path':r'samtools index'
+},
+'mpileup':{
+  'key':'samtools mpileup',
+  'description':'Create a readable mpileup format',
+  'switch':True,
+  'path':r'samtools mpileup'
+},
+'fastqc':{
+  'key':'fastqc',
+  'description':'Create a readable quality report in html format',
+  'switch':True,
+  'path':r'fastqc'
 }
+}
+
 default_settings =\
 {
   'trim':{
-    'quality':20,
-    'adapter':''
-  }
+    'quality':{'description':'Trim low-quality ends from reads', 'key':'-q', 'value':20, 'switch':True}
+  },
+  'alignment':{
+    'seed':{'description':'Minimum seed length', 'key':'-k', 'value':19, 'switch':True}
+  },
+  'view':{
+    'header':{'description':'Include the header in the output', 'key':'-h', 'value':'', 'switch':True},
+    'bam':{'description':'Output in BAM format', 'key':'-b', 'value':'', 'switch':1}
+  },
+  'index':{},
+  'mpileup':{
+    'quality':{'description':'Minimum base quality for a base to be considered', 'key':'-Q', 'value':30, 'switch':True}
+  },
+  'fastqc':{},
+
 }
-default_paths =\
-{
-  'fastqc' : r'fastqc',
-  'trim' : r'trim_galore',
-  'bwa' : r'bwa-v0.7.16',
-  'samtools': r'samtools'
-}
-defaults = (default_pipe, default_settings, default_paths)
+
+defaults = (default_pipe, default_settings)
 dir_checker('fastq')
 dir_checker('mtDNA_ref')
 dir_checker('error_output')
@@ -126,13 +162,14 @@ dir_checker('pileup')
 
 configs = ['pipeline', 'settings', 'paths']
 for i,config in enumerate(configs):
-  if not os.path.exists(f'{PATH}{slash}{config}.txt'):
+  if not os.path.exists(f'{PATH}{slash}{config}.json'):
     file_creator(config, defaults[i])
 
 def fasta_wrap(seq):
   """
   """
   return '\n'.join(wrap(seq, 60))
+
 def ref_maker(org_name):
   """
   Create a fasta file for indexing purposes.
@@ -188,63 +225,126 @@ def ref_main(org_name):
 
 
 
-def settings():
+def change_settings():
   """
   """
-  finished = False
   settings = file_reader('settings')
-  while not finished:
-    print(f"Welcome to the settings menu\nThe current settings are:\n")
-    break
+  pipeline = file_reader('pipeline')
+  options = list(settings.keys())
+  print(f"Welcome to the settings menu\n")
+  while True:
+    [print(f'{i}\t{v}\n') for i,v in enumerate(options) if pipeline[v]['switch']]
+    print('To change settings for a specific step, enter the number next to it\n')
+    print('Type exit to exit\n')
+    choice = input()
+    if choice == 'exit': break
+    choice = int(choice)
+    chosen_stage = options[choice]
+    configs = list(settings[chosen_stage].keys())
+    print(f'Index\tName\tCurrent_setting\tDescription\n')
+    [
+      print(f'{i}\t{v}\t{s}\t{d}\n') for i,v,d,s in zip(range(len(configs)),configs,
+      [i['description'] for i in settings[chosen_stage].values()],[i['value'] for i in settings[chosen_stage].values()])
+    ]
+    if settings[chosen_stage] == {}:
+      print(f'It seems no settings were added to {chosen_stage} yet\nto add some return first to the main menu by typing exit\n')
+    else:
+      print(f'What would you like to change in {chosen_stage}?\nEnter the number next to the setting\n')
+      change = int(input())
+      chosen_setting = configs[change]
+      setting_value = settings[chosen_stage][chosen_setting]['value']
+      setting_switch = settings[chosen_stage][chosen_setting]['switch']
+      if settings[chosen_stage][chosen_setting]['value'] == '':
+        settings[chosen_stage][chosen_setting]['switch'] = not setting_switch
+        print(f'\nSetting switched to {not bool(setting_switch)}\n')
 
-def pipeline():
+      else:
+        print(f'You chose: {chosen_setting}\nPlease choose a new value, current value {setting_value}:')
+        new_val = input()
+        settings[chosen_stage][chosen_setting]['value'] = new_val
+        print('\nSetting changed successfuly!\n')
+    
+  file_creator('settings', settings)
+
+def change_pipeline():
   """
   """
   running = True
   pipeline = file_reader('pipeline')
   while running:
     print("Welcome to the pipeline customizer\nThe current pipeline is:\n")
-    [print(f'{k}\n') for i,k,v in zip(range(len(pipeline)),pipeline.keys(), pipeline.values()) if v != 0]
+    [print(f'{k}\n') for i,k in zip(range(len(pipeline)),pipeline.keys()) if pipeline[k]['switch']]
     print('To change the pipeline enter 1\nTo exit pipeline enter 0\n')
     running = int(input())
     if running:
       pipeline_changes = {i:k for i,k in enumerate(pipeline.keys())}
       print('To remove or add a feature, simply enter its number\n')
-      [print(f'{i} {k} - current setting: {v}\n') for i,k,v in zip(pipeline_changes.keys(), pipeline_changes.values(), pipeline.values())]
+      [print(f'{i} {k} - current setting: {pipeline[k]["switch"]}\n') for i,k in zip(pipeline_changes.keys(), pipeline_changes.values())]
       to_change = pipeline_changes[int(input())]
-      if pipeline[to_change]:
-        pipeline[to_change] = 0
-      else:
-        pipeline[to_change] = 1
-  print(pipeline)
+      pipeline[to_change]['switch'] = not pipeline[to_change]['switch']
   file_creator('pipeline', pipeline)
-  return
 
-def paths():
+def change_paths():
   """
   """
   pass
 
-def menu():
+def add_new_setting():
+  """
+  """
+  settings = file_reader('settings')
+  setting_keys = list(settings.keys())
+  [print(f'{i}\t{k}\n') for i,k in enumerate(setting_keys)]
+  print('\nPlease type the pipeline step to add a setting to\n')
+  step = int(input())
+  chosen_step = setting_keys[step]
+  print(f'You chose {chosen_step}\nPlease enter the setting name\n')
+  new_name = input()
+  settings[chosen_step][new_name] = {}
+  print(f'Please enter a description for {new_name}\n')
+  settings[chosen_step][new_name]['description'] = input()
+  print(f'Please enter a key for {new_name} (a key is the name that needs to be added to the command, must be identical to the one defined in {chosen_step} docs\n')
+  key = input()
+  try: int(key)
+  except ValueError: pass
+  settings[chosen_step][new_name]['key'] = key
+  print(f'Please enter a value for {new_name} (if the setting is an on/off switch, enter nothing!)\n')
+  value = input()
+  settings[chosen_step][new_name]['value']  = value
+  settings[chosen_step][new_name]['switch'] = 1
+  file_creator('settings', settings) 
+  print(settings)
+  print('Setting added successfuly!\n')
+
+def add_new_pipeline():
+  """
+  """
+  pipeline = file_reader('pipeline')
+  print('To begin defining a new pipeline step, first enter its step\nIMPORTANT: the name must be different from the current pipeline steps\n')
+  name = input()
+  pipeline[name] = {k:'' for k,v in pipeline['trim'].items() if k != 'switch'}
+  for k in pipeline[name].keys():
+    print(f'Please enter a {k}\n')
+    v = input()
+    pipeline[name][k] = v
+  print('\nPipeline step added successfuly!\n')
+
+def change_menu():
   """
   """
   choice = True
+  print('####################\n\nWelcome to the configuration menu\n')
+  menu = [lambda :0,change_settings,add_new_setting, change_pipeline, add_new_pipeline, change_paths]
   while choice:
-    print('#####################\n\nWelcome to the reconfiguration menu\nTo change the pipeline enter 1\nTo change the settings enter 2\nTo exit enter 0\n\n#####################\n')
+    [print(f"Enter {i+1}\tto {x.__name__}\n") for i,x in enumerate(menu[1:])]
+    print("Enter 0\t to exit\n")
     try:
       choice = int(input())
     except ValueError:
-      print('Please enter either 1, 2, 3 or 0!')
-    if choice == 1:
-      pipeline()
-    elif choice == 2:
-      settings()
-    elif choice == 3:
-      paths()
-    elif not choice:
-      pass
-    else: print("Please enter either 1, 2, 3 or 0!")
-  return
+      print('Please only choose one of the listed options!\n')
+    try: menu[choice]()
+    except IndexError:
+      print("Please only choose one of the listed options!\n")
 
 
 
@@ -255,9 +355,9 @@ tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
 tsv_df.scientific_name = tsv_df.scientific_name.str.replace(' ','_')
 org_name = tsv_df['scientific_name'][0]
 
-change = int(input('Please enter 1 to change the settings or pipeline.\nEnter 0 to continue\n'))
+change = int(input('Please enter 1 to enter the configuration menu.\nEnter 0 to continue\n'))
 if change:
-  menu()
+  change_menu()
 print(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\n')
 [print(f'{ind}\t{samp}') for ind,samp in zip(tsv_df.index,tsv_df.sample_accession)]
 work_on = input()
