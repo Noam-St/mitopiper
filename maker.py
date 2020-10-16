@@ -449,7 +449,11 @@ def main():
       tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
       break
     except FileNotFoundError:
-      print('\nthe tsv file does not exist or is not inside the samples folder!\n')
+      try:
+        tsv_path = tsv_path.replace('.tsv','.txt')
+        tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
+      except FileNotFoundError:
+        print('\nthe tsv file does not exist or is not inside the samples folder!\n')
   tsv_df.scientific_name = tsv_df.scientific_name.str.replace(' ','_')
   print('Please enter 1 to enter the configuration menu.\nEnter 0 to continue\n')
   change = int(input())
