@@ -221,26 +221,39 @@ def change_pipeline():
     print("Welcome to the pipeline customizer\nThe current pipeline is:\n")
     [print(f'{i}\n') for i in order]
     print('To change the pipeline enter 1\nTo change the pipeline order enter 2\nTo exit pipeline enter 0\n')
-    running = int(input())
-    if running == 1:
-      pipeline_changes = {i:k for i,k in enumerate(pipeline.keys())}
-      print('To remove or add a feature, simply enter its number\n')
-      [print(f'{i} {k} - current setting: {pipeline[k]["switch"]}\n') for i,k in zip(pipeline_changes.keys(), pipeline_changes.values())]
-      to_change = pipeline_changes[int(input())]
-      pipeline[to_change]['switch'] = not pipeline[to_change]['switch']
-    elif running == 2:
-      print('The current run order is:\n')
-      [print(f'{i}\t{v}') for i,v in enumerate(order)]
-      print('To move a command enter the number next to it\n')
-      to_move = int(input())
-      print(f'Who would you like to replace {order[to_move]} with?\n')
-      where = int(input())
-      temp = order[where]
-      order[where] = order[to_move]
-      order[to_move] = temp
+    try:
+      running = int(input())
+      if running == 1:
+        pipeline_changes = {i:k for i,k in enumerate(pipeline.keys())}
+        print('To remove or add a feature, simply enter its number\nIMPORTANT: if you remove a command and add it later, it will be in the last position!\n')
+        [print(f'{i} {k} - current setting: {pipeline[k]["switch"]}\n') for i,k in zip(pipeline_changes.keys(), pipeline_changes.values())]
+        to_change = pipeline_changes[int(input())]
+        pipeline[to_change]['switch'] = not pipeline[to_change]['switch']
+        if to_change not in order:
+          order.append(to_change)
+      elif running == 2:
+        print('The current run order is:\n')
+        [print(f'{i}\t{v}') for i,v in enumerate(order)]
+        print('To move a command enter the number next to it\nNOTE: you can also reorder by entering a sequence of numbers seperated by space (i.e: \"0 3 5 ...\")\n')
+        to_move = input()
+        if not len(to_move) > 1:
+          to_move = int(to_move)
+          print(f'Who would you like to replace {order[to_move]} with?\n')
+          where = int(input())
+          temp = order[where]
+          order[where] = order[to_move]
+          order[to_move] = temp
+        else:
+          order = [order[int(i)] for i in to_move.split(' ')]
+          for i in pipeline.keys():
+            if i not in order:
+              pipeline[i]['switch'] = False
+
+    except ValueError:
+      print('Please enter a number!\n')
     order = [i for i in order if pipeline[i]['switch']]
-  file_creator('pipeline', pipeline)
-  file_creator('run_order', order)
+    file_creator('pipeline', pipeline)
+    file_creator('run_order', order)
 
 def add_new_setting():
   """
@@ -460,7 +473,7 @@ def main():
   if change:
     change_menu()
   print(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\n')
-  [print(f'{ind}\t{samp}') for ind,samp in zip(tsv_df.index,tsv_df.sample_accession)]
+  [print(f'{ind}\t{samp}') for ind,samp in zip(tsv_df.index,tsv_df.run_accession)]
   work_on = input()
   csh_maker(work_on, tsv_df)
 
@@ -603,4 +616,4 @@ for i,config in enumerate(configs):
   if not os.path.exists(f'{PATH}{slash}configs{slash}{config}.json'):
     file_creator(config, defaults[i])
 main()
-print('Enter \"qsub master.csh\" into the console to run the commands\n')
+print('Enter \"qsub master.csh\" into the console to run the commands\nIMPORTANT: Each sample will be executed simultaneously in qsub you run this command, make sure you dont run too many at once!\n')
