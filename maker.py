@@ -592,7 +592,6 @@ default_settings =\
 default_order = ['wget','trim','fastqc','alignment','view','sort','index','mpileup']
 
 defaults = (default_pipe, default_settings, default_order)
-print('Enter \"qsub master.csh\" into the console to run the commands\n')
 if not os.path.exists(f'{PATH}{slash}configs{slash}credentials.json'):
   EMAIL = input('Please enter your NCBI account email:')
   API = input('Please enter your NCBI API (can be found in NCBI account page)')
@@ -604,3 +603,4 @@ for i,config in enumerate(configs):
   if not os.path.exists(f'{PATH}{slash}configs{slash}{config}.json'):
     file_creator(config, defaults[i])
 main()
+print('Enter \"qsub master.csh\" into the console to run the commands\n')
