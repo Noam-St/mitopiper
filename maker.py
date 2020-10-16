@@ -42,7 +42,7 @@ def file_reader(filename):
   format_dict : dict
     Dictionary with the left side of the equal sign as key and right side as value
   """
-  with open(f'{PATH}{slash}{filename}.json', 'r') as file:
+  with open(f'{PATH}{slash}configs{slash}{filename}.json', 'r') as file:
     format_dict = json.load(file)
   return format_dict
 
@@ -57,7 +57,7 @@ def file_creator(filename, format_dict):
   format_dict : dict
     Dictionary by-which to write the file in this format: key=value
   """
-  filepath = f'{PATH}{slash}{filename}.json'
+  filepath = f'{PATH}{slash}configs{slash}{filename}.json'
   with open(filepath, 'w') as file:
     json.dump(format_dict, sort_keys = True, fp = file, indent = 1)
 
@@ -73,8 +73,14 @@ def dir_checker(dirname):
   if not os.path.isdir(f'{PATH}{slash}{dirname}'):
     os.mkdir(f'{PATH}{slash}{dirname}')
 
+dir_checker('mtDNA_ref')
+dir_checker('error_output')
+dir_checker('std_output')
+dir_checker('Genbank_DB')
+dir_checker('samples')
+dir_checker('configs')
 
-if not os.path.exists(f'{PATH}{slash}credentials.json'):
+if not os.path.exists(f'{PATH}{slash}configs{slash}credentials.json'):
   EMAIL = input('Please enter your NCBI account email:')
   API = input('Please enter your NCBI API (can be found in NCBI account page)')
   file_creator('credentials', {'Email':EMAIL, 'API':API})
@@ -89,7 +95,9 @@ default_pipe =\
   'switch':True,
   'path':'',
   'outdir':'fastq',
-  'output_ext':''
+  'output_ext':'',
+  'inputdir':'',
+  'input_ext':''
 },
 'trim' : {
   'key':'trim_galore',
@@ -97,7 +105,9 @@ default_pipe =\
   'switch':True,
   'path':r'',
   'outdir':'post_trim',
-  'output_ext':'.fq.gz'
+  'output_ext':'.fq.gz',
+  'inputdir':'',
+  'input_ext':''
 },
 'fastqc':{
   'key':'fastqc',
@@ -105,7 +115,9 @@ default_pipe =\
   'switch':True,
   'path':r'/gpfs0/biores/apps/FastQC_v0.11.7/fastqc',
   'outdir':'post_trim',
-  'output_ext':''
+  'output_ext':'',
+  'inputdir':'',
+  'input_ext':''
 },
 'alignment' : {
   'key':'bwa index',
@@ -113,7 +125,9 @@ default_pipe =\
   'switch':True,
   'path':r'',
   'outdir':'alignment',
-  'output_ext':'.sam'
+  'output_ext':'.sam',
+  'inputdir':'',
+  'input_ext':''
 },
 'view':{
   'key':'samtools view',
@@ -121,15 +135,19 @@ default_pipe =\
   'switch':True,
   'path':r'',
   'outdir':'alignment',
-  'output_ext':'.bam'
+  'output_ext':'.bam',
+  'inputdir':'alignment',
+  'input_ext':'.sam'
 },
 'index':{
   'key':'samtools index',
   'description':'Index bam for fast access via samtools',
   'switch':True,
   'path':r'',
-  'outdir':'',
-  'output_ext':''
+  'outdir':'alignment',
+  'output_ext':'.bam.bai',
+  'inputdir':'alignment',
+  'input_ext':'.bam'
 },
 'mpileup':{
   'key':'samtools mpileup',
@@ -137,7 +155,9 @@ default_pipe =\
   'switch':True,
   'path':r'',
   'outdir':'pileup',
-  'output_ext':'.pileup'
+  'output_ext':'.pileup',
+  'inputdir':'alignment',
+  'input_ext':'.bam'
 },
 'sort':{
   'key': 'samtools sort',
@@ -145,7 +165,9 @@ default_pipe =\
   'switch':True,
   'path':r'',
   'outdir':'alignment',
-  'output_ext':'.bam'
+  'output_ext':'.bam',
+  'inputdir':'alignment',
+  'input_ext':'.bam'
 }
 }
 
@@ -164,25 +186,23 @@ default_settings =\
   },
   'index':{},
   'mpileup':{
-    'quality':{'description':'Minimum base quality for a base to be considered', 'key':'-Q', 'value':30, 'switch':True}
+    'quality':{'description':'Minimum base quality for a base to be considered', 'key':'-Q', 'value':30, 'switch':True},
+    'reference':{'description':'Fasta type ref file','key':'-f', 'value':'fasta', 'switch':True}
   },
   'fastqc':{
     'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':f'{PATH}{slash}post_trim', 'switch':True}
   },
+  'wget':{},
+  'sort':{}
 }
 default_order = ['wget','trim','fastqc','alignment','view','index','mpileup']
 
 defaults = (default_pipe, default_settings, default_order)
-dir_checker('mtDNA_ref')
-dir_checker('error_output')
-dir_checker('std_output')
-dir_checker('Genbank_DB')
-dir_checker('samples')
 
 
 configs = ['pipeline', 'settings', 'run_order']
 for i,config in enumerate(configs):
-  if not os.path.exists(f'{PATH}{slash}{config}.json'):
+  if not os.path.exists(f'{PATH}{slash}configs{slash}{config}.json'):
     file_creator(config, defaults[i])
 
 def fasta_wrap(seq):
@@ -291,6 +311,7 @@ def change_pipeline():
   """
   running = True
   pipeline = file_reader('pipeline')
+  order = file_reader('run_order')
   while running:
     print("Welcome to the pipeline customizer\nThe current pipeline is:\n")
     [print(f'{k}\n') for i,k in zip(range(len(pipeline)),pipeline.keys()) if pipeline[k]['switch']]
@@ -302,12 +323,9 @@ def change_pipeline():
       [print(f'{i} {k} - current setting: {pipeline[k]["switch"]}\n') for i,k in zip(pipeline_changes.keys(), pipeline_changes.values())]
       to_change = pipeline_changes[int(input())]
       pipeline[to_change]['switch'] = not pipeline[to_change]['switch']
+  order = [i for i in order if pipeline[i]['switch']]
   file_creator('pipeline', pipeline)
-
-def change_paths():
-  """
-  """
-  pass
+  file_creator('order', order)
 
 def add_new_setting():
   """
@@ -354,7 +372,7 @@ def change_menu():
   """
   choice = True
   print('####################\n\nWelcome to the configuration menu\n')
-  menu = [lambda :0,change_settings,add_new_setting, change_pipeline, add_new_pipeline, change_paths]
+  menu = [lambda :0,change_settings,add_new_setting, change_pipeline, add_new_pipeline]
   while choice:
     [print(f"Enter {i+1}\tto {x.__name__}\n") for i,x in enumerate(menu[1:])]
     print("Enter 0\t to exit\n")
@@ -366,42 +384,48 @@ def change_menu():
     except IndexError:
       print("Please only choose one of the listed options!\n")
 
-def paired_csh(row, settings, pipeline, order, fasta):
+def csh_commands(row, settings, pipeline, order, fasta, PAIRED):
   """
   """
   csh_str = ''
   sample = row.run_accession
-
   for command in order:
+    for i in settings[command].values():
+      if i['value'] == 'fasta': i['value'] = fasta
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else pipeline[command]['path']
     command_outdir = pipeline[command]['outdir']
-    command_settings = ' '.join([\
-      f'{key} {value} ' for key,value in settings[command].items() if value['switch'] == True])
-    csh_str+= f'echo \"Running {command}: {pipeline[command]["description"]} on {sample}\"\n'
-    ftps = sample.fastq_ftp.split(';')
-    if command == 'wget':
-      for i in range(2):
-        csh_str+=f'{command_key} {command_settings} -O {PATH}{slash}{command_outdir}{slash}{sample}_{i+1}.fastq.gz {ftps[i]}\n'
-    elif command == 'fastq':
-      for i in range(2):
-        csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline[command]["trim"]["outdir"]}{slash}{sample}_{i+1}_val_{i+1}.fq.gz\n'
-    elif command == 'alignment':
-      csh_str+=f'{command_key} {command_settings} {fasta} {PATH}{slash}{pipeline[command]["trim"]["outdir"]}{slash}{sample}_1_val_1.fq.gz {PATH}{slash}{pipeline[command]["trim"]["outdir"]}{slash}{sample}_2_val_2.fq.gz > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
-    elif command == 'mpileup':
-      csh_str+=f'{command_key} -f {fasta} {command_settings} {PATH}{slash}{pipeline[command]["alignment"]["outdir"]}{slash}{sample}.bam > {PATH}{slash}{command_outdir}{slash}{sample}.pileup\n'
-    elif command == 'view':
-      csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline[command]["alignment"]["outdir"]}{slash}{sample}.sam > {PATH}{slash}{command_outdir}{slash}{sample}.bam\n'
-    elif command == 'sort':
-      csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline[command]["alignment"]["outdir"]}{slash}{sample}.bam -o {PATH}{slash}{pipeline[command]["alignment"]["outdir"]}{slash}{sample}.bam\n'
+    command_inputdir = pipeline[command]['inputdir']
+    input_ext = pipeline[command]['input_ext']
+    output_ext = pipeline[command]['output_ext']
+    if settings[command] != {}:
+      command_settings = ' '.join([\
+        f'{v["key"]} {v["value"]} ' for v in settings[command].values() if v['switch'] == True])
     else:
-      csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline[command]["alignment"]["outdir"]}{slash}{sample}.bam'
+      command_settings=''
+    csh_str+= f'echo \"Running {command}: {pipeline[command]["description"]} on {sample}\"\n'
+    if PAIRED:
+      ftps = row.fastq_ftp.split(';')
+      if command == 'wget':
+        for i in range(2):
+          csh_str+=f'{command_key} {command_settings} -O {PATH}{slash}{command_outdir}{slash}{sample}_{i+1}.fastq.gz {ftps[i]}\n'
+      elif command == 'fastqc':
+        for i in range(2):
+          csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_{i+1}_val_{i+1}.fq.gz\n'
+      elif command == 'alignment':
+        csh_str+=f'{command_key} {command_settings} {fasta} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_1_val_1.fq.gz {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_2_val_2.fq.gz > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
+      else:
+        csh_str+=f'{command_key}  {command_settings} {PATH}{slash}{command_inputdir}{slash}{sample}{input_ext} > {PATH}{slash}{command_outdir}{slash}{sample}{output_ext}\n'
+    else:
+      if command == 'wget':
+        csh_str+=f'{command_key} {command_settings} -O {PATH}{slash}{command_outdir}{slash}{sample}.fastq.gz {row.fastq_ftp}\n'
+      elif command == 'fastqc':
+        csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_trimmed.fq.gz\n'
+      elif command == 'alignment':
+        csh_str+=f'{command_key} {command_settings} {fasta} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_1_val_1.fq.gz {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_2_val_2.fq.gz > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
+      else:
+        csh_str+=f'{command_key}  {command_settings} {PATH}{slash}{command_inputdir}{slash}{sample}{input_ext} > {PATH}{slash}{command_outdir}{slash}{sample}{output_ext}\n'
+  return csh_str
 
-    #STOPPED HERE, need to find a way to not manually elif every single pipeline step..
-
-def unpaired_csh(row, settings, pipeline, order, ref):
-  """
-  """
-  pass
 
 tsv_name = input('Please enter TSV file name (without extension).\nIMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: the tsv msut be in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
 tsv_path = f'{PATH}{slash}samples{slash}{tsv_name}.tsv'
@@ -420,9 +444,15 @@ work_on = input()
 def csh_maker(work_on, tsv_df):
   """
   """
+  master = open(f'{PATH}{slash}master.csh', 'w')
+  master.write('#!/bin/csh\n')
+  master.write('#$ -cwd\n')
+  master.write('#$ -q bioinfo.q\n')
+  master.write('#$ -N master.csh\n')
   settings = file_reader('settings')
   pipeline = file_reader('pipeline')
-  [dir_checker(i['outdir']) for i in settings.values()]
+  order = file_reader('run_order')
+  [dir_checker(i['outdir']) for i in pipeline.values() if i['outdir'] != '']
   if '-' in work_on:
     work_on = [int(i) for i in work_on.split('-')]
     start = work_on[0]
@@ -434,7 +464,7 @@ def csh_maker(work_on, tsv_df):
     work_on = int(work_on)
     start = work_on
     end = start+1
-  for _,row in tsv_df.iloc[start:end,:].iterrows():
+  for i,row in tsv_df.iloc[start:end,:].iterrows():
     if len(row.fastq_ftp.split(';')) > 1: PAIRED = True
     else : PAIRED = False
     with open(f'run{i}.csh', 'w') as file:
@@ -444,53 +474,16 @@ def csh_maker(work_on, tsv_df):
       file.write(f'#$ -cwd\n')
       file.write(f'#$ -N {tsv_df.study_accession[0]}\n')
       file.write(f'#$ -q bioinfo.q\n')
-      ftps = row.fastq_ftp.split(';')
-      sample = row.run_accession
       file.write(f'echo \"Current organism: {row.scientific_name}\"\n\n')
-      for ind, ftp in enumerate(ftps):
-        if PAIRED:
-          ind+=1
-          ind = '_' + str(ind)
-        else: ind = ''
-        if cur_pipe['wget']:
-          file.write(f'echo \"Downloading sample: {sample}{ind}\"\n\n')
-          file.write(f'wget -nH -nd -O {PATH}{slash}fastq{slash}{sample}{ind}.fastq.gz {ftp}\n')
-        if cur_pipe['fastqc_pre']:
-          file.write(f'echo \"Checking quality of {sample}{ind}\"\n\n')
-          file.write(f'{cur_path["fastqc"]} --outdir {PATH}{slash}fastqc_pre {PATH}{slash}fastq{slash}{sample}{ind}.fastq.gz\n')
-    for _,row in tsv_df.iloc[start:end,:].iterrows():
-      org_name = row.scientific_name
-      sample = row.run_accession
       fasta = f'{PATH}{slash}mtDNA_ref{slash}{org_name}{slash}{org_name}.fasta'
-      file.write(f'echo \"Current organism: {row.scientific_name}\"\n\n')
-      if cur_pipe['trim']:
-        file.write(f'echo \"Trimming {sample}\"\n\n')
-        if PAIRED:
-          file.write(f'trim_galore -o {PATH}{slash}post_trim --paired {PATH}{slash}fastq{slash}{sample}_1.fastq.gz {PATH}{slash}fastq{slash}{sample}_2.fastq.gz\n')
-          file.write(f'{cur_path["fastqc"]} --outdir {PATH}{slash}fastqc_post {PATH}{slash}post_trim{slash}{sample}_1_val_1.fq.gz\n')
-          file.write(f'{cur_path["fastqc"]} --outdir {PATH}{slash}fastqc_post {PATH}{slash}post_trim{slash}{sample}_2_val_2.fq.gz\n')
-
-        else:
-          file.write(f'trim_galore -o {PATH}{slash}post_trim {PATH}{slash}fastq{slash}{sample}.fastq.gz\n')
-          file.write(f'{cur_path["fastqc"]} --outdir {PATH}{slash}fastqc_post {PATH}{slash}post_trim{slash}{sample}_trimmed.fq.gz\n')
       if not os.path.exists(fasta):
         fasta, add_to_csh = ref_main(org_name)
         file.write(add_to_csh)
-      if cur_pipe['align+index']:
-        file.write(f'echo \"Alignment stage start for {sample}\"\n\n')
-        if PAIRED:
-          file.write(f'bwa mem {fasta} {PATH}{slash}post_trim{slash}{sample}_1_val_1.fq.gz {PATH}{slash}post_trim{slash}{sample}_2_val_2.fq.gz > {PATH}{slash}alignment{slash}{sample}.sam\n')
-        else:
-          file.write(f'bwa mem {fasta} {PATH}{slash}post_trim{slash}{sample}_trimmed.fq.gz > {PATH}{slash}alignment{slash}{sample}.sam\n')
-        file.write(f'echo \"Mpileup stage start for {sample}\"\n\n')
-        file.write(f'samtools view -h -b {PATH}{slash}alignment{slash}{sample}.sam > {PATH}{slash}alignment{slash}{sample}.bam\n')
-        file.write(f'samtools sort {PATH}{slash}alignment{slash}{sample}.bam -o {PATH}{slash}alignment{slash}{sample}.bam\n')
-        file.write(f'samtools index {PATH}{slash}alignment{slash}{sample}.bam\n')
-      if cur_pipe['mpileup']:
-        file.write(f'samtools mpileup -f {fasta} -Q 30 -q 0 {PATH}{slash}alignment{slash}{sample}.bam > {PATH}{slash}pileup{slash}{sample}.pileup\n')
-      #CONTINUE FROM HERE add some settings.
-
-
+      to_csh = csh_commands(row, settings, pipeline, order, fasta, PAIRED)
+      file.write(to_csh)
+      master.write(f'qsub run{i}.csh\n')
+  master.close()
+    
 
     
 
