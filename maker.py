@@ -232,7 +232,7 @@ def change_pipeline():
         if to_change not in order:
           order.append(to_change)
       elif running == 2:
-        print('The current run order is:\n')
+        print('Th e current run order is:\n')
         [print(f'{i}\t{v}') for i,v in enumerate(order)]
         print('To move a command enter the number next to it\nNOTE: you can also reorder by entering a sequence of numbers seperated by space (i.e: \"0 3 5 ...\")\n')
         to_move = input()
@@ -412,9 +412,7 @@ def csh_maker(work_on, tsv_df):
   master.write('#$ -cwd\n')
   master.write('#$ -q bioinfo.q\n')
   master.write('#$ -N master.csh\n')
-  settings = file_reader('settings')
   pipeline = file_reader('pipeline')
-  order = file_reader('run_order')
   [dir_checker(i['outdir']) for i in pipeline.values() if i['outdir'] != '']
   if '-' in work_on:
     work_on = [int(i) for i in work_on.split('-')]
@@ -428,6 +426,9 @@ def csh_maker(work_on, tsv_df):
     start = work_on
     end = start+1
   for i,row in tsv_df.iloc[start:end,:].iterrows():
+    settings = file_reader('settings')
+    pipeline = file_reader('pipeline')
+    order = file_reader('run_order')
     org_name = row.scientific_name
     if len(row.fastq_ftp.split(';')) > 1: PAIRED = True
     else : PAIRED = False
