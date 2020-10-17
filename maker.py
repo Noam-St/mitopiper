@@ -437,7 +437,7 @@ def csh_maker(work_on, tsv_df):
       file.write(f'#$ -o {PATH}{slash}std_output\n')
       file.write(f'#$ -e {PATH}{slash}error_output\n')
       file.write(f'#$ -cwd\n')
-      file.write(f'#$ -N {tsv_df.study_accession[0]}\n')
+      file.write(f'#$ -N {row.run_accession}\n')
       file.write(f'#$ -q bioinfo.q\n')
       file.write(f'echo \"Current organism: {row.scientific_name}\"\n\n')
       fasta = f'{PATH}{slash}mtDNA_ref{slash}{org_name}{slash}{org_name}.fasta'
