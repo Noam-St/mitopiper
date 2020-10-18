@@ -232,7 +232,7 @@ def change_pipeline():
         if to_change not in order:
           order.append(to_change)
       elif running == 2:
-        print('Th e current run order is:\n')
+        print('The current run order is:\n')
         [print(f'{i}\t{v}') for i,v in enumerate(order)]
         print('To move a command enter the number next to it\nNOTE: you can also reorder by entering a sequence of numbers seperated by space (i.e: \"0 3 5 ...\")\n')
         to_move = input()
@@ -452,8 +452,6 @@ def csh_maker(work_on, tsv_df):
 def main():
   """
   """
-
- 
   print('Welcome to the semi-automatic .csh maker\n')
   while True:
     print('Please enter TSV file name (without extension).\nIMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: the tsv msut be in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
