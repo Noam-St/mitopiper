@@ -248,7 +248,6 @@ def change_pipeline():
           for i in pipeline.keys():
             if i not in order:
               pipeline[i]['switch'] = False
-
     except ValueError:
       print('Please enter a number!\n')
     order = [i for i in order if pipeline[i]['switch']]
@@ -381,7 +380,8 @@ def csh_commands(row, settings, pipeline, order, fasta, PAIRED):
       elif command == 'alignment':
         csh_str+=f'{command_key} {command_settings} {fasta} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_1_val_1.fq.gz {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_2_val_2.fq.gz > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
       else:
-        csh_str+=f'{command_key} {command_settings} {PATH}{slash}{command_inputdir}{slash}{sample}{input_ext}' + f' > {PATH}{slash}{command_outdir}{slash}{sample}{output_ext}\n' if command_outdir != '' else ''
+        csh_str+=f'{command_key} {command_settings} {PATH}{slash}{command_inputdir}{slash}{sample}{input_ext}'
+        csh_str+=f' > {PATH}{slash}{command_outdir}{slash}{sample}{output_ext}\n' if command_outdir != '' else ''
     else:
       if command == 'wget':
         csh_str+=f'{command_key} {command_settings} -O {PATH}{slash}{command_outdir}{slash}{sample}.fastq.gz {row.fastq_ftp}\n'
