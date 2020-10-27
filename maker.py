@@ -377,6 +377,9 @@ def csh_commands(row, settings, pipeline, order, fasta, PAIRED):
       elif command == 'fastqc':
         for i in range(2):
           csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_{i+1}_val_{i+1}.fq.gz\n'
+      elif command == 'fastqc_pre':
+        for i in range(2):
+          csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}_{i+1}.fastq.gz\n'
       elif command == 'alignment':
         csh_str+=f'{command_key} {command_settings} {fasta} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_1_val_1.fq.gz {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_2_val_2.fq.gz > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
       else:
@@ -389,6 +392,8 @@ def csh_commands(row, settings, pipeline, order, fasta, PAIRED):
         csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}.fastq.gz\n'
       elif command == 'fastqc':
         csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_trimmed.fq.gz\n'
+      elif command == 'fastqc_pre':
+        csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}.fastq.gz\n'
       elif command == 'alignment':
         csh_str+=f'{command_key} {command_settings} {fasta} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_trimmed.fq.gz  > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
       else:
@@ -524,6 +529,16 @@ default_pipe =\
   'inputdir':'',
   'input_ext':''
 },
+'fastqc_pre':{
+  'key':'fastqc',
+  'switch':True,
+  'description':'Create a readable quality report in html format',
+  'path':r'fastqc',
+  'outdir':'fastq',
+  'output_ext':'',
+  'inputdir':'',
+  'input_ext':''
+},
 'alignment' : {
   'key':'bwa mem',
   'description':'Align reads to reference',
@@ -596,12 +611,15 @@ default_settings =\
   'fastqc':{
     'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':f'{PATH}{slash}post_trim', 'switch':True}
   },
+   'fastqc_pre':{
+    'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':f'{PATH}{slash}fastq', 'switch':True}
+  },
   'wget':{},
   'sort':{
     'output_file':{'description':'Output file', 'key' : '-o', 'value':f'{PATH}{slash}alignment','switch':True}
   }
 }
-default_order = ['wget','trim','fastqc','alignment','view','sort','index','mpileup']
+default_order = ['wget','fastqc_pre','trim','fastqc','alignment','view','sort','index','mpileup']
 
 defaults = (default_pipe, default_settings, default_order)
 if not os.path.exists(f'{PATH}{slash}configs{slash}credentials.json'):
