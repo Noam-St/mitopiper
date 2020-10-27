@@ -1,4 +1,4 @@
-# Semi Automatic csh file creator for RNA-seq pipeline using qsub
+# Semi automatic csh file creator for RNA-seq pipeline using qsub
 
 This project script creates csh file that can be run easily using qsub.
 
