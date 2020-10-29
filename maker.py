@@ -142,7 +142,7 @@ def ref_main(org_name):
   """
   choice = True
   while choice:
-    print('It seems an reference fasta does not exist in the default location\nTo create one automatically, press 1\nTo enter an index path, press 2\n')
+    print('It seems a reference fasta does not exist in the default location\nTo create one automatically, press 1\nTo enter an index path, press 2\n')
     choice = input()
     try: choice = int(choice)
     except ValueError: print('Please enter 1 or 2 only')
@@ -154,6 +154,9 @@ def ref_main(org_name):
     elif choice == 2:
       print('Please enter the full path to the reference fasta\n')
       fasta = input()
+      refs = file_reader('refpaths')
+      refs[org_name] = fasta
+      file_creator('refpaths', refs)
       return fasta, ''
     else:
       print('Please enter 1 or 2 only')
@@ -447,8 +450,12 @@ def csh_maker(work_on, tsv_df):
       file.write(f'echo \"Current organism: {row.scientific_name}\"\n\n')
       fasta = f'{PATH}{slash}mtDNA_ref{slash}{org_name}{slash}{org_name}.fasta'
       if not os.path.exists(fasta):
-        fasta, add_to_csh = ref_main(org_name)
-        file.write(add_to_csh)
+        try:
+          refs = file_reader('refpaths')
+          fasta = refs[org_name]
+        except (FileNotFoundError, KeyError):
+          fasta, add_to_csh = ref_main(org_name)
+          file.write(add_to_csh)
       to_csh = csh_commands(row, settings, pipeline, order, fasta, PAIRED)
       file.write(to_csh)
       master.write(f'qsub run{i}.csh\n')
@@ -622,6 +629,8 @@ default_settings =\
 default_order = ['wget','fastqc_pre','trim','fastqc','alignment','view','sort','index','mpileup']
 
 defaults = (default_pipe, default_settings, default_order)
+if not os.path.exists(f'{PATH}{slash}configs{slash}refpaths.json'):
+  file_creator('refpaths', {})
 if not os.path.exists(f'{PATH}{slash}configs{slash}credentials.json'):
   EMAIL = input('Please enter your NCBI account email:')
   API = input('Please enter your NCBI API (can be found in NCBI account page)')
