@@ -108,8 +108,9 @@ def ref_maker(org_name):
   ID = org_df.loc[org_name, 'RefSeq']
   filename = f'{PATH}{slash}genbank_DB{slash}{ID}.gbk'
   if not os.path.isfile(filename):
-    Entrez.email = creds['Email']
-    Entrez.api_key = creds['API']
+    if creds['Email'] != '':
+      Entrez.email = creds['Email']
+      Entrez.api_key = creds['API']
     net_handle = Entrez.efetch(db = 'nucleotide', id = ID, rettype = 'gb', retmode = 'text')
     out_handle = open(filename, 'w')
     out_handle.write(net_handle.read())
@@ -140,6 +141,13 @@ def ref_main(org_name):
     add_to_csh : str
       string to add to the csh (incase the user chooses to automatically create a fasta)
   """
+  refs = file_reader('refpaths')
+  try:
+    refs[org_name]['refpath']
+    refs[org_name]['gtfpath']
+    return ''
+  except KeyError:
+    pass
   choice = True
   while choice:
     print('It seems a reference fasta does not exist in the default location\nTo create one automatically, press 1\nTo enter an index path, press 2\n')
@@ -150,16 +158,19 @@ def ref_main(org_name):
       dir_checker(f'mtDNA_ref{slash}{org_name}')
       fasta = ref_maker(org_name)
       add_to_csh = f'samtools faidx {fasta}\nbwa index {fasta}\n'
-      return fasta, add_to_csh
     elif choice == 2:
       print('Please enter the full path to the reference fasta\n')
       fasta = input()
-      refs = file_reader('refpaths')
-      refs[org_name] = fasta
-      file_creator('refpaths', refs)
-      return fasta, ''
+      add_to_csh = ''
     else:
       print('Please enter 1 or 2 only')
+    print('Please enter path to gtf file for this organism\nPress enter if none needed\n')
+    gtf = input()
+    refs[org_name] = {}
+    refs[org_name]['refpath'] = fasta
+    refs[org_name]['gtfpath'] = gtf
+    file_creator('refpaths', refs)
+    return add_to_csh
 
 def change_settings():
   """
@@ -327,7 +338,7 @@ def change_menu():
     except IndexError:
       print("Please only choose one of the listed options!\n")
 
-def csh_commands(row, settings, pipeline, order, fasta, PAIRED):
+def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED):
   """
   Create a csh fomratted string designed to be run by qsub, works differnetly for PAIRED and unPAIRED samples.
 
@@ -448,15 +459,13 @@ def csh_maker(work_on, tsv_df):
       file.write(f'#$ -N {row.run_accession}\n')
       file.write(f'#$ -q bioinfo.q\n')
       file.write(f'echo \"Current organism: {row.scientific_name}\"\n\n')
-      fasta = f'{PATH}{slash}mtDNA_ref{slash}{org_name}{slash}{org_name}.fasta'
-      if not os.path.exists(fasta):
-        try:
-          refs = file_reader('refpaths')
-          fasta = refs[org_name]
-        except (FileNotFoundError, KeyError):
-          fasta, add_to_csh = ref_main(org_name)
-          file.write(add_to_csh)
-      to_csh = csh_commands(row, settings, pipeline, order, fasta, PAIRED)
+      csh_add_ref = ref_main(org_name)
+      if csh_add_ref != '': file.write(csh_add_ref)
+      refs = file_reader('refpaths')
+      fasta = refs[org_name]['refpath']
+      gtf = refs[org_name]['gtfpath']
+
+      to_csh = csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED)
       file.write(to_csh)
       master.write(f'qsub run{i}.csh\n')
   master.close()
