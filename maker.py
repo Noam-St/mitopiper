@@ -366,6 +366,7 @@ def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED):
   sample = row.run_accession
   for command in order:
     
+    to_f_string = ['fasta','gtf']
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else pipeline[command]['path']
     command_outdir = pipeline[command]['outdir']
     command_inputdir = pipeline[command]['inputdir']
@@ -376,6 +377,9 @@ def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED):
       if 'output_file' in i:
         v['value'] += slash + sample + output_ext
     if settings[command] != {}:
+      for k in settings[command].keys():
+        if settings[command][k]['value'] in to_f_string:
+          settings[command][k]['value'] = f'{settings[command][k]["value"]}'
       command_settings = ' '.join([\
         f'{v["key"]} {v["value"]} ' for v in settings[command].values() if v['switch'] == True])
     else:
@@ -395,7 +399,7 @@ def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED):
         for i in range(2):
           csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}_{i+1}.fastq.gz\n'
       elif command == 'alignment':
-        csh_str+=f'{command_key} {command_settings} {fasta} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_1_val_1.fq.gz {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_2_val_2.fq.gz > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
+        csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_1_val_1.fq.gz {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_2_val_2.fq.gz > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
       else:
         csh_str+=f'{command_key} {command_settings} {PATH}{slash}{command_inputdir}{slash}{sample}{input_ext}'
         csh_str+=f' > {PATH}{slash}{command_outdir}{slash}{sample}{output_ext}\n' if command_outdir != '' else ''
@@ -409,7 +413,7 @@ def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED):
       elif command == 'fastqc_pre':
         csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}.fastq.gz\n'
       elif command == 'alignment':
-        csh_str+=f'{command_key} {command_settings} {fasta} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_trimmed.fq.gz  > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
+        csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_trimmed.fq.gz  > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
       else:
         csh_str+=f'{command_key} {command_settings} {PATH}{slash}{command_inputdir}{slash}{sample}{input_ext}'
         csh_str+=f' > {PATH}{slash}{command_outdir}{slash}{sample}{output_ext}\n' if command_outdir != '' else '\n'
@@ -613,7 +617,8 @@ default_settings =\
     'outdir':{'description':'Choose output directory', 'key':'-o', 'value':f'{PATH}{slash}post_trim', 'switch':True}
   },
   'alignment':{
-    'seed':{'description':'Minimum seed length', 'key':'-k', 'value':19, 'switch':True}
+    'seed':{'description':'Minimum seed length', 'key':'-k', 'value':19, 'switch':True},
+    'ref':{'description':'Reference', 'key':'', 'value':'fasta','switch':True}
   },
   'view':{
     'header':{'description':'Include the header in the output', 'key':'-h', 'value':'', 'switch':True},
