@@ -315,7 +315,7 @@ def change_menu():
   """
   choice = True
   print('####################\n\nWelcome to the configuration menu\n')
-  menu = [lambda :0,change_settings,add_new_setting, change_pipeline, add_new_pipeline]
+  menu = [lambda :0,change_settings, change_pipeline, add_new_setting, add_new_pipeline]
   while choice:
     [print(f"Enter {i+1}\tto {x.__name__}\n") for i,x in enumerate(menu[1:])]
     print("Enter 0\t to exit\n")
