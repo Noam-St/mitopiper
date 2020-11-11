@@ -402,7 +402,7 @@ def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED):
         csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_1_val_1.fq.gz {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_2_val_2.fq.gz > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
       else:
         csh_str+=f'{command_key} {command_settings} {PATH}{slash}{command_inputdir}{slash}{sample}{input_ext}'
-        csh_str+=f' > {PATH}{slash}{command_outdir}{slash}{sample}{output_ext}\n' if command_outdir != '' else ''
+        csh_str+=f' > {PATH}{slash}{command_outdir}{slash}{sample}{output_ext}\n' if command_outdir != '' else '\n'
     else:
       if command == 'wget':
         csh_str+=f'{command_key} {command_settings} -O {PATH}{slash}{command_outdir}{slash}{sample}.fastq.gz {row.fastq_ftp}\n'
