@@ -288,7 +288,7 @@ def add_new_setting():
   try: int(key)
   except ValueError: pass
   settings[chosen_step][new_name]['key'] = key
-  print(f'Please enter a value for {new_name} (if the setting is an on/off switch, enter nothing!)\n')
+  print(f'Please enter a value for {new_name} (if the setting is an on/off switch, enter nothing!)\nKeywords gtf and fasta will be replaced with paths\n')
   value = input()
   settings[chosen_step][new_name]['value']  = value
   settings[chosen_step][new_name]['switch'] = 1
@@ -390,6 +390,7 @@ def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED):
       if command == 'wget':
         for i in range(2):
           csh_str+=f'{command_key} {command_settings} -O {PATH}{slash}{command_outdir}{slash}{sample}_{i+1}.fastq.gz {ftps[i]}\n'
+          csh_str+='sleep 30s\n'
       elif command == 'trim':
         csh_str+=f'{command_key} {command_settings} --paired {PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}_1.fastq.gz {PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}_2.fastq.gz\n'
       elif command == 'fastqc':
