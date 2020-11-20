@@ -288,7 +288,7 @@ def add_new_setting():
   try: int(key)
   except ValueError: pass
   settings[chosen_step][new_name]['key'] = key
-  print(f'Please enter a value for {new_name} (if the setting is an on/off switch, enter nothing!)\nKeywords gtf and fasta will be replaced with paths\n')
+  print(f'Please enter a value for {new_name} (if the setting is an on/off switch, enter nothing!)\nKeywords gtf and fasta will be replaced with appropriate paths\n')
   value = input()
   settings[chosen_step][new_name]['value']  = value
   settings[chosen_step][new_name]['switch'] = 1
@@ -302,7 +302,7 @@ def add_new_pipeline():
   pipeline = file_reader('pipeline')
   order = file_reader('run_order')
   settings = file_reader('settings')
-  print('To begin defining a new pipeline step, first enter its step\nIMPORTANT: the name must be different from the current pipeline steps\n')
+  print('To begin defining a new pipeline step, first enter its name\nIMPORTANT: the name must be different from the current pipeline steps\n')
   name = input()
   pipeline[name] = {k:'' for k,v in pipeline['trim'].items() if k != 'switch'}
   for k in pipeline[name].keys():
@@ -365,13 +365,13 @@ def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED):
   csh_str = ''
   sample = row.run_accession
   for command in order:
-    
-    to_f_string = ['fasta','gtf']
+    to_f_string = ['fasta','gtf', 'command_input']
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else pipeline[command]['path']
     command_outdir = pipeline[command]['outdir']
     command_inputdir = pipeline[command]['inputdir']
     input_ext = pipeline[command]['input_ext']
     output_ext = pipeline[command]['output_ext']
+
     for i,v in settings[command].items():
       if v['value'] == 'fasta': v['value'] = fasta
       if 'output_file' in i:
@@ -379,11 +379,27 @@ def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED):
     if settings[command] != {}:
       for k in settings[command].keys():
         if settings[command][k]['value'] in to_f_string:
-          settings[command][k]['value'] = f'{settings[command][k]["value"]}'
+          settings[command][k]['value'] = eval(settings[command][k]["value"])
       command_settings = ' '.join([\
         f'{v["key"]} {v["value"]} ' for v in settings[command].values() if v['switch'] == True])
     else:
       command_settings=''
+    command_input = f'{PATH}{slash}{command_inputdir}{slash}{sample}{input_ext}'
+    command_output = f'{PATH}{slash}{command_outdir}{slash}{sample}{output_ext}'
+    structure = pipeline[command]['structure']
+    default_structure = f'{command_key} {command_settings} {command_input}'
+    if structure == '':
+      structure = default_structure
+    else:
+      struc_list = structure.split(' ')
+      struc_list = ['command_' + i if i in ['input','key','settings'] else i for i in struc_list]
+      for k,v in enumerate(struc_list):
+        struc_list[k] = eval(v)
+      try: pass
+      except NameError:
+        print(f'You entered an invalid command structure! reset to default, to change please re-create the pipeline step: {struc_list}') 
+        structure = default_structure
+      structure = ' '.join(struc_list)
     csh_str+= f'echo \"Running {command}: {pipeline[command]["description"]} on {sample}\"\n'
     if PAIRED:
       ftps = row.fastq_ftp.split(';')
@@ -402,8 +418,8 @@ def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED):
       elif command == 'alignment':
         csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_1_val_1.fq.gz {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_2_val_2.fq.gz > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
       else:
-        csh_str+=f'{command_key} {command_settings} {PATH}{slash}{command_inputdir}{slash}{sample}{input_ext}'
-        csh_str+=f' > {PATH}{slash}{command_outdir}{slash}{sample}{output_ext}\n' if command_outdir != '' else '\n'
+        csh_str+=structure
+        csh_str+=f' > {command_output}\n' if command_outdir != '' else '\n'
     else:
       if command == 'wget':
         csh_str+=f'{command_key} {command_settings} -O {PATH}{slash}{command_outdir}{slash}{sample}.fastq.gz {row.fastq_ftp}\n'
@@ -416,8 +432,8 @@ def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED):
       elif command == 'alignment':
         csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_trimmed.fq.gz  > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
       else:
-        csh_str+=f'{command_key} {command_settings} {PATH}{slash}{command_inputdir}{slash}{sample}{input_ext}'
-        csh_str+=f' > {PATH}{slash}{command_outdir}{slash}{sample}{output_ext}\n' if command_outdir != '' else '\n'
+        csh_str+=structure
+        csh_str+=f' > {command_output}\n' if command_outdir != '' else '\n'
   return csh_str
 
 def csh_maker(work_on, tsv_df):
@@ -513,10 +529,11 @@ explanation_pipe = {
   'key':'The command needed to run the pipeline step (i.e samtools view)',
   'description':'A description of what the command does',
   'path':'Path to the command in the cluster (or wherever the code is being run)',
-  'outdir':'Output directory to pipe the resulting file into',
+  'outdir':'Output directory to pipe the resulting file into\nNOTICE: Leave empty if you wish to define output as a setting.',
   'output_ext': 'What extension is the command supposed to output? (i.e .bam)',
   'inputdir': 'If the command requires a file to run, what is the name of the directory it is in? (i.e alignment)',
-  'input_ext': 'What is the extension of the file the command runs on? (i.e .sam)'
+  'input_ext': 'What is the extension of the file the command runs on? (i.e .sam)',
+  'structure':'Command structure, enter nothing for default format: key input settings > output\nIMPORTNAT: A non-default structure can only include the following keywords: key, input, settings, gtf and fasta seperated by a SINGLE SPACE'
 }
 default_pipe =\
 {
@@ -524,11 +541,12 @@ default_pipe =\
   'key':'wget',
   'description':'Download command',
   'switch':True,
-  'path':'',
+  'path':r'',
   'outdir':'fastq',
   'output_ext':'',
   'inputdir':'',
-  'input_ext':''
+  'input_ext':'',
+  'structure':''
 },
 'trim' : {
   'key':'trim_galore',
@@ -538,7 +556,8 @@ default_pipe =\
   'outdir':'post_trim',
   'output_ext':'.fq.gz',
   'inputdir':'',
-  'input_ext':''
+  'input_ext':'',
+  'structure':''
 },
 'fastqc':{
   'key':'fastqc',
@@ -548,7 +567,8 @@ default_pipe =\
   'outdir':'post_trim',
   'output_ext':'',
   'inputdir':'',
-  'input_ext':''
+  'input_ext':'',
+  'structure':''
 },
 'fastqc_pre':{
   'key':'fastqc',
@@ -558,7 +578,8 @@ default_pipe =\
   'outdir':'fastq',
   'output_ext':'',
   'inputdir':'',
-  'input_ext':''
+  'input_ext':'',
+  'structure':''
 },
 'alignment' : {
   'key':'bwa mem',
@@ -568,7 +589,8 @@ default_pipe =\
   'outdir':'alignment',
   'output_ext':'.sam',
   'inputdir':'',
-  'input_ext':''
+  'input_ext':'',
+  'structure':''
 },
 'view':{
   'key':'samtools view',
@@ -578,7 +600,8 @@ default_pipe =\
   'outdir':'alignment',
   'output_ext':'.bam',
   'inputdir':'alignment',
-  'input_ext':'.sam'
+  'input_ext':'.sam',
+  'structure':''
 },
 'index':{
   'key':'samtools index',
@@ -588,7 +611,8 @@ default_pipe =\
   'outdir':'alignment',
   'output_ext':'.bam.bai',
   'inputdir':'alignment',
-  'input_ext':'.bam'
+  'input_ext':'.bam',
+  'structure':''
 },
 'mpileup':{
   'key':'samtools mpileup',
@@ -598,7 +622,8 @@ default_pipe =\
   'outdir':'pileup',
   'output_ext':'.pileup',
   'inputdir':'alignment',
-  'input_ext':'.bam'
+  'input_ext':'.bam',
+  'structure':''
 },
 'sort':{
   'key': 'samtools sort',
@@ -608,7 +633,21 @@ default_pipe =\
   'outdir':'',
   'output_ext':'.bam',
   'inputdir':'alignment',
-  'input_ext':'.bam'
+  'input_ext':'.bam',
+  'structure':''
+},
+'htseq-count':{
+  'key': 'htseq-count',
+  'description': 'Measure expression',
+  'switch': False,
+  'path': r'',
+  'outdir':'count',
+  'output_ext':'.txt',
+  'inputdir':'alignment',
+  'input_ext':'.bam',
+  'structure': 'key settings input gtf'
+  
+
 }}
 
 default_settings =\
@@ -639,7 +678,8 @@ default_settings =\
   'wget':{},
   'sort':{
     'output_file':{'description':'Output file', 'key' : '-o', 'value':f'{PATH}{slash}alignment','switch':True}
-  }
+  },
+  'htseq-count':{}
 }
 default_order = ['wget','fastqc_pre','trim','fastqc','alignment','view','sort','index','mpileup']
 
