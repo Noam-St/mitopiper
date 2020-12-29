@@ -16,7 +16,6 @@ from Bio import SeqIO
 from Bio import Entrez
 from textwrap import wrap
 from ast import literal_eval
-import configparser as cp
 import json
 
 if sys.platform != 'win32':
@@ -288,7 +287,7 @@ def add_new_setting():
   try: int(key)
   except ValueError: pass
   settings[chosen_step][new_name]['key'] = key
-  print(f'Please enter a value for {new_name} (if the setting is an on/off switch, enter nothing!)\nKeywords gtf and fasta will be replaced with appropriate paths\n')
+  print(f'Please enter a value for {new_name} (if the setting is an on/off switch, enter nothing!)\nKeywords gtf, fasta fastq and fastq_pre will be replaced with appropriate paths\n')
   value = input()
   settings[chosen_step][new_name]['value']  = value
   settings[chosen_step][new_name]['switch'] = 1
@@ -326,7 +325,7 @@ def change_menu():
   """
   choice = True
   print('####################\n\nWelcome to the configuration menu\n')
-  menu = [lambda :0,change_settings, change_pipeline, add_new_setting, add_new_pipeline]
+  menu = [lambda :0, change_settings, change_pipeline, add_new_setting, add_new_pipeline]
   while choice:
     [print(f"Enter {i+1}\tto {x.__name__}\n") for i,x in enumerate(menu[1:])]
     print("Enter 0\t to exit\n")
@@ -338,7 +337,7 @@ def change_menu():
     except IndexError:
       print("Please only choose one of the listed options!\n")
 
-def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED):
+def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED, org):
   """
   Create a csh fomratted string designed to be run by qsub, works differnetly for PAIRED and unPAIRED samples.
 
@@ -363,15 +362,27 @@ def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED):
     The string that contains all the commands - to be added to the csh file in main.
   """
   csh_str = ''
-  sample = row.run_accession
+  org = org.split(' ')
+  try:
+    org = org[0][0] + org[1][0]
+  except IndexError:
+    org = org[0].split('_')
+    org = org[0][0] + org[1][0]
+  org = org.upper()
+  sample = f'{row.run_accession}_{org}'
   for command in order:
-    to_f_string = ['fasta','gtf', 'command_input']
+    to_f_string = ['fasta','gtf', 'command_input', 'fastq', 'fastq_pre']
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else pipeline[command]['path']
     command_outdir = pipeline[command]['outdir']
     command_inputdir = pipeline[command]['inputdir']
     input_ext = pipeline[command]['input_ext']
     output_ext = pipeline[command]['output_ext']
-
+    if PAIRED:
+      fastq = f'{PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_1_val_1.fq.gz {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_2_val_2.fq.gz'
+      fastq_pre = f'{PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}_1.fastq.gz {PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}_2.fastq.gz'
+    else:
+      fastq = f'{PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_trimmed.fq.gz'
+      fastq_pre = f'{PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}.fastq.gz'
     for i,v in settings[command].items():
       if v['value'] == 'fasta': v['value'] = fasta
       if 'output_file' in i:
@@ -408,7 +419,7 @@ def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED):
           csh_str+=f'{command_key} {command_settings} -O {PATH}{slash}{command_outdir}{slash}{sample}_{i+1}.fastq.gz {ftps[i]}\n'
           csh_str+='sleep 30s\n'
       elif command == 'trim':
-        csh_str+=f'{command_key} {command_settings} --paired {PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}_1.fastq.gz {PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}_2.fastq.gz\n'
+        csh_str+=f'{command_key} {command_settings} --paired {fastq_pre}\n'
       elif command == 'fastqc':
         for i in range(2):
           csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_{i+1}_val_{i+1}.fq.gz\n'
@@ -416,7 +427,7 @@ def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED):
         for i in range(2):
           csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}_{i+1}.fastq.gz\n'
       elif command == 'alignment':
-        csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_1_val_1.fq.gz {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_2_val_2.fq.gz > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
+        csh_str+=f'{command_key} {command_settings} {fastq} > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
       else:
         csh_str+=structure
         csh_str+=f' > {command_output}\n' if command_outdir != '' else '\n'
@@ -424,13 +435,13 @@ def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED):
       if command == 'wget':
         csh_str+=f'{command_key} {command_settings} -O {PATH}{slash}{command_outdir}{slash}{sample}.fastq.gz {row.fastq_ftp}\n'
       elif command == 'trim':
-        csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}.fastq.gz\n'
+        csh_str+=f'{command_key} {command_settings} {fastq_pre}\n'
       elif command == 'fastqc':
         csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_trimmed.fq.gz\n'
       elif command == 'fastqc_pre':
         csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}.fastq.gz\n'
       elif command == 'alignment':
-        csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_trimmed.fq.gz  > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
+        csh_str+=f'{command_key} {command_settings} {fastq} > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
       else:
         csh_str+=structure
         csh_str+=f' > {command_output}\n' if command_outdir != '' else '\n'
@@ -486,7 +497,7 @@ def csh_maker(work_on, tsv_df):
       fasta = refs[org_name]['refpath']
       gtf = refs[org_name]['gtfpath']
 
-      to_csh = csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED)
+      to_csh = csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED, org_name)
       file.write(to_csh)
       master.write(f'qsub run{i}.csh\n')
   master.close()
@@ -496,7 +507,7 @@ def main():
   """
   print('Welcome to the semi-automatic .csh maker\n')
   while True:
-    print('Please enter TSV file name (without extension).\nIMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: the tsv msut be in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
+    print('Please enter TSV file name (without extension).\IMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: the tsv msut be in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
     tsv_name = input()
     tsv_path = f'{PATH}{slash}samples{slash}{tsv_name}.tsv'
     try: 
@@ -533,7 +544,7 @@ explanation_pipe = {
   'output_ext': 'What extension is the command supposed to output? (i.e .bam)',
   'inputdir': 'If the command requires a file to run, what is the name of the directory it is in? (i.e alignment)',
   'input_ext': 'What is the extension of the file the command runs on? (i.e .sam)',
-  'structure':'Command structure, enter nothing for default format: key input settings > output\nIMPORTNAT: A non-default structure can only include the following keywords: key, input, settings, gtf and fasta seperated by a SINGLE SPACE'
+  'structure':'Command structure, enter nothing for default format: key settings input\IMPORTANT: A non-default structure can only include the following keywords: key, input, settings, gtf, fasta, fastq and fastq_pre seperated by a SINGLE space'
 }
 default_pipe =\
 {
@@ -555,9 +566,9 @@ default_pipe =\
   'path':r'',
   'outdir':'post_trim',
   'output_ext':'.fq.gz',
-  'inputdir':'',
-  'input_ext':'',
-  'structure':''
+  'inputdir':'fastq',
+  'input_ext':'.fastq',
+  'structure':'key settings fastq_pre'
 },
 'fastqc':{
   'key':'fastqc',
@@ -581,16 +592,16 @@ default_pipe =\
   'input_ext':'',
   'structure':''
 },
-'alignment' : {
+'bwa-align' : {
   'key':'bwa mem',
   'description':'Align reads to reference',
   'switch':True,
   'path':r'',
   'outdir':'alignment',
   'output_ext':'.sam',
-  'inputdir':'',
-  'input_ext':'',
-  'structure':''
+  'inputdir':'post_trim',
+  'input_ext':'.fq.gz',
+  'structure':'key settings fasta fastq'
 },
 'view':{
   'key':'samtools view',
@@ -646,9 +657,19 @@ default_pipe =\
   'inputdir':'alignment',
   'input_ext':'.bam',
   'structure': 'key settings input gtf'
-  
-
-}}
+},
+'STAR-alignment':{
+  'key':'STAR',
+  'description':'Align reads to ref',
+  'switch': False,
+  'path': '/gpfs0/biores/apps/STAR/STAR-v2.5.3a/bin/Linux_x86_64/STAR',
+  'outdir':'alignment',
+  'output_ext':'.sam',
+  'inputdir':'post_trim',
+  'input_ext':'.fq.gz',
+  'structure':'key settings'
+}
+}
 
 default_settings =\
 {
@@ -656,9 +677,8 @@ default_settings =\
     'quality':{'description':'Trim low-quality ends from reads', 'key':'-q', 'value':20, 'switch':True},
     'outdir':{'description':'Choose output directory', 'key':'-o', 'value':f'{PATH}{slash}post_trim', 'switch':True}
   },
-  'alignment':{
+  'bwa-align':{
     'seed':{'description':'Minimum seed length', 'key':'-k', 'value':19, 'switch':True},
-    'ref':{'description':'Reference', 'key':'', 'value':'fasta','switch':True}
   },
   'view':{
     'header':{'description':'Include the header in the output', 'key':'-h', 'value':'', 'switch':True},
@@ -679,9 +699,13 @@ default_settings =\
   'sort':{
     'output_file':{'description':'Output file', 'key' : '-o', 'value':f'{PATH}{slash}alignment','switch':True}
   },
-  'htseq-count':{}
+  'htseq-count':{},
+  'STAR-alignment':{
+    'genomeDir':{'description':'Input ref', 'key' : '--genomeDir', 'value':'fasta', 'switch':True},
+    'readFilesIn':{'description':'Input fastq', 'key': '--readFilesIn', 'value':'fastq', 'switch':True}
+  }
 }
-default_order = ['wget','fastqc_pre','trim','fastqc','alignment','view','sort','index','mpileup']
+default_order = ['wget','fastqc_pre','trim','fastqc','bwa-align','view','sort','index','mpileup']
 
 defaults = (default_pipe, default_settings, default_order)
 if not os.path.exists(f'{PATH}{slash}configs{slash}refpaths.json'):
