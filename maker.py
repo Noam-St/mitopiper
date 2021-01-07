@@ -501,13 +501,26 @@ def csh_maker(work_on, tsv_df):
       file.write(to_csh)
       master.write(f'qsub run{i}.csh\n')
   master.close()
-    
+def rows_of_links(tsv_path):
+  """
+  """
+  tsv_df = pd.DataFrame(columns = ['study_accession', 'sample_accession', 'experiment_accession', 'run_accession', 'scientific_name', 'fastq_ftp'])
+  with open(tsv_path, 'r') as file:
+    lines = file.readlines()
+    if 'fastq.gz' not in lines[0]:
+      lines = lines[1:]
+    print("What is the organism's name?")
+    tsv_df.fastq_ftp = lines
+    tsv_df.scientific_name = input()
+    tsv_df.run_accession = #TODO define run accession (FINSIH THIS FUNCTION)
+
+  
 def main():
   """
   """
   print('Welcome to the semi-automatic .csh maker\n')
   while True:
-    print('Please enter TSV file name (without extension).\nIMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: the tsv msut be in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
+    print('Please enter TSV file name (without extension).\nIMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: the tsv must be in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
     tsv_name = input()
     tsv_path = f'{PATH}{slash}samples{slash}{tsv_name}.tsv'
     try: 
@@ -519,7 +532,14 @@ def main():
         tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
       except FileNotFoundError:
         print('\nthe tsv file does not exist or is not inside the samples folder!\n')
-  tsv_df.scientific_name = tsv_df.scientific_name.str.replace(' ','_')
+  try: tsv_df.scientific_name = tsv_df.scientific_name.str.replace(' ','_')
+  except AttributeError:
+    formats = [rows_of_links]
+    print("It appears your file is not in EBI format.\n")
+    [print(f'Enter {i}\tto {v.__name__}' for i,v in enumerate(formats))]
+    choice = input()
+    tsv_df = formats[choice](tsv_path)
+    
   print('Please enter 1 to enter the configuration menu.\nEnter 0 to continue\n')
   change = int(input())
   if change:
