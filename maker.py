@@ -416,7 +416,7 @@ def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED, org):
       ftps = row.fastq_ftp.split(';')
       if command == 'wget':
         for i in range(2):
-          csh_str+=f'{command_key} {command_settings} -O {PATH}{slash}{command_outdir}{slash}{sample}_{i+1}.fastq.gz {ftps[i]}\n'
+          csh_str+=f'{command_key} {command_settings} -O {PATH}{slash}{command_outdir}{slash}{sample}_{i+1}.fastq.gz ftp://{ftps[i]}\n'
           csh_str+='sleep 30s\n'
       elif command == 'trim':
         csh_str+=f'{command_key} {command_settings} --paired {fastq_pre}\n'
@@ -433,7 +433,7 @@ def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED, org):
         csh_str+=f' > {command_output}\n' if command_outdir != '' else '\n'
     else:
       if command == 'wget':
-        csh_str+=f'{command_key} {command_settings} -O {PATH}{slash}{command_outdir}{slash}{sample}.fastq.gz {row.fastq_ftp}\n'
+        csh_str+=f'{command_key} {command_settings} -O {PATH}{slash}{command_outdir}{slash}{sample}.fastq.gz ftp://{row.fastq_ftp}\n'
       elif command == 'trim':
         csh_str+=f'{command_key} {command_settings} {fastq_pre}\n'
       elif command == 'fastqc':
@@ -499,6 +499,7 @@ def csh_maker(work_on, tsv_df):
 
       to_csh = csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED, org_name)
       file.write(to_csh)
+      master.write(f'sleep 1s')
       master.write(f'qsub run{i}.csh\n')
   master.close()
 def rows_of_links(tsv_path):
