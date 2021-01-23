@@ -371,7 +371,7 @@ def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED, org):
   org = org.upper()
   sample = f'{row.run_accession}_{org}'
   for command in order:
-    to_f_string = ['fasta','gtf', 'command_input', 'fastq', 'fastq_pre']
+    to_f_string = ['fasta','gtf', 'command_input', 'fastq', 'fastq_pre', 'sample']
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else pipeline[command]['path']
     command_outdir = pipeline[command]['outdir']
     command_inputdir = pipeline[command]['inputdir']
@@ -512,7 +512,7 @@ def rows_of_links(tsv_path):
     print("What is the organism's name?")
     tsv_df.fastq_ftp = lines
     tsv_df.scientific_name = input()
-    tsv_df.run_accession = #TODO define run accession (FINSIH THIS FUNCTION)
+    tsv_df.run_accession = 0 #PLACEHOLDER TODO define run accession (FINSIH THIS FUNCTION)
 
   
 def main():
@@ -564,7 +564,7 @@ explanation_pipe = {
   'output_ext': 'What extension is the command supposed to output? (i.e .bam)',
   'inputdir': 'If the command requires a file to run, what is the name of the directory it is in? (i.e alignment)',
   'input_ext': 'What is the extension of the file the command runs on? (i.e .sam)',
-  'structure':'Command structure, enter nothing for default format: key settings input\IMPORTANT: A non-default structure can only include the following keywords: key, input, settings, gtf, fasta, fastq and fastq_pre seperated by a SINGLE space'
+  'structure':'Command structure, enter nothing for default format: key settings input\IMPORTANT: A non-default structure can only include the following keywords: sample, key, input, settings, gtf, fasta, fastq and fastq_pre seperated by a SINGLE space'
 }
 default_pipe =\
 {
