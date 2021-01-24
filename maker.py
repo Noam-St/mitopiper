@@ -499,7 +499,7 @@ def csh_maker(work_on, tsv_df):
 
       to_csh = csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED, org_name)
       file.write(to_csh)
-      master.write(f'sleep 1s')
+      master.write(f'sleep 1s\n')
       master.write(f'qsub run{i}.csh\n')
   master.close()
 def rows_of_links(tsv_path):
