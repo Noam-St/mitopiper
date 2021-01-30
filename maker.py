@@ -10,13 +10,12 @@ the settings for each of the pipeline programs used, and the paths of the progra
 """
 #%%
 import pandas as pd
-import sys, os
+import sys, os, json
 PATH = os.getcwd()
 from Bio import SeqIO
 from Bio import Entrez
 from textwrap import wrap
 from ast import literal_eval
-import json
 
 if sys.platform != 'win32':
     slash = '/'
@@ -337,7 +336,7 @@ def change_menu():
     except IndexError:
       print("Please only choose one of the listed options!\n")
 
-def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED, org):
+def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org):
   """
   Create a csh fomratted string designed to be run by qsub, works differnetly for PAIRED and unPAIRED samples.
 
@@ -369,7 +368,7 @@ def csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED, org):
     org = org[0].split('_')
     org = org[0][0] + org[1][0]
   org = org.upper()
-  sample = f'{row.run_accession}_{org}'
+  sample = f'{row.run_accession}_{i}_{org}'
   for command in order:
     to_f_string = ['fasta','gtf', 'command_input', 'fastq', 'fastq_pre', 'sample']
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else pipeline[command]['path']
@@ -497,7 +496,7 @@ def csh_maker(work_on, tsv_df):
       fasta = refs[org_name]['refpath']
       gtf = refs[org_name]['gtfpath']
 
-      to_csh = csh_commands(row, settings, pipeline, order, fasta, gtf, PAIRED, org_name)
+      to_csh = csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org_name)
       file.write(to_csh)
       master.write(f'sleep 1s\n')
       master.write(f'qsub run{i}.csh\n')

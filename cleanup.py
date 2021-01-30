@@ -25,5 +25,6 @@ def remove_files():
     choice = input()
     [os.remove(f'{PATH}{slash}{c}{slash}{file}') for file in os.listdir(f'{PATH}{slash}{c}') if yn(choice)]
     
-
+if __name__ == '__main__':
+  remove_files()
 
