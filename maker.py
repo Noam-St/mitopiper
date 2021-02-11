@@ -170,6 +170,37 @@ def ref_main(org_name):
     file_creator('refpaths', refs)
     return add_to_csh
 
+def change_general_settings():
+  """
+  Change general settings defined on a per-run basis.
+  """
+  general_settings = file_reader('general_settings')
+  options = list(general_settings.keys())
+  while True:
+    [print(f'{i}\t{v}\n') for i,v in enumerate(options)]
+    print('Which setting would you like to change?\n')
+    print('Type exit to exit\n')
+    choice = input()
+    if choice == 'exit': break
+    try:
+      choice = int(choice)
+      chosen = general_settings[options[choice]]
+    except (ValueError, IndexError):
+      print('Please enter either a number or exit!\n')
+      continue
+    print(f"Please enter a new value for {options[choice]}\nCurrent value: {chosen[0]}\nDescription: {chosen[1]}")
+    new_value = input()
+    if options[choice] == 'free_form':
+      if new_value == '':
+        chosen[0] = ''
+      else:
+        chosen[0] += new_value + '\n'
+    else:
+      chosen[0] = new_value
+    general_settings[options[choice]] = chosen
+
+  file_creator(filename = 'general_settings', format_dict = general_settings)
+
 def change_settings():
   """
   Settings change menu, in this menu you can reconfigure any of the setting options for any
@@ -324,7 +355,7 @@ def change_menu():
   """
   choice = True
   print('####################\n\nWelcome to the configuration menu\n')
-  menu = [lambda :0, change_settings, change_pipeline, add_new_setting, add_new_pipeline]
+  menu = [lambda :0, change_general_settings, change_settings, change_pipeline, add_new_setting, add_new_pipeline]
   while choice:
     [print(f"Enter {i+1}\tto {x.__name__}\n") for i,x in enumerate(menu[1:])]
     print("Enter 0\t to exit\n")
@@ -463,6 +494,7 @@ def csh_maker(work_on, tsv_df):
   master.write('#$ -q bioinfo.q\n')
   master.write('#$ -N master.csh\n')
   pipeline = file_reader('pipeline')
+  general_settings = file_reader('general_settings')
   [dir_checker(i['outdir']) for i in pipeline.values() if i['outdir'] != '']
   if '-' in work_on:
     work_on = [int(i) for i in work_on.split('-')]
@@ -480,15 +512,17 @@ def csh_maker(work_on, tsv_df):
     pipeline = file_reader('pipeline')
     order = file_reader('run_order')
     org_name = row.scientific_name
+
     if len(row.fastq_ftp.split(';')) > 1: PAIRED = True
     else : PAIRED = False
     with open(f'run{i}.csh', 'w') as file:
-      file.write('#!/bin/csh\n')
+      file.write(f'#!/bin/{general_settings["environment"][0]}\n')
       file.write(f'#$ -o {PATH}{slash}std_output\n')
       file.write(f'#$ -e {PATH}{slash}error_output\n')
       file.write(f'#$ -cwd\n')
       file.write(f'#$ -N {row.run_accession}\n')
-      file.write(f'#$ -q bioinfo.q\n')
+      file.write(f'#$ -q {general_settings["qsub_queue"][0]}\n')
+      file.write(general_settings["free_form"][0])
       file.write(f'echo \"Current organism: {row.scientific_name}\"\n\n')
       csh_add_ref = ref_main(org_name)
       if csh_add_ref != '': file.write(csh_add_ref)
@@ -518,7 +552,7 @@ def rows_of_links(tsv_path):
 def main():
   """
   """
-  print('Welcome to the semi-automatic .csh maker\n')
+  print('#########\nWelcome to the semi-automatic .csh maker\n#########')
   while True:
     print('Please enter TSV file name (without extension).\nIMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: the tsv must be in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
     tsv_name = input()
@@ -726,8 +760,13 @@ default_settings =\
   }
 }
 default_order = ['wget','fastqc_pre','trim','fastqc','bwa-align','view','sort','index','mpileup']
+default_main = {
+  'qsub_queue' : ['bioinfo.q', 'choose which cluster queue to send the jobs into'],
+  'environment':['bash', 'choose the linux environment to use'],
+  'free_form':['', 'any command you type here will be added to every single .csh file created, enter nothing to wipe setting']
+}
 
-defaults = (default_pipe, default_settings, default_order)
+defaults = (default_pipe, default_settings, default_order, default_main)
 if not os.path.exists(f'{PATH}{slash}configs{slash}refpaths.json'):
   file_creator('refpaths', {})
 if not os.path.exists(f'{PATH}{slash}configs{slash}credentials.json'):
@@ -736,7 +775,7 @@ if not os.path.exists(f'{PATH}{slash}configs{slash}credentials.json'):
   file_creator('credentials', {'Email':EMAIL, 'API':API})
 
 creds = file_reader('credentials')
-configs = ['pipeline', 'settings', 'run_order']
+configs = ['pipeline', 'settings', 'run_order', 'general_settings']
 for i,config in enumerate(configs):
   if not os.path.exists(f'{PATH}{slash}configs{slash}{config}.json'):
     file_creator(config, defaults[i])
