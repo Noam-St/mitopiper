@@ -26,13 +26,13 @@ try:
   org_df.organism = org_df.organism.str.replace(' ','_')
   org_df = org_df.set_index('organism')
 except FileNotFoundError: raise FileNotFoundError('final.csv is required in the same folder for the program to operate.')
-def file_reader(filename):
+def file_reader(filename, directory = 'current'):
   """
   Read files in the format: X=Y to a dictionary
 
   Parameters
   ----------
-  filePATH : str
+  filename : str
     PATH to txt file in the expected format
   
   Returns
@@ -40,11 +40,15 @@ def file_reader(filename):
   format_dict : dict
     Dictionary with the left side of the equal sign as key and right side as value
   """
-  with open(f'{PATH}{slash}configs{slash}{filename}.json', 'r') as file:
-    format_dict = json.load(file)
+  if directory == '':
+    with open(f'{PATH}{slash}config{slash}{filename}.json', 'r') as file:
+      format_dict = json.load(file)
+  else:
+    with open(f'{PATH}{slash}config{slash}{directory}{slash}{filename}.json', 'r') as file:
+      format_dict = json.load(file)
   return format_dict
 
-def file_creator(filename, format_dict):
+def file_creator(filename, format_dict, directory = 'current'):
   """
   Create json files of the format_dict, place file in cwd
 
@@ -55,7 +59,10 @@ def file_creator(filename, format_dict):
   format_dict : dict
     Dictionary by-which to write the file in this format: key=value
   """
-  filepath = f'{PATH}{slash}configs{slash}{filename}.json'
+  if directory == '':
+    filepath = f'{PATH}{slash}config{slash}{filename}.json'
+  else:
+    filepath = f'{PATH}{slash}config{slash}{directory}{slash}{filename}.json'
   with open(filepath, 'w') as file:
     json.dump(format_dict, sort_keys = True, fp = file, indent = 1)
 
@@ -68,6 +75,7 @@ def dir_checker(dirname):
   dirname : str
     Name of the directory to be checked
   """
+  dirname = dirname.replace('/', slash)
   if not os.path.isdir(f'{PATH}{slash}{dirname}'):
     os.mkdir(f'{PATH}{slash}{dirname}')
 
@@ -104,7 +112,8 @@ def ref_maker(org_name):
     Absolute path to the fasta file created.
   """
   ID = org_df.loc[org_name, 'RefSeq']
-  filename = f'{PATH}{slash}genbank_DB{slash}{ID}.gbk'
+  filename = f'{PATH}{slash}genbank{slash}{ID}.gbk'
+  creds = file_reader('creds')
   if not os.path.isfile(filename):
     if creds['Email'] != '':
       Entrez.email = creds['Email']
@@ -116,7 +125,7 @@ def ref_maker(org_name):
     out_handle.close()
   record = SeqIO.read(filename, 'genbank')
   seq = str(record.seq)
-  fasta = f'{PATH}{slash}mtDNA_ref{slash}{org_name}{slash}{org_name}.fasta'
+  fasta = f'{PATH}{slash}src{slash}mtDNA_ref{slash}{org_name}{slash}{org_name}.fasta'
   with open(fasta, 'w') as ref:
     ref.write('>MT\n')
     ref.write(fasta_wrap(seq))
@@ -153,7 +162,7 @@ def ref_main(org_name):
     try: choice = int(choice)
     except ValueError: print('Please enter 1 or 2 only')
     if choice == 1:
-      dir_checker(f'mtDNA_ref{slash}{org_name}')
+      dir_checker(f'src{slash}mtDNA_ref{slash}{org_name}')
       fasta = ref_maker(org_name)
       add_to_csh = f'samtools faidx {fasta}\nbwa index {fasta}\n'
     elif choice == 2:
@@ -517,8 +526,8 @@ def csh_maker(work_on, tsv_df):
     else : PAIRED = False
     with open(f'run{i}.csh', 'w') as file:
       file.write(f'#!/bin/{general_settings["environment"][0]}\n')
-      file.write(f'#$ -o {PATH}{slash}std_output\n')
-      file.write(f'#$ -e {PATH}{slash}error_output\n')
+      file.write(f'#$ -o {PATH}{slash}stdout\n')
+      file.write(f'#$ -e {PATH}{slash}stderr\n')
       file.write(f'#$ -cwd\n')
       file.write(f'#$ -N {row.run_accession}\n')
       file.write(f'#$ -q {general_settings["qsub_queue"][0]}\n')
@@ -535,6 +544,7 @@ def csh_maker(work_on, tsv_df):
       master.write(f'sleep 1s\n')
       master.write(f'qsub run{i}.csh\n')
   master.close()
+
 def rows_of_links(tsv_path):
   """
   """
@@ -548,59 +558,12 @@ def rows_of_links(tsv_path):
     tsv_df.scientific_name = input()
     tsv_df.run_accession = 0 #PLACEHOLDER TODO define run accession (FINSIH THIS FUNCTION)
 
-  
-def main():
+def defaults():
   """
   """
-  print('#########\nWelcome to the semi-automatic .csh maker\n#########')
-  while True:
-    print('Please enter TSV file name (without extension).\nIMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: the tsv must be in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
-    tsv_name = input()
-    tsv_path = f'{PATH}{slash}samples{slash}{tsv_name}.tsv'
-    try: 
-      tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
-      break
-    except FileNotFoundError:
-      try:
-        tsv_path = tsv_path.replace('.tsv','.txt')
-        tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
-      except FileNotFoundError:
-        print('\nthe tsv file does not exist or is not inside the samples folder!\n')
-  try: tsv_df.scientific_name = tsv_df.scientific_name.str.replace(' ','_')
-  except AttributeError:
-    formats = [rows_of_links]
-    print("It appears your file is not in EBI format.\n")
-    [print(f'Enter {i}\tto {v.__name__}' for i,v in enumerate(formats))]
-    choice = input()
-    tsv_df = formats[choice](tsv_path)
-    
-  print('Please enter 1 to enter the configuration menu.\nEnter 0 to continue\n')
-  change = int(input())
-  if change:
-    change_menu()
-  print(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\n')
-  [print(f'{ind}\t{samp}') for ind,samp in zip(tsv_df.index,tsv_df.run_accession)]
-  work_on = input()
-  csh_maker(work_on, tsv_df)
-
-  
-dir_checker('mtDNA_ref')
-dir_checker('error_output')
-dir_checker('std_output')
-dir_checker('Genbank_DB')
-dir_checker('samples')
-dir_checker('configs')
-explanation_pipe = {
-  'key':'The command needed to run the pipeline step (i.e samtools view)',
-  'description':'A description of what the command does',
-  'path':'Path to the command in the cluster (or wherever the code is being run)',
-  'outdir':'Output directory to pipe the resulting file into\nNOTICE: Leave empty if you wish to define output as a setting.',
-  'output_ext': 'What extension is the command supposed to output? (i.e .bam)',
-  'inputdir': 'If the command requires a file to run, what is the name of the directory it is in? (i.e alignment)',
-  'input_ext': 'What is the extension of the file the command runs on? (i.e .sam)',
-  'structure':'Command structure, enter nothing for default format: key settings input\IMPORTANT: A non-default structure can only include the following keywords: sample, key, input, settings, gtf, fasta, fastq and fastq_pre seperated by a SINGLE space'
-}
-default_pipe =\
+  dir_checker('config')
+  dir_checker('config/default')
+  default_pipe =\
 {
 'wget' : {
   'key':'wget',
@@ -725,7 +688,7 @@ default_pipe =\
 }
 }
 
-default_settings =\
+  default_settings =\
 {
   'trim':{
     'quality':{'description':'Trim low-quality ends from reads', 'key':'-q', 'value':20, 'switch':True},
@@ -759,25 +722,94 @@ default_settings =\
     'readFilesIn':{'description':'Input fastq', 'key': '--readFilesIn', 'value':'fastq', 'switch':True}
   }
 }
-default_order = ['wget','fastqc_pre','trim','fastqc','bwa-align','view','sort','index','mpileup']
-default_main = {
+  default_order = ['wget','fastqc_pre','trim','fastqc','bwa-align','view','sort','index','mpileup']
+  default_main = {
   'qsub_queue' : ['bioinfo.q', 'choose which cluster queue to send the jobs into'],
   'environment':['bash', 'choose the linux environment to use'],
   'free_form':['', 'any command you type here will be added to every single .csh file created, enter nothing to wipe setting']
 }
-
-defaults = (default_pipe, default_settings, default_order, default_main)
-if not os.path.exists(f'{PATH}{slash}configs{slash}refpaths.json'):
+  defaults = (default_pipe, default_settings, default_order, default_main)
+  
   file_creator('refpaths', {})
-if not os.path.exists(f'{PATH}{slash}configs{slash}credentials.json'):
-  EMAIL = input('Please enter your NCBI account email:')
-  API = input('Please enter your NCBI API (can be found in NCBI account page)')
-  file_creator('credentials', {'Email':EMAIL, 'API':API})
+  configs = ['pipeline', 'settings', 'run_order', 'general_settings']
+  for i,config in enumerate(configs):
+    file_creator(config, defaults[i], directory = 'default')
 
-creds = file_reader('credentials')
-configs = ['pipeline', 'settings', 'run_order', 'general_settings']
-for i,config in enumerate(configs):
-  if not os.path.exists(f'{PATH}{slash}configs{slash}{config}.json'):
-    file_creator(config, defaults[i])
+def current_settings(workflow):
+  """
+  """
+  dir_checker('config/current')
+
+def main():
+  """
+  """
+  dir_checker('src')
+  dir_checker('src/mtDNA_ref')
+  dir_checker('stderr')
+  dir_checker('stdout')
+  dir_checker('src/genbank')
+  dir_checker('src/samples')
+
+  if not os.path.exists(f'{PATH}{slash}config{slash}default'):
+    defaults()
+
+  
+  print('#########\nWelcome to the semi-automatic .csh maker\n#########\n')
+  workflows = os.listdir(f'{PATH}{slash}config')
+  while True:
+    print('Please choose a pre-configured workflow\n')
+    [print(f'{i}\t{v}') for i,v in enumerate(workflows) if v != 'current']
+    workflow = input()
+    try:
+      workflow = workflows[workflow] 
+      current_settings(workflow)
+      break
+    except (IndexError, ValueError):
+      pass
+
+  while True:
+    print('Please enter TSV file name (without extension).\nIMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: the tsv must be in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
+    tsv_name = input()
+    tsv_path = f'{PATH}{slash}src{slash}samples{slash}{tsv_name}.tsv'
+    try: 
+      tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
+      break
+    except FileNotFoundError:
+      try:
+        tsv_path = tsv_path.replace('.tsv','.txt')
+        tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
+      except FileNotFoundError:
+        print('\nthe tsv file does not exist or is not inside the samples folder!\n')
+  try: tsv_df.scientific_name = tsv_df.scientific_name.str.replace(' ','_')
+  except AttributeError:
+    formats = [rows_of_links]
+    print("It appears your file is not in EBI format.\n")
+    [print(f'Enter {i}\tto {v.__name__}' for i,v in enumerate(formats))]
+    choice = input()
+    tsv_df = formats[choice](tsv_path)
+    
+  print('Please enter 1 to enter the configuration menu.\nEnter 0 to continue\n')
+  change = int(input())
+  if change:
+    change_menu()
+  print(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\n')
+  [print(f'{ind}\t{samp}') for ind,samp in zip(tsv_df.index,tsv_df.run_accession)]
+  work_on = input()
+  csh_maker(work_on, tsv_df)
+
+
+explanation_pipe = {
+  'key':'The command needed to run the pipeline step (i.e samtools view)',
+  'description':'A description of what the command does',
+  'path':'Path to the command in the cluster (or wherever the code is being run)',
+  'outdir':'Output directory to pipe the resulting file into\nNOTICE: Leave empty if you wish to define output as a setting.',
+  'output_ext': 'What extension is the command supposed to output? (i.e .bam)',
+  'inputdir': 'If the command requires a file to run, what is the name of the directory it is in? (i.e alignment)',
+  'input_ext': 'What is the extension of the file the command runs on? (i.e .sam)',
+  'structure':'Command structure, enter nothing for default format: key settings input\IMPORTANT: A non-default structure can only include the following keywords: sample, key, input, settings, gtf, fasta, fastq and fastq_pre seperated by a SINGLE space'
+}
+
+
+
 main()
 print('Enter \"qsub master.csh\" into the console to run the commands\nIMPORTANT: Each sample will be executed simultaneously in qsub you run this command, make sure you dont run too many at once!\n')
