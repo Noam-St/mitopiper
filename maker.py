@@ -730,16 +730,25 @@ def defaults():
 }
   defaults = (default_pipe, default_settings, default_order, default_main)
   
-  file_creator('refpaths', {})
+  file_creator('refpaths', {}, directory = 'default')
   configs = ['pipeline', 'settings', 'run_order', 'general_settings']
   for i,config in enumerate(configs):
     file_creator(config, defaults[i], directory = 'default')
 
-def current_settings(workflow):
+def save_settings(source, output):
   """
+  Transfer settings from source to output
   """
-  dir_checker('config/current')
+  dir_checker('config/' + output)
+  for jsonfile in os.listdir(f'{PATH}{slash}config{slash}{source}'):
+    jsonfile = jsonfile.replace('.json','')
+    file_creator(filename = jsonfile, format_dict = file_reader(filename = jsonfile, directory = source), directory = output)
 
+def setup_sample():
+  """
+  TODO HERE, This function will set up a sample directory tree for each sample, based on the tsv name.
+  """
+  pass
 def main():
   """
   """
@@ -752,8 +761,8 @@ def main():
 
   if not os.path.exists(f'{PATH}{slash}config{slash}default'):
     defaults()
-
   
+
   print('#########\nWelcome to the semi-automatic .csh maker\n#########\n')
   workflows = os.listdir(f'{PATH}{slash}config')
   while True:
@@ -761,25 +770,26 @@ def main():
     [print(f'{i}\t{v}') for i,v in enumerate(workflows) if v != 'current']
     workflow = input()
     try:
-      workflow = workflows[workflow] 
-      current_settings(workflow)
+      workflow = workflows[int(workflow)] 
+      save_settings(source = workflow, output = 'current')
       break
-    except (IndexError, ValueError):
-      pass
+    except (IndexError, ValueError, TypeError):
+      print('Please enter the number next to the configuration name\n\n')
 
   while True:
     print('Please enter TSV file name (without extension).\nIMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: the tsv must be in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
     tsv_name = input()
-    tsv_path = f'{PATH}{slash}src{slash}samples{slash}{tsv_name}.tsv'
+    tsv_path = f'{PATH}{slash}{tsv_name}.tsv'
     try: 
-      tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
+      assert os.path.exists(tsv_path)
       break
-    except FileNotFoundError:
+    except AssertionError:
       try:
         tsv_path = tsv_path.replace('.tsv','.txt')
-        tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
-      except FileNotFoundError:
-        print('\nthe tsv file does not exist or is not inside the samples folder!\n')
+        assert os.path.exists(tsv_path)
+      except AssertionError:
+        print('\nThe TSV file does not exist or is not inside the samples folder!\n')
+  setup_sample()
   try: tsv_df.scientific_name = tsv_df.scientific_name.str.replace(' ','_')
   except AttributeError:
     formats = [rows_of_links]
