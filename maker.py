@@ -23,10 +23,10 @@ if sys.platform != 'win32':
 else:
     SLASH = '\\'
 try:
-  org_df = pd.read_csv(f'{PATH}{SLASH}final.csv')
+  org_df = pd.read_csv(f'{PATH}{SLASH}src{SLASH}final.csv')
   org_df.organism = org_df.organism.str.replace(' ','_')
   org_df = org_df.set_index('organism')
-except FileNotFoundError: raise FileNotFoundError('final.csv is required in the same folder for the program to operate.')
+except FileNotFoundError: raise FileNotFoundError('final.csv is required in the src folder for the program to operate.')
 def file_reader(filename, directory = 'current'):
   """
   Read files in the format: X=Y to a dictionary
@@ -439,7 +439,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
   org = org.upper()
   sample = f'{row.run_accession}_{i}_{org}'
   for command in order:
-    to_f_string = ['fasta','gtf', 'command_input', 'fastq', 'fastq_pre', 'sample']
+    to_f_string = ['fasta','gtf', 'command_input', 'fastq', 'fastq_pre', 'sample', 'fastq_dir', 'fastq_pre_dir']
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else pipeline[command]['path']
     command_outdir = pipeline[command]['outdir']
     command_inputdir = pipeline[command]['inputdir']
@@ -447,7 +447,9 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
     output_ext = pipeline[command]['output_ext']
     if PAIRED:
       fastq = f'{tsv_dir}{SLASH}{pipeline["trim"]["outdir"]}{SLASH}{sample}_1_val_1.fq.gz {tsv_dir}{SLASH}{pipeline["trim"]["outdir"]}{SLASH}{sample}_2_val_2.fq.gz'
+      fastq_dir =  f'{tsv_dir}{SLASH}{pipeline["trim"]["outdir"]}'
       fastq_pre = f'{tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}{SLASH}{sample}_1.fastq.gz {tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}{SLASH}{sample}_2.fastq.gz'
+      fastq_pre_dir = f'{tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}'
     else:
       fastq = f'{tsv_dir}{SLASH}{pipeline["trim"]["outdir"]}{SLASH}{sample}_trimmed.fq.gz'
       fastq_pre = f'{tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}{SLASH}{sample}.fastq.gz'
@@ -731,7 +733,7 @@ def defaults():
 {
   'trim':{
     'quality':{'description':'Trim low-quality ends from reads', 'key':'-q', 'value':20, 'switch':True},
-    'outdir':{'description':'Choose output directory', 'key':'-o', 'value':f'{PATH}{SLASH}post_trim', 'switch':True}
+    'outdir':{'description':'Choose output directory', 'key':'-o', 'value':'fastq_dir', 'switch':True}
   },
   'bwa-align':{
     'seed':{'description':'Minimum seed length', 'key':'-k', 'value':19, 'switch':True},
@@ -746,10 +748,10 @@ def defaults():
     'reference':{'description':'Fasta type ref file','key':'-f', 'value':'fasta', 'switch':True}
   },
   'fastqc':{
-    'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':f'{PATH}{SLASH}post_trim', 'switch':True}
+    'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':'fastq_dir', 'switch':True}
   },
    'fastqc_pre':{
-    'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':f'{PATH}{SLASH}fastq', 'switch':True}
+    'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':f'fastq_pre_dir', 'switch':True}
   },
   'wget':{},
   'sort':{
