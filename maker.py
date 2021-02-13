@@ -227,6 +227,7 @@ def change_general_settings():
     general_settings[options[choice]] = chosen
 
   file_creator(filename = 'general_settings', format_dict = general_settings)
+  print("Setting changed successfuly!\n")
 
 def change_settings():
   """
@@ -323,6 +324,7 @@ def change_pipeline():
     order = [i for i in order if pipeline[i]['switch']]
     file_creator('pipeline', pipeline)
     file_creator('run_order', order)
+    print('Pipeline changed successfuly!\n')
 
 def add_new_setting():
   """
@@ -344,7 +346,7 @@ def add_new_setting():
   try: int(key)
   except ValueError: pass
   settings[chosen_step][new_name]['key'] = key
-  print(f'Please enter a value for {new_name} (if the setting is an on/off switch, enter nothing!)\nKeywords gtf, fasta fastq and fastq_pre will be replaced with appropriate paths\n')
+  print(f'Please enter a value for {new_name} (if the setting is an on/off switch, enter nothing!)\nKeywords gtf, fasta, fastq, fastq_pre, fastq_dir and fastq_dir_pre will be replaced with appropriate paths\n')
   value = input()
   settings[chosen_step][new_name]['value']  = value
   settings[chosen_step][new_name]['switch'] = 1
