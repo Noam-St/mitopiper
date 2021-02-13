@@ -16,13 +16,14 @@ from Bio import SeqIO
 from Bio import Entrez
 from textwrap import wrap
 from ast import literal_eval
+import shutil
 
 if sys.platform != 'win32':
-    slash = '/'
+    SLASH = '/'
 else:
-    slash = '\\'
+    SLASH = '\\'
 try:
-  org_df = pd.read_csv(f'{PATH}{slash}final.csv')
+  org_df = pd.read_csv(f'{PATH}{SLASH}final.csv')
   org_df.organism = org_df.organism.str.replace(' ','_')
   org_df = org_df.set_index('organism')
 except FileNotFoundError: raise FileNotFoundError('final.csv is required in the same folder for the program to operate.')
@@ -41,10 +42,10 @@ def file_reader(filename, directory = 'current'):
     Dictionary with the left side of the equal sign as key and right side as value
   """
   if directory == '':
-    with open(f'{PATH}{slash}config{slash}{filename}.json', 'r') as file:
+    with open(f'{PATH}{SLASH}config{SLASH}{filename}.json', 'r') as file:
       format_dict = json.load(file)
   else:
-    with open(f'{PATH}{slash}config{slash}{directory}{slash}{filename}.json', 'r') as file:
+    with open(f'{PATH}{SLASH}config{SLASH}{directory}{SLASH}{filename}.json', 'r') as file:
       format_dict = json.load(file)
   return format_dict
 
@@ -60,9 +61,9 @@ def file_creator(filename, format_dict, directory = 'current'):
     Dictionary by-which to write the file in this format: key=value
   """
   if directory == '':
-    filepath = f'{PATH}{slash}config{slash}{filename}.json'
+    filepath = f'{PATH}{SLASH}config{SLASH}{filename}.json'
   else:
-    filepath = f'{PATH}{slash}config{slash}{directory}{slash}{filename}.json'
+    filepath = f'{PATH}{SLASH}config{SLASH}{directory}{SLASH}{filename}.json'
   with open(filepath, 'w') as file:
     json.dump(format_dict, sort_keys = True, fp = file, indent = 1)
 
@@ -75,9 +76,9 @@ def dir_checker(dirname):
   dirname : str
     Name of the directory to be checked
   """
-  dirname = dirname.replace('/', slash)
-  if not os.path.isdir(f'{PATH}{slash}{dirname}'):
-    os.mkdir(f'{PATH}{slash}{dirname}')
+  dirname = dirname.replace('/', SLASH)
+  if not os.path.isdir(f'{PATH}{SLASH}{dirname}'):
+    os.mkdir(f'{PATH}{SLASH}{dirname}')
 
 def fasta_wrap(string, per = 60):
   """
@@ -112,8 +113,8 @@ def ref_maker(org_name):
     Absolute path to the fasta file created.
   """
   ID = org_df.loc[org_name, 'RefSeq']
-  filename = f'{PATH}{slash}genbank{slash}{ID}.gbk'
-  creds = file_reader('creds')
+  filename = f'{PATH}{SLASH}src{SLASH}genbank{SLASH}{ID}.gbk'
+  creds = file_reader('credentials')
   if not os.path.isfile(filename):
     if creds['Email'] != '':
       Entrez.email = creds['Email']
@@ -125,11 +126,28 @@ def ref_maker(org_name):
     out_handle.close()
   record = SeqIO.read(filename, 'genbank')
   seq = str(record.seq)
-  fasta = f'{PATH}{slash}src{slash}mtDNA_ref{slash}{org_name}{slash}{org_name}.fasta'
+  fasta = f'{PATH}{SLASH}src{SLASH}mtDNA_ref{SLASH}{org_name}{SLASH}{org_name}.fasta'
   with open(fasta, 'w') as ref:
     ref.write('>MT\n')
     ref.write(fasta_wrap(seq))
   return fasta
+
+def save_settings(source, output):
+  """
+  Transfer settings from source to output
+  """
+  dir_checker('config/' + output)
+  for jsonfile in os.listdir(f'{PATH}{SLASH}config{SLASH}{source}'):
+    if '.json' in jsonfile:
+      jsonfile = jsonfile.replace('.json','')
+      file_creator(filename = jsonfile, format_dict = file_reader(filename = jsonfile, directory = source), directory = output)
+
+def save_current_settings():
+  """
+  """
+  print("Please enter preset settings name\n")
+  name = input()
+  save_settings(source = 'current', output = name)
 
 def ref_main(org_name):
   """
@@ -148,7 +166,7 @@ def ref_main(org_name):
     add_to_csh : str
       string to add to the csh (incase the user chooses to automatically create a fasta)
   """
-  refs = file_reader('refpaths')
+  refs = file_reader('refpaths', 'global')
   try:
     refs[org_name]['refpath']
     refs[org_name]['gtfpath']
@@ -162,7 +180,7 @@ def ref_main(org_name):
     try: choice = int(choice)
     except ValueError: print('Please enter 1 or 2 only')
     if choice == 1:
-      dir_checker(f'src{slash}mtDNA_ref{slash}{org_name}')
+      dir_checker(f'src{SLASH}mtDNA_ref{SLASH}{org_name}')
       fasta = ref_maker(org_name)
       add_to_csh = f'samtools faidx {fasta}\nbwa index {fasta}\n'
     elif choice == 2:
@@ -176,7 +194,7 @@ def ref_main(org_name):
     refs[org_name] = {}
     refs[org_name]['refpath'] = fasta
     refs[org_name]['gtfpath'] = gtf
-    file_creator('refpaths', refs)
+    file_creator('refpaths', refs, 'global')
     return add_to_csh
 
 def change_general_settings():
@@ -337,6 +355,17 @@ def add_new_pipeline():
   """
   Add new pipeline step menu, currently the user has to configure every option
   """
+  explanation_pipe = {
+  'key':'The command needed to run the pipeline step (i.e samtools view)',
+  'description':'A description of what the command does',
+  'path':'Path to the command in the cluster (or wherever the code is being run)',
+  'outdir':'Output directory to pipe the resulting file into\nNOTICE: Leave empty if you wish to define output as a setting.',
+  'output_ext': 'What extension is the command supposed to output? (i.e .bam)',
+  'inputdir': 'If the command requires a file to run, what is the name of the directory it is in? (i.e alignment)',
+  'input_ext': 'What is the extension of the file the command runs on? (i.e .sam)',
+  'structure':'Command structure, enter nothing for default format: key settings input\IMPORTANT: A non-default structure can only include the following keywords: sample, key, input, settings, gtf, fasta, fastq and fastq_pre seperated by a SINGLE space'
+}
+
   pipeline = file_reader('pipeline')
   order = file_reader('run_order')
   settings = file_reader('settings')
@@ -364,7 +393,7 @@ def change_menu():
   """
   choice = True
   print('####################\n\nWelcome to the configuration menu\n')
-  menu = [lambda :0, change_general_settings, change_settings, change_pipeline, add_new_setting, add_new_pipeline]
+  menu = [lambda :0, change_general_settings, change_settings, change_pipeline, add_new_setting, add_new_pipeline, save_current_settings]
   while choice:
     [print(f"Enter {i+1}\tto {x.__name__}\n") for i,x in enumerate(menu[1:])]
     print("Enter 0\t to exit\n")
@@ -376,7 +405,7 @@ def change_menu():
     except IndexError:
       print("Please only choose one of the listed options!\n")
 
-def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org):
+def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv_dir):
   """
   Create a csh fomratted string designed to be run by qsub, works differnetly for PAIRED and unPAIRED samples.
 
@@ -417,15 +446,15 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org):
     input_ext = pipeline[command]['input_ext']
     output_ext = pipeline[command]['output_ext']
     if PAIRED:
-      fastq = f'{PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_1_val_1.fq.gz {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_2_val_2.fq.gz'
-      fastq_pre = f'{PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}_1.fastq.gz {PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}_2.fastq.gz'
+      fastq = f'{tsv_dir}{SLASH}{pipeline["trim"]["outdir"]}{SLASH}{sample}_1_val_1.fq.gz {tsv_dir}{SLASH}{pipeline["trim"]["outdir"]}{SLASH}{sample}_2_val_2.fq.gz'
+      fastq_pre = f'{tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}{SLASH}{sample}_1.fastq.gz {tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}{SLASH}{sample}_2.fastq.gz'
     else:
-      fastq = f'{PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_trimmed.fq.gz'
-      fastq_pre = f'{PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}.fastq.gz'
+      fastq = f'{tsv_dir}{SLASH}{pipeline["trim"]["outdir"]}{SLASH}{sample}_trimmed.fq.gz'
+      fastq_pre = f'{tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}{SLASH}{sample}.fastq.gz'
     for i,v in settings[command].items():
       if v['value'] == 'fasta': v['value'] = fasta
       if 'output_file' in i:
-        v['value'] += slash + sample + output_ext
+        v['value'] += SLASH + sample + output_ext
     if settings[command] != {}:
       for k in settings[command].keys():
         if settings[command][k]['value'] in to_f_string:
@@ -434,8 +463,8 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org):
         f'{v["key"]} {v["value"]} ' for v in settings[command].values() if v['switch'] == True])
     else:
       command_settings=''
-    command_input = f'{PATH}{slash}{command_inputdir}{slash}{sample}{input_ext}'
-    command_output = f'{PATH}{slash}{command_outdir}{slash}{sample}{output_ext}'
+    command_input = f'{tsv_dir}{SLASH}{command_inputdir}{SLASH}{sample}{input_ext}'
+    command_output = f'{tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}{output_ext}'
     structure = pipeline[command]['structure']
     default_structure = f'{command_key} {command_settings} {command_input}'
     if structure == '':
@@ -455,38 +484,38 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org):
       ftps = row.fastq_ftp.split(';')
       if command == 'wget':
         for i in range(2):
-          csh_str+=f'{command_key} {command_settings} -O {PATH}{slash}{command_outdir}{slash}{sample}_{i+1}.fastq.gz ftp://{ftps[i]}\n'
+          csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}.fastq.gz ftp://{ftps[i]}\n'
           csh_str+='sleep 30s\n'
       elif command == 'trim':
         csh_str+=f'{command_key} {command_settings} --paired {fastq_pre}\n'
       elif command == 'fastqc':
         for i in range(2):
-          csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_{i+1}_val_{i+1}.fq.gz\n'
+          csh_str+=f'{command_key} {command_settings} {tsv_dir}{SLASH}{pipeline["trim"]["outdir"]}{SLASH}{sample}_{i+1}_val_{i+1}.fq.gz\n'
       elif command == 'fastqc_pre':
         for i in range(2):
-          csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}_{i+1}.fastq.gz\n'
+          csh_str+=f'{command_key} {command_settings} {tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}{SLASH}{sample}_{i+1}.fastq.gz\n'
       elif command == 'alignment':
-        csh_str+=f'{command_key} {command_settings} {fastq} > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
+        csh_str+=f'{command_key} {command_settings} {fastq} > {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}.sam\n'
       else:
         csh_str+=structure
         csh_str+=f' > {command_output}\n' if command_outdir != '' else '\n'
     else:
       if command == 'wget':
-        csh_str+=f'{command_key} {command_settings} -O {PATH}{slash}{command_outdir}{slash}{sample}.fastq.gz ftp://{row.fastq_ftp}\n'
+        csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}.fastq.gz ftp://{row.fastq_ftp}\n'
       elif command == 'trim':
         csh_str+=f'{command_key} {command_settings} {fastq_pre}\n'
       elif command == 'fastqc':
-        csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["trim"]["outdir"]}{slash}{sample}_trimmed.fq.gz\n'
+        csh_str+=f'{command_key} {command_settings} {tsv_dir}{SLASH}{pipeline["trim"]["outdir"]}{SLASH}{sample}_trimmed.fq.gz\n'
       elif command == 'fastqc_pre':
-        csh_str+=f'{command_key} {command_settings} {PATH}{slash}{pipeline["wget"]["outdir"]}{slash}{sample}.fastq.gz\n'
+        csh_str+=f'{command_key} {command_settings} {tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}{SLASH}{sample}.fastq.gz\n'
       elif command == 'alignment':
-        csh_str+=f'{command_key} {command_settings} {fastq} > {PATH}{slash}{command_outdir}{slash}{sample}.sam\n'
+        csh_str+=f'{command_key} {command_settings} {fastq} > {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}.sam\n'
       else:
         csh_str+=structure
         csh_str+=f' > {command_output}\n' if command_outdir != '' else '\n'
   return csh_str
 
-def csh_maker(work_on, tsv_df):
+def csh_maker(work_on, tsv_df, tsv_name):
   """
   Makes a single .csh file for each line of .tsv, and a master.csh to be run by qsub
 
@@ -497,14 +526,15 @@ def csh_maker(work_on, tsv_df):
   tsv_df
     The df version of samples.tsv
   """
-  master = open(f'{PATH}{slash}master.csh', 'w')
+  tsv_dir = f"{PATH}{SLASH}output{SLASH}{tsv_name}"
+  master = open(f'{PATH}{SLASH}master.csh', 'w')
   master.write('#!/bin/csh\n')
   master.write('#$ -cwd\n')
   master.write('#$ -q bioinfo.q\n')
   master.write('#$ -N master.csh\n')
   pipeline = file_reader('pipeline')
   general_settings = file_reader('general_settings')
-  [dir_checker(i['outdir']) for i in pipeline.values() if i['outdir'] != '']
+  [dir_checker('output' + '/' + tsv_name + '/' + i['outdir']) for i in pipeline.values() if i['outdir'] != '']
   if '-' in work_on:
     work_on = [int(i) for i in work_on.split('-')]
     start = work_on[0]
@@ -524,10 +554,10 @@ def csh_maker(work_on, tsv_df):
 
     if len(row.fastq_ftp.split(';')) > 1: PAIRED = True
     else : PAIRED = False
-    with open(f'run{i}.csh', 'w') as file:
+    with open(f'{tsv_dir}{SLASH}run{i}.csh', 'w') as file:
       file.write(f'#!/bin/{general_settings["environment"][0]}\n')
-      file.write(f'#$ -o {PATH}{slash}stdout\n')
-      file.write(f'#$ -e {PATH}{slash}stderr\n')
+      file.write(f'#$ -o {tsv_dir}{SLASH}stdout\n')
+      file.write(f'#$ -e {tsv_dir}{SLASH}stderr\n')
       file.write(f'#$ -cwd\n')
       file.write(f'#$ -N {row.run_accession}\n')
       file.write(f'#$ -q {general_settings["qsub_queue"][0]}\n')
@@ -535,14 +565,14 @@ def csh_maker(work_on, tsv_df):
       file.write(f'echo \"Current organism: {row.scientific_name}\"\n\n')
       csh_add_ref = ref_main(org_name)
       if csh_add_ref != '': file.write(csh_add_ref)
-      refs = file_reader('refpaths')
+      refs = file_reader('refpaths', 'global')
       fasta = refs[org_name]['refpath']
       gtf = refs[org_name]['gtfpath']
 
-      to_csh = csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org_name)
+      to_csh = csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org_name, tsv_dir)
       file.write(to_csh)
       master.write(f'sleep 1s\n')
-      master.write(f'qsub run{i}.csh\n')
+      master.write(f'qsub {tsv_dir}{SLASH}run{i}.csh\n')
   master.close()
 
 def rows_of_links(tsv_path):
@@ -561,8 +591,17 @@ def rows_of_links(tsv_path):
 def defaults():
   """
   """
+
   dir_checker('config')
   dir_checker('config/default')
+  dir_checker('config/global')
+
+  if not os.path.exists(f"{PATH}{SLASH}config{SLASH}default{SLASH}creds.json"):
+    print("Please enter your NCBI account email:\n")
+    EMAIL = input()
+    print("Please enter your NCBI API key: (can be found in the NCBI account page)\n")
+    API = input()
+    file_creator('credentials', {'Email':EMAIL, 'API':API}, directory = 'default')
   default_pipe =\
 {
 'wget' : {
@@ -692,7 +731,7 @@ def defaults():
 {
   'trim':{
     'quality':{'description':'Trim low-quality ends from reads', 'key':'-q', 'value':20, 'switch':True},
-    'outdir':{'description':'Choose output directory', 'key':'-o', 'value':f'{PATH}{slash}post_trim', 'switch':True}
+    'outdir':{'description':'Choose output directory', 'key':'-o', 'value':f'{PATH}{SLASH}post_trim', 'switch':True}
   },
   'bwa-align':{
     'seed':{'description':'Minimum seed length', 'key':'-k', 'value':19, 'switch':True},
@@ -707,14 +746,14 @@ def defaults():
     'reference':{'description':'Fasta type ref file','key':'-f', 'value':'fasta', 'switch':True}
   },
   'fastqc':{
-    'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':f'{PATH}{slash}post_trim', 'switch':True}
+    'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':f'{PATH}{SLASH}post_trim', 'switch':True}
   },
    'fastqc_pre':{
-    'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':f'{PATH}{slash}fastq', 'switch':True}
+    'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':f'{PATH}{SLASH}fastq', 'switch':True}
   },
   'wget':{},
   'sort':{
-    'output_file':{'description':'Output file', 'key' : '-o', 'value':f'{PATH}{slash}alignment','switch':True}
+    'output_file':{'description':'Output file', 'key' : '-o', 'value':f'{PATH}{SLASH}alignment','switch':True}
   },
   'htseq-count':{},
   'STAR-alignment':{
@@ -730,44 +769,68 @@ def defaults():
 }
   defaults = (default_pipe, default_settings, default_order, default_main)
   
-  file_creator('refpaths', {}, directory = 'default')
+  file_creator('refpaths', {}, directory = 'global')
   configs = ['pipeline', 'settings', 'run_order', 'general_settings']
   for i,config in enumerate(configs):
     file_creator(config, defaults[i], directory = 'default')
 
-def save_settings(source, output):
-  """
-  Transfer settings from source to output
-  """
-  dir_checker('config/' + output)
-  for jsonfile in os.listdir(f'{PATH}{slash}config{slash}{source}'):
-    jsonfile = jsonfile.replace('.json','')
-    file_creator(filename = jsonfile, format_dict = file_reader(filename = jsonfile, directory = source), directory = output)
 
-def setup_sample():
+def tsv_handler():
   """
   TODO HERE, This function will set up a sample directory tree for each sample, based on the tsv name.
   """
-  pass
+
+  while True:
+    print('Please enter TSV file name (without extension) or the number next to a pre-existing TSV file.\nIMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: the tsv must be in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
+    tsvs = os.listdir(f'{PATH}{SLASH}output')
+    [print(f'{i}\t{v}') for i,v in enumerate(tsvs) if os.path.isdir(f'{PATH}{SLASH}output{SLASH}{v}')]
+    tsv = input()
+    try:
+      tsv = tsvs[int(tsv)]
+      break
+    except (IndexError, AttributeError, TypeError, ValueError):
+      print('Uhmm')
+      tsv_path = f"{PATH}{SLASH}{tsv}.tsv"
+      try:
+        assert os.path.exists(tsv_path)
+        break
+      except AssertionError:
+        try:
+          assert os.path.exists(tsv_path.replace('.tsv','.txt'))
+          break
+        except AssertionError: print("Please enter a valid TSV file name!\n")
+      
+  dir_checker('output/' + tsv)
+  dir_checker('output/' + tsv + '/' + 'stderr')
+  dir_checker('output/' + tsv + '/' + 'stdout')
+  new_tsv_path = f'{PATH}{SLASH}output{SLASH}{tsv}{SLASH}{tsv}'
+  try:
+    shutil.copyfile(src = tsv_path, dst = new_tsv_path)
+  except (FileNotFoundError, NameError):
+    pass
+  assert os.path.exists(new_tsv_path), "TSV file does not exist!"
+  return new_tsv_path, tsv
+
+
+
 def main():
   """
   """
+  dir_checker('output')
   dir_checker('src')
   dir_checker('src/mtDNA_ref')
-  dir_checker('stderr')
-  dir_checker('stdout')
   dir_checker('src/genbank')
   dir_checker('src/samples')
 
-  if not os.path.exists(f'{PATH}{slash}config{slash}default'):
+  if not os.path.exists(f'{PATH}{SLASH}config{SLASH}default'):
     defaults()
   
 
   print('#########\nWelcome to the semi-automatic .csh maker\n#########\n')
-  workflows = os.listdir(f'{PATH}{slash}config')
+  workflows = os.listdir(f'{PATH}{SLASH}config')
   while True:
     print('Please choose a pre-configured workflow\n')
-    [print(f'{i}\t{v}') for i,v in enumerate(workflows) if v != 'current']
+    [print(f'{i}\t{v}') for i,v in enumerate(workflows) if (v not in  ('global','current')) and (os.path.isdir(f'{PATH}{SLASH}config{SLASH}{v}'))]
     workflow = input()
     try:
       workflow = workflows[int(workflow)] 
@@ -776,20 +839,8 @@ def main():
     except (IndexError, ValueError, TypeError):
       print('Please enter the number next to the configuration name\n\n')
 
-  while True:
-    print('Please enter TSV file name (without extension).\nIMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: the tsv must be in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
-    tsv_name = input()
-    tsv_path = f'{PATH}{slash}{tsv_name}.tsv'
-    try: 
-      assert os.path.exists(tsv_path)
-      break
-    except AssertionError:
-      try:
-        tsv_path = tsv_path.replace('.tsv','.txt')
-        assert os.path.exists(tsv_path)
-      except AssertionError:
-        print('\nThe TSV file does not exist or is not inside the samples folder!\n')
-  setup_sample()
+  tsv_path, tsv_name = tsv_handler()
+  tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
   try: tsv_df.scientific_name = tsv_df.scientific_name.str.replace(' ','_')
   except AttributeError:
     formats = [rows_of_links]
@@ -805,21 +856,10 @@ def main():
   print(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\n')
   [print(f'{ind}\t{samp}') for ind,samp in zip(tsv_df.index,tsv_df.run_accession)]
   work_on = input()
-  csh_maker(work_on, tsv_df)
+  csh_maker(work_on, tsv_df, tsv_name)
+  save_settings(source = 'current', output = 'last_used')
+  print('Enter \"qsub master.csh\" into the console to run the commands\nIMPORTANT: Each sample will be executed simultaneously in qsub you run this command, make sure you dont run too many at once!\n')
 
 
-explanation_pipe = {
-  'key':'The command needed to run the pipeline step (i.e samtools view)',
-  'description':'A description of what the command does',
-  'path':'Path to the command in the cluster (or wherever the code is being run)',
-  'outdir':'Output directory to pipe the resulting file into\nNOTICE: Leave empty if you wish to define output as a setting.',
-  'output_ext': 'What extension is the command supposed to output? (i.e .bam)',
-  'inputdir': 'If the command requires a file to run, what is the name of the directory it is in? (i.e alignment)',
-  'input_ext': 'What is the extension of the file the command runs on? (i.e .sam)',
-  'structure':'Command structure, enter nothing for default format: key settings input\IMPORTANT: A non-default structure can only include the following keywords: sample, key, input, settings, gtf, fasta, fastq and fastq_pre seperated by a SINGLE space'
-}
-
-
-
-main()
-print('Enter \"qsub master.csh\" into the console to run the commands\nIMPORTANT: Each sample will be executed simultaneously in qsub you run this command, make sure you dont run too many at once!\n')
+if __name__ == '__main__':
+  main()
