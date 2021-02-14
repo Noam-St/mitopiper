@@ -441,7 +441,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
   org = org.upper()
   sample = f'{row.run_accession}_{i}_{org}'
   for command in order:
-    to_f_string = ['fasta','gtf', 'command_input', 'fastq', 'fastq_pre', 'sample', 'fastq_dir', 'fastq_pre_dir', 'bam']
+    to_f_string = ['fasta','gtf', 'command_input', 'fastq', 'fastq_pre', 'sample', 'fastq_dir', 'fastq_pre_dir', 'bam', 'sam']
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else (pipeline[command]['path'] +' ' + ' '.join(pipeline[command]['key'].split(' ')[1:]))
     command_outdir = pipeline[command]['outdir']
     command_inputdir = pipeline[command]['inputdir']
@@ -706,11 +706,11 @@ def defaults():
   'description':'Sort reads',
   'switch':True,
   'path':r'',
-  'outdir':'',
+  'outdir':'alignment',
   'output_ext':'.bam',
   'inputdir':'alignment',
   'input_ext':'.bam',
-  'structure':''
+  'structure':'key settings bam'
 },
 'htseq-count':{
   'key': 'htseq-count',
@@ -762,9 +762,10 @@ def defaults():
   },
   'wget':{},
   'sort':{
-    'output_file':{'description':'Output file', 'key' : '-o', 'value':f'{PATH}{SLASH}alignment','switch':True}
+    'output':{'description':'Output directory', 'key' : '-o', 'value': 'bam', 'switch':True}
   },
-  'htseq-count':{},
+  'htseq-count':{
+  },
   'STAR-alignment':{
     'genomeDir':{'description':'Input ref', 'key' : '--genomeDir', 'value':'fasta', 'switch':True},
     'readFilesIn':{'description':'Input fastq', 'key': '--readFilesIn', 'value':'fastq', 'switch':True}
@@ -812,7 +813,7 @@ def tsv_handler():
   dir_checker('output/' + tsv)
   dir_checker('output/' + tsv + '/' + 'stderr')
   dir_checker('output/' + tsv + '/' + 'stdout')
-  new_tsv_path = f'{PATH}{SLASH}output{SLASH}{tsv}{SLASH}{tsv}'
+  new_tsv_path = f'{PATH}{SLASH}output{SLASH}{tsv}{SLASH}{tsv}.tsv'
   try:
     shutil.move(src = tsv_path, dst = new_tsv_path)
   except (FileNotFoundError, NameError):
