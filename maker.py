@@ -346,7 +346,7 @@ def add_new_setting():
   try: int(key)
   except ValueError: pass
   settings[chosen_step][new_name]['key'] = key
-  print(f'Please enter a value for {new_name} (if the setting is an on/off switch, enter nothing!)\nKeywords gtf, fasta, fastq, fastq_pre, fastq_dir and fastq_dir_pre will be replaced with appropriate paths\n')
+  print(f'Please enter a value for {new_name} (if the setting is an on/off switch, enter nothing!)\nKeywords gtf, fasta, fastq, fastq_pre, fastq_dir, fastq_dir_pre, bam and sam will be replaced with appropriate paths\n')
   value = input()
   settings[chosen_step][new_name]['value']  = value
   settings[chosen_step][new_name]['switch'] = 1
@@ -365,7 +365,7 @@ def add_new_pipeline():
   'output_ext': 'What extension is the command supposed to output? (i.e .bam)',
   'inputdir': 'If the command requires a file to run, what is the name of the directory it is in? (i.e alignment)',
   'input_ext': 'What is the extension of the file the command runs on? (i.e .sam)',
-  'structure':'Command structure, enter nothing for default format: key settings input\IMPORTANT: A non-default structure can only include the following keywords: sample, key, input, settings, gtf, fasta, fastq and fastq_pre seperated by a SINGLE space'
+  'structure':'Command structure, enter nothing for default format: key settings input\IMPORTANT: A non-default structure can only include the following keywords: sample, key, input, settings, gtf, fasta, fastq, fastq_pre fastq_dir, fastq_pre_dir, sam and bam seperated by a SINGLE space'
 }
 
   pipeline = file_reader('pipeline')
@@ -441,8 +441,8 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
   org = org.upper()
   sample = f'{row.run_accession}_{i}_{org}'
   for command in order:
-    to_f_string = ['fasta','gtf', 'command_input', 'fastq', 'fastq_pre', 'sample', 'fastq_dir', 'fastq_pre_dir']
-    command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else pipeline[command]['path']
+    to_f_string = ['fasta','gtf', 'command_input', 'fastq', 'fastq_pre', 'sample', 'fastq_dir', 'fastq_pre_dir', 'bam']
+    command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else (pipeline[command]['path'] +' ' + ' '.join(pipeline[command]['key'].split(' ')[1:]))
     command_outdir = pipeline[command]['outdir']
     command_inputdir = pipeline[command]['inputdir']
     input_ext = pipeline[command]['input_ext']
@@ -455,6 +455,11 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
     else:
       fastq = f'{tsv_dir}{SLASH}{pipeline["trim"]["outdir"]}{SLASH}{sample}_trimmed.fq.gz'
       fastq_pre = f'{tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}{SLASH}{sample}.fastq.gz'
+      fastq_dir =  f'{tsv_dir}{SLASH}{pipeline["trim"]["outdir"]}'
+      fastq_pre_dir = f'{tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}'
+    bam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}.bam'
+    sam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}.sam'
+
     for i,v in settings[command].items():
       if v['value'] == 'fasta': v['value'] = fasta
       if 'output_file' in i:
@@ -809,7 +814,7 @@ def tsv_handler():
   dir_checker('output/' + tsv + '/' + 'stdout')
   new_tsv_path = f'{PATH}{SLASH}output{SLASH}{tsv}{SLASH}{tsv}'
   try:
-    shutil.copyfile(src = tsv_path, dst = new_tsv_path)
+    shutil.move(src = tsv_path, dst = new_tsv_path)
   except (FileNotFoundError, NameError):
     pass
   assert os.path.exists(new_tsv_path), "TSV file does not exist!"
