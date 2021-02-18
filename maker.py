@@ -706,8 +706,8 @@ def defaults():
   'description':'Sort reads',
   'switch':True,
   'path':r'',
-  'outdir':'alignment',
-  'output_ext':'.bam',
+  'outdir':'',
+  'output_ext':'',
   'inputdir':'alignment',
   'input_ext':'.bam',
   'structure':'key settings bam'
