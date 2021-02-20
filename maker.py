@@ -229,7 +229,7 @@ def change_general_settings():
   file_creator(filename = 'general_settings', format_dict = general_settings)
   print("Setting changed successfuly!\n")
 
-def change_settings():
+def change_pipeline_settings():
   """
   Settings change menu, in this menu you can reconfigure any of the setting options for any
   of the pipeline steps
@@ -326,7 +326,7 @@ def change_pipeline():
     file_creator('run_order', order)
     print('Pipeline changed successfuly!\n')
 
-def add_new_setting():
+def add_new_pipeline_setting():
   """
   add a new setting menu, currently the user has to reconfigure every menu option.
   """
@@ -388,6 +388,44 @@ def add_new_pipeline():
   file_creator('settings', settings)
   print('\nPipeline step added successfuly!\n')
 
+def manually_change_ref_or_gtf():
+  """
+  Manually change fasta or gtf path after assigning them through the regular process.
+  """
+  ref = file_reader('refpaths', 'global')
+  if ref == {}:
+    print('Please run the program once before attempting to change ref or gtf manually!')
+    return
+  keys = list(ref.keys())
+  while True:
+    print("Please choose an organism to add reference fasta or gtf path to\nEnter exit to return to main menu")
+    [print(f'{i}\t{v}\n') for i,v in enumerate(keys)]
+    org = input()
+    if org == 'exit': break
+    try: org = keys[int(org)]
+    except IndexError:
+      print("Please enter an organism from the list!\n")
+      continue
+    print('Would you like to change gtf, fasta or both?\n')
+    work_on = ['ref', 'gtf', 'both']
+    [print(f'{i}\t{v}\n') for i,v in enumerate(work_on)]
+    choice = input()
+    try: work_on = work_on[int(choice)]
+    except IndexError:
+      print('Please enter one of the possible options!\n')
+      continue
+    if work_on == 'both':
+      work_on = ['ref', 'gtf']
+    else:
+      work_on = [work_on]
+    for i in work_on:
+      print(f"Please enter {i} path\n")
+      path = input()
+      i += 'path'
+      ref[org][i] = path
+    break
+  file_creator(filename = 'refpaths', format_dict = ref, directory = 'global') 
+
 def change_menu():
   """
   Main reconfiguration menu, sends to (currently 4) sub-menus, after exiting sub-menus, returns
@@ -395,7 +433,7 @@ def change_menu():
   """
   choice = True
   print('####################\n\nWelcome to the configuration menu\n')
-  menu = [lambda :0, change_general_settings, change_settings, change_pipeline, add_new_setting, add_new_pipeline, save_current_settings]
+  menu = [lambda :0, change_general_settings, change_pipeline_settings, change_pipeline, add_new_pipeline_setting, add_new_pipeline,manually_change_ref_or_gtf, save_current_settings]
   while choice:
     [print(f"Enter {i+1}\tto {x.__name__}\n") for i,x in enumerate(menu[1:])]
     print("Enter 0\t to exit\n")
@@ -765,6 +803,7 @@ def defaults():
     'output':{'description':'Output directory', 'key' : '-o', 'value': 'bam', 'switch':True}
   },
   'htseq-count':{
+    'format':{'description': 'alignment format (SAM or BAM)', 'key' : '-f', 'value' : 'bam', 'switch':True}
   },
   'STAR-alignment':{
     'genomeDir':{'description':'Input ref', 'key' : '--genomeDir', 'value':'fasta', 'switch':True},
@@ -873,3 +912,5 @@ def main():
 
 if __name__ == '__main__':
   main()
+
+# %%
