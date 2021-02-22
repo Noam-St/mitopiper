@@ -9,6 +9,7 @@ the settings for each of the pipeline programs used, and the paths of the progra
 #########################################################################
 """
 #%%
+dash = '--------------------------------------------'
 import pandas as pd
 import sys, os, json
 PATH = os.getcwd()
@@ -875,7 +876,7 @@ def main():
     defaults()
   
 
-  print('#########\nWelcome to the semi-automatic .csh maker\n#########\n')
+  print(f'{dash}\nWelcome to the semi-automatic .csh maker\n{dash}')
   workflows = os.listdir(f'{PATH}{SLASH}config')
   while True:
     print('Please choose a pre-configured workflow\n')
@@ -903,7 +904,13 @@ def main():
   if change:
     change_menu()
   print(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\n')
-  [print(f'{ind}\t{samp}') for ind,samp in zip(tsv_df.index,tsv_df.run_accession)]
+  try:
+    print(dash)
+    print('Index\tID\t\tSample')
+    print(dash)
+    [print(f'{ind}\t{samp}\t{des}') for ind,samp,des in zip(tsv_df.index, tsv_df.run_accession, tsv_df.sample_title)]
+  except KeyError: [print(f'{ind}\t{samp}') for ind,samp in zip(tsv_df.index, tsv_df.run_accession)]
+
   work_on = input()
   csh_maker(work_on, tsv_df, tsv_name)
   save_settings(source = 'current', output = 'last_used')
