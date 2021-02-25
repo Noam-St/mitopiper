@@ -93,7 +93,7 @@ After choosing which step to add a setting to, you will be asked to define sever
   Write an informative description for what the setting accomplishes.
 - **key**
   IMPORTANT, refer to the pipeline manual for the correct key for your setting, the key is in the following format `-k` or `--key` sometimes followed by a value (i.e `-q 5`).
-- **value**
+- **value**\n
   IMPORTANT, the setting value which will appear after the key in the file created `.csh` run files.
   The value can be in any format, notice that several *key* words will be entered, the *key* words are automatically
   replaced with their value in the final `.csh` run files. For example, *fastq* keyword is replaced by the full path to the fastq
