@@ -480,7 +480,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
   org = org.upper()
   sample = f'{row.run_accession}_{i}_{org}'
   for command in order:
-    to_f_string = ['fasta','gtf', 'command_input', 'fastq', 'fastq_pre', 'sample', 'fastq_dir', 'fastq_pre_dir', 'bam', 'sam']
+    to_f_string = ['fasta','gtf', 'command_input', 'fastq', 'fastq_pre', 'sample', 'fastq_dir', 'fastq_pre_dir', 'bam', 'sam', 'STAR_out']
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else (pipeline[command]['path'] +' ' + ' '.join(pipeline[command]['key'].split(' ')[1:]))
     command_outdir = pipeline[command]['outdir']
     command_inputdir = pipeline[command]['inputdir']
@@ -498,6 +498,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
       fastq_pre_dir = f'{tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}'
     bam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}.bam'
     sam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}.sam'
+    STAR_out = f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}_'
 
     for i,v in settings[command].items():
       if v['value'] == 'fasta': v['value'] = fasta
@@ -767,8 +768,8 @@ def defaults():
   'description':'Align reads to ref',
   'switch': False,
   'path': '/gpfs0/biores/apps/STAR/STAR-v2.5.3a/bin/Linux_x86_64/STAR',
-  'outdir':'alignment',
-  'output_ext':'.sam',
+  'outdir':'',
+  'output_ext':'',
   'inputdir':'post_trim',
   'input_ext':'.fq.gz',
   'structure':'key settings'
@@ -808,7 +809,32 @@ def defaults():
   },
   'STAR-alignment':{
     'genomeDir':{'description':'Input ref', 'key' : '--genomeDir', 'value':'fasta', 'switch':True},
-    'readFilesIn':{'description':'Input fastq', 'key': '--readFilesIn', 'value':'fastq', 'switch':True}
+    'readFilesIn':{'description':'Input fastq', 'key': '--readFilesIn', 'value':'fastq', 'switch':True},
+      "outSAMtype": {
+   "description": "output format",
+   "key": "--outSAMtype",
+   "switch": True,
+   "value": "BAM SortedByCoordinate"
+  },
+    "readFilesCommand": {
+   "description": "Input format",
+   "key": "--readFilesCommand",
+   "switch": True,
+   "value": "gunzip -c"
+  },
+    "runThreadN": {
+   "description": "The amount of threads to use",
+   "key": "--runThreadN",
+   "switch": True,
+   "value": 4
+  },
+  "outFileNamePrefix":
+  {
+    "description": "Output prefix",
+    "key": '--outFIleNamePrefix',
+    'switch': True,
+    'value': 'STAR_out'
+  }
   }
 }
   default_order = ['wget','fastqc_pre','trim','fastqc','bwa-align','view','sort','index','mpileup']
