@@ -498,7 +498,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
       fastq_pre_dir = f'{tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}'
     bam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}.bam'
     sam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}.sam'
-    STAR_out = f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}_'
+    STAR_out = f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}'
 
     for i,v in settings[command].items():
       if v['value'] == 'fasta': v['value'] = fasta
@@ -831,7 +831,7 @@ def defaults():
   "outFileNamePrefix":
   {
     "description": "Output prefix",
-    "key": '--outFIleNamePrefix',
+    "key": '--outFileNamePrefix',
     'switch': True,
     'value': 'STAR_out'
   }
