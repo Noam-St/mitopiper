@@ -149,6 +149,8 @@ def save_current_settings():
   print("Please enter preset settings name\n")
   name = input()
   save_settings(source = 'current', output = name)
+  print('Settings saved successfuly!\n')
+  return
 
 def ref_main(org_name):
   """
@@ -163,11 +165,12 @@ def ref_main(org_name):
     -------
     fasta : str
       Path to the created fasta file
-    
     add_to_csh : str
       string to add to the csh (incase the user chooses to automatically create a fasta)
   """
   refs = file_reader('refpaths', 'global')
+  pipeline = file_reader('pipeline')
+
   try:
     refs[org_name]['refpath']
     refs[org_name]['gtfpath']
@@ -183,14 +186,24 @@ def ref_main(org_name):
     if choice == 1:
       dir_checker(f'src{SLASH}mtDNA_ref{SLASH}{org_name}')
       fasta = ref_maker(org_name)
-      add_to_csh = f'samtools faidx {fasta}\nbwa index {fasta}\n'
+      fasta_dir = os.path.dirname(fasta)
+      try: 
+        STAR_command = pipeline['STAR-alignment']['path'] if pipeline['STAR-alignment']['path'] != '' else  pipeline['STAR-alignment']['key']
+        STAR_command += f' --runMode genomeGenerate --genomeDir {fasta_dir} --runThreadN 4 --genomeFastaFiles {fasta}\n'
+      except KeyError: STAR_command = ''
+      try:
+        BWA_command = f'samtools faidx {fasta}\n'
+        BWA_command += pipeline['bwa-align']['path'] if pipeline['bwa-align']['path'] != '' else  pipeline['bwa-align']['key'].split(' ')[0]
+        BWA_command += f' index {fasta}\n '
+      except KeyError: BWA_command = ''
+      add_to_csh = STAR_command + BWA_command
     elif choice == 2:
       print('Please enter the full path to the reference fasta\n')
       fasta = input()
       add_to_csh = ''
     else:
       print('Please enter 1 or 2 only')
-    print('Please enter path to gtf file for this organism\nPress enter if none needed\n')
+    print('Please enter path to gtf file for this organism\nPress enter if none needed\n') #TODO(Noam) Please add the option to automatically download .gtf files.
     gtf = input()
     refs[org_name] = {}
     refs[org_name]['refpath'] = fasta
@@ -420,7 +433,7 @@ def manually_change_ref_or_gtf():
     else:
       work_on = [work_on]
     for i in work_on:
-      print(f"Please enter {i} path\n")
+      print(f"Please enter the {i} absolute path!\n")
       path = input()
       i += 'path'
       ref[org][i] = path
@@ -480,7 +493,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
   org = org.upper()
   sample = f'{row.run_accession}_{i}_{org}'
   for command in order:
-    to_f_string = ['fasta','gtf', 'command_input', 'fastq', 'fastq_pre', 'sample', 'fastq_dir', 'fastq_pre_dir', 'bam', 'sam', 'STAR_out']
+    to_f_string = ['fasta', 'fasta_dir', 'gtf', 'command_input', 'fastq', 'fastq_pre', 'sample', 'fastq_dir', 'fastq_pre_dir', 'bam', 'sam', 'STAR_out']
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else (pipeline[command]['path'] +' ' + ' '.join(pipeline[command]['key'].split(' ')[1:]))
     command_outdir = pipeline[command]['outdir']
     command_inputdir = pipeline[command]['inputdir']
@@ -496,9 +509,10 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
       fastq_pre = f'{tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}{SLASH}{sample}.fastq.gz'
       fastq_dir =  f'{tsv_dir}{SLASH}{pipeline["trim"]["outdir"]}'
       fastq_pre_dir = f'{tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}'
-    bam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}.bam'
-    sam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}.sam'
+    bam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}*.bam'
+    sam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}*.sam'
     STAR_out = f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}'
+    fasta_dir = os.path.dirname(fasta)
 
     for i,v in settings[command].items():
       if v['value'] == 'fasta': v['value'] = fasta
@@ -512,7 +526,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
         f'{v["key"]} {v["value"]} ' for v in settings[command].values() if v['switch'] == True])
     else:
       command_settings=''
-    command_input = f'{tsv_dir}{SLASH}{command_inputdir}{SLASH}{sample}{input_ext}'
+    command_input = f'{tsv_dir}{SLASH}{command_inputdir}{SLASH}{sample}*{input_ext}'
     command_output = f'{tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}{output_ext}'
     structure = pipeline[command]['structure']
     default_structure = f'{command_key} {command_settings} {command_input}'
@@ -750,7 +764,7 @@ def defaults():
   'output_ext':'',
   'inputdir':'alignment',
   'input_ext':'.bam',
-  'structure':'key settings bam'
+  'structure':'key settings command_input'
 },
 'htseq-count':{
   'key': 'htseq-count',
@@ -808,7 +822,7 @@ def defaults():
     'format':{'description': 'alignment format (SAM or BAM)', 'key' : '-f', 'value' : 'bam', 'switch':True}
   },
   'STAR-alignment':{
-    'genomeDir':{'description':'Input ref', 'key' : '--genomeDir', 'value':'fasta', 'switch':True},
+    'genomeDir':{'description':'Input ref', 'key' : '--genomeDir', 'value':'fasta_dir', 'switch':True},
     'readFilesIn':{'description':'Input fastq', 'key': '--readFilesIn', 'value':'fastq', 'switch':True},
       "outSAMtype": {
    "description": "output format",
