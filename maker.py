@@ -493,7 +493,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
   org = org.upper()
   sample = f'{row.run_accession}_{i}_{org}'
   for command in order:
-    to_f_string = ['fasta', 'fasta_dir', 'gtf', 'command_input', 'fastq', 'fastq_pre', 'sample', 'fastq_dir', 'fastq_pre_dir', 'bam', 'sam', 'STAR_out']
+    to_f_string = ['fasta', 'fasta_dir', 'gtf', 'command_input', 'fastq', 'fastq_pre', 'sample', 'fastq_dir', 'fastq_pre_dir', 'bam', 'sam', 'STAR_out', 'fastq1', 'fastq2']
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else (pipeline[command]['path'] +' ' + ' '.join(pipeline[command]['key'].split(' ')[1:]))
     command_outdir = pipeline[command]['outdir']
     command_inputdir = pipeline[command]['inputdir']
@@ -501,6 +501,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
     output_ext = pipeline[command]['output_ext']
     if PAIRED:
       fastq = f'{tsv_dir}{SLASH}{pipeline["trim"]["outdir"]}{SLASH}{sample}_1_val_1.fq.gz {tsv_dir}{SLASH}{pipeline["trim"]["outdir"]}{SLASH}{sample}_2_val_2.fq.gz'
+      fastq1, fastq2 = fastq.split(' ')
       fastq_dir =  f'{tsv_dir}{SLASH}{pipeline["trim"]["outdir"]}'
       fastq_pre = f'{tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}{SLASH}{sample}_1.fastq.gz {tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}{SLASH}{sample}_2.fastq.gz'
       fastq_pre_dir = f'{tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}'
@@ -509,6 +510,9 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
       fastq_pre = f'{tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}{SLASH}{sample}.fastq.gz'
       fastq_dir =  f'{tsv_dir}{SLASH}{pipeline["trim"]["outdir"]}'
       fastq_pre_dir = f'{tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}'
+      fastq1 = fastq
+      fastq2 = fastq
+
     bam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}*.bam'
     sam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}*.sam'
     STAR_out = f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}'
