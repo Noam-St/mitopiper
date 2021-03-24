@@ -952,7 +952,7 @@ def main():
     print(dash)
     print('Index\tID\t\tSample')
     print(dash)
-    [print(f'{ind}\t{samp}\t{des}') for ind,samp,des in zip(tsv_df.index, tsv_df.run_accession, tsv_df.sample_title)]
+    [print(f'{ind}\t{name}\t{samp}\t{desc}\t{strat}\t{sel}\t{count}\n') for ind,name,samp,desc,strat,sel,count in zip(tsv_df.index, tsv_df.scientific_name, tsv_df.run_accession, tsv_df.sample_title, tsv_df.library_strategy, tsv_df.library_selection, tsv_df.read_count)] #TODO make this better
   except KeyError: [print(f'{ind}\t{samp}') for ind,samp in zip(tsv_df.index, tsv_df.run_accession)]
 
   work_on = input()
