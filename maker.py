@@ -18,6 +18,7 @@ from Bio import Entrez
 from textwrap import wrap
 from ast import literal_eval
 import shutil
+from tabulate import tabulate
 
 if sys.platform != 'win32':
     SLASH = '/'
@@ -131,7 +132,7 @@ def ref_maker(org_name):
   with open(fasta, 'w') as ref:
     ref.write('>MT\n')
     ref.write(fasta_wrap(seq))
-  return fasta
+  return fasta, ID
 
 def save_settings(source, output):
   """
@@ -179,13 +180,13 @@ def ref_main(org_name):
     pass
   choice = True
   while choice:
-    print('It seems a reference fasta does not exist in the default location\nTo create one automatically, press 1\nTo enter an index path, press 2\n')
+    print('It seems a reference fasta+gtf do not exist in the default location\nTo create them automatically, press 1\nTo enter an index path, press 2\n')
     choice = input()
     try: choice = int(choice)
     except ValueError: print('Please enter 1 or 2 only')
     if choice == 1:
       dir_checker(f'src{SLASH}mtDNA_ref{SLASH}{org_name}')
-      fasta = ref_maker(org_name)
+      fasta, ID = ref_maker(org_name)
       fasta_dir = os.path.dirname(fasta)
       try: 
         STAR_command = pipeline['STAR-alignment']['path'] if pipeline['STAR-alignment']['path'] != '' else  pipeline['STAR-alignment']['key']
@@ -194,21 +195,24 @@ def ref_main(org_name):
       try:
         BWA_command = f'samtools faidx {fasta}\n'
         BWA_command += pipeline['bwa-align']['path'] if pipeline['bwa-align']['path'] != '' else  pipeline['bwa-align']['key'].split(' ')[0]
-        BWA_command += f' index {fasta}\n '
+        BWA_command += f' index {fasta}\n'
       except KeyError: BWA_command = ''
-      add_to_csh = STAR_command + BWA_command
+      gtf = f'{PATH}{SLASH}src{SLASH}mtDNA_ref{SLASH}{org_name}{SLASH}{org_name}.gtf'
+      GTF_command = f'perl {PATH}{SLASH}src{SLASH}genbank2gtf_CDS.pl {PATH}{SLASH}src{SLASH}genbank{SLASH}{ID}.gbk MT > {gtf}\n'
+      add_to_csh = STAR_command + BWA_command + GTF_command
     elif choice == 2:
       print('Please enter the full path to the reference fasta\n')
       fasta = input()
       add_to_csh = ''
+      print('Please enter path to gtf file for this organism\nPress enter if none needed\n')
+      gtf = input()
     else:
       print('Please enter 1 or 2 only')
-    print('Please enter path to gtf file for this organism\nPress enter if none needed\n') #TODO(Noam) Please add the option to automatically download .gtf files.
-    gtf = input()
+ 
     refs[org_name] = {}
     refs[org_name]['refpath'] = fasta
     refs[org_name]['gtfpath'] = gtf
-    file_creator('refpaths', refs, 'global')
+    file_creator('refpaths', refs, 'global') #NOTE(Noam) Currently set to global, think about changing to local pre-configurations to enable multiple ref files for the same organism depending on preset.
     return add_to_csh
 
 def change_general_settings():
@@ -948,12 +952,13 @@ def main():
   if change:
     change_menu()
   print(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\n')
-  try:
-    print(dash)
-    print('Index\tID\t\tSample')
-    print(dash)
-    [print(f'{ind}\t{name}\t{samp}\t{desc}\t{strat}\t{sel}\t{count}\n') for ind,name,samp,desc,strat,sel,count in zip(tsv_df.index, tsv_df.scientific_name, tsv_df.run_accession, tsv_df.sample_title, tsv_df.library_strategy, tsv_df.library_selection, tsv_df.read_count)] #TODO make this better
-  except KeyError: [print(f'{ind}\t{samp}') for ind,samp in zip(tsv_df.index, tsv_df.run_accession)]
+  wanted_cols = ['index', 'scientific_name', 'run_accession', 'sample_title', 'library_strategy', 'library_selection', 'read_count']
+  colnames = ['Index', 'ID', 'Sample accession', 'Sample', 'Library Strategy', 'Library Selection', 'Read Count']
+  actual_cols = [i for i in wanted_cols if i in tsv_df.columns]
+  print(actual_cols)
+  print(tsv_df.columns)
+  sliced_df = tsv_df.loc[:, actual_cols]
+  print(tabulate(sliced_df, headers = 'keys', tablefmt = 'psql'))
 
   work_on = input()
   csh_maker(work_on, tsv_df, tsv_name)
