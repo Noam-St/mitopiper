@@ -955,8 +955,6 @@ def main():
   wanted_cols = ['index', 'scientific_name', 'run_accession', 'sample_title', 'library_strategy', 'library_selection', 'read_count']
   colnames = ['Index', 'ID', 'Sample accession', 'Sample', 'Library Strategy', 'Library Selection', 'Read Count']
   actual_cols = [i for i in wanted_cols if i in tsv_df.columns]
-  print(actual_cols)
-  print(tsv_df.columns)
   sliced_df = tsv_df.loc[:, actual_cols]
   print(tabulate(sliced_df, headers = 'keys', tablefmt = 'psql'))
 
