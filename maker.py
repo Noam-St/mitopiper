@@ -134,6 +134,24 @@ def ref_maker(org_name):
     ref.write(fasta_wrap(seq))
   return fasta, ID
 
+def gff3_maker(org_name):
+  """
+  Create a gtf(gff3) file if needed, return the path to the gtf file
+  """
+  ID = org_df.loc[org_name, 'RefSeq']
+  gtf = f'{PATH}{SLASH}src{SLASH}mtDNA_ref{SLASH}{org_name}{SLASH}{org_name}.gff3'
+  creds = file_reader('credentials')
+  if not os.path.isfile(gtf):
+    if creds['Email'] != '':
+      Entrez.email = creds['Email']
+      Entrez.api_key = creds['API']
+    net_handle = Entrez.efetch(db = 'nucleotide', id = ID, rettype = 'gtf', retmode = 'text')
+    out_handle = open(gtf, 'w')
+    out_handle.write(net_handle.read())
+    net_handle.close()
+    out_handle.close()
+  return gtf
+
 def save_settings(source, output):
   """
   Transfer settings from source to output
@@ -186,7 +204,9 @@ def ref_main(org_name):
     except ValueError: print('Please enter 1 or 2 only')
     if choice == 1:
       dir_checker(f'src{SLASH}mtDNA_ref{SLASH}{org_name}')
-      fasta, ID = ref_maker(org_name)
+      ID = org_df.loc[org_name, 'RefSeq']
+      fasta = f'{PATH}{SLASH}src{SLASH}mtDNA_ref{SLASH}{org_name}{SLASH}{org_name}.fasta'
+      FASTA_command = f'wget -O {fasta} \"https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi?db=nuccore&report=fasta&id={ID}\"\n'
       fasta_dir = os.path.dirname(fasta)
       try: 
         STAR_command = pipeline['STAR-alignment']['path'] if pipeline['STAR-alignment']['path'] != '' else  pipeline['STAR-alignment']['key']
@@ -197,9 +217,9 @@ def ref_main(org_name):
         BWA_command += pipeline['bwa-align']['path'] if pipeline['bwa-align']['path'] != '' else  pipeline['bwa-align']['key'].split(' ')[0]
         BWA_command += f' index {fasta}\n'
       except KeyError: BWA_command = ''
-      gtf = f'{PATH}{SLASH}src{SLASH}mtDNA_ref{SLASH}{org_name}{SLASH}{org_name}.gtf'
-      GTF_command = f'perl {PATH}{SLASH}src{SLASH}genbank2gtf_CDS.pl {PATH}{SLASH}src{SLASH}genbank{SLASH}{ID}.gbk MT > {gtf}\n'
-      add_to_csh = STAR_command + BWA_command + GTF_command
+      gtf = f'{PATH}{SLASH}src{SLASH}mtDNA_ref{SLASH}{org_name}{SLASH}{org_name}.gff3'
+      GTF_command = f'wget -O {gtf} \"https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi?db=nuccore&report=gff3&id={ID}\"\n'
+      add_to_csh = GTF_command + FASTA_command + STAR_command + BWA_command 
     elif choice == 2:
       print('Please enter the full path to the reference fasta\n')
       fasta = input()
@@ -667,12 +687,13 @@ def defaults():
   dir_checker('config/default')
   dir_checker('config/global')
 
-  if not os.path.exists(f"{PATH}{SLASH}config{SLASH}default{SLASH}creds.json"):
-    print("Please enter your NCBI account email:\n")
-    EMAIL = input()
-    print("Please enter your NCBI API key: (can be found in the NCBI account page)\n")
-    API = input()
-    file_creator('credentials', {'Email':EMAIL, 'API':API}, directory = 'default')
+  #if not os.path.exists(f"{PATH}{SLASH}config{SLASH}default{SLASH}creds.json"):
+  #  print("Please enter your NCBI account email:\n")
+  #  EMAIL = input()
+  #  print("Please enter your NCBI API key: (can be found in the NCBI account page)\n")
+  #  API = input()
+  #  file_creator('credentials', {'Email':EMAIL, 'API':API}, directory = 'default')
+  
   default_pipe =\
 {
 'wget' : {
