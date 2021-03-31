@@ -11,13 +11,12 @@ the settings for each of the pipeline programs used, and the paths of the progra
 #%%
 dash = '--------------------------------------------'
 import pandas as pd
-import sys, os, json
+import sys, os, json, shutil, math
 PATH = os.getcwd()
 from Bio import SeqIO
 from Bio import Entrez
 from textwrap import wrap
 from ast import literal_eval
-import shutil
 from tabulate import tabulate
 
 if sys.platform != 'win32':
@@ -162,6 +161,11 @@ def save_settings(source, output):
       jsonfile = jsonfile.replace('.json','')
       file_creator(filename = jsonfile, format_dict = file_reader(filename = jsonfile, directory = source), directory = output)
 
+def sa_index_calc(glen):
+  """
+  """
+  return min(14, math.log2(glen)/2 - 1)
+
 def save_current_settings():
   """
   """
@@ -206,11 +210,15 @@ def ref_main(org_name):
       dir_checker(f'src{SLASH}mtDNA_ref{SLASH}{org_name}')
       ID = org_df.loc[org_name, 'RefSeq']
       fasta = f'{PATH}{SLASH}src{SLASH}mtDNA_ref{SLASH}{org_name}{SLASH}{org_name}.fasta'
-      FASTA_command = f'wget -O {fasta} \"https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi?db=nuccore&report=fasta&id={ID}\"\n'
+      os.system(f'wget -O {fasta} \"https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi?db=nuccore&report=fasta&id={ID}\"\n')
+      temp_fasta = open(fasta, 'r')
+      glen = len(''.join([i.rstrip('\n') for i in temp_fasta.readlines()[1:]]))
+      sa_index = sa_index_calc(glen)
+      temp_fasta.close()
       fasta_dir = os.path.dirname(fasta)
       try: 
         STAR_command = pipeline['STAR-alignment']['path'] if pipeline['STAR-alignment']['path'] != '' else  pipeline['STAR-alignment']['key']
-        STAR_command += f' --runMode genomeGenerate --genomeDir {fasta_dir} --runThreadN 4 --genomeFastaFiles {fasta}\n'
+        STAR_command += f' --runMode genomeGenerate --genomeDir {fasta_dir} --runThreadN 4 --genomeFastaFiles {fasta} --genomeSAindexNbases {sa_index}\n'
       except KeyError: STAR_command = ''
       try:
         BWA_command = f'samtools faidx {fasta}\n'
@@ -219,7 +227,7 @@ def ref_main(org_name):
       except KeyError: BWA_command = ''
       gtf = f'{PATH}{SLASH}src{SLASH}mtDNA_ref{SLASH}{org_name}{SLASH}{org_name}.gff3'
       GTF_command = f'wget -O {gtf} \"https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi?db=nuccore&report=gff3&id={ID}\"\n'
-      add_to_csh = GTF_command + FASTA_command + STAR_command + BWA_command 
+      add_to_csh = GTF_command + STAR_command + BWA_command 
     elif choice == 2:
       print('Please enter the full path to the reference fasta\n')
       fasta = input()
