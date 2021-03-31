@@ -18,7 +18,7 @@ def yn(c, forced):
   """
   if forced:
     return True
-  print(f'Clear {c}? (y/n)\n')
+  print(f'Clear {c} in ALL sample folders? (y/n)\n')
   choice = input()
   if type(choice) != str:
     return False
@@ -30,12 +30,13 @@ def remove_files(clears, forced):
     if 'run' in file or 'master' in file:
       os.remove(f'{PATH}{SLASH}{file}')
   for c in clears:
+    yn_result = yn(c, forced)
     for f in os.listdir(os.path.join(PATH, 'output')):
       f = os.path.join(PATH, 'output', f)
       if os.path.isdir(f):
         direc = os.path.join(PATH, 'output', f)
         try:
-          [os.remove(os.path.join(direc, c, file)) for file in os.listdir(os.path.join(direc, c)) if yn(c, forced)]
+          [os.remove(os.path.join(direc, c, file)) for file in os.listdir(os.path.join(direc, c)) if yn_result]
         except FileNotFoundError:
           print(f'Folder {c} does not exist in {os.path.basename(f)}!\n')
           continue

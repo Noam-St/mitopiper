@@ -164,7 +164,7 @@ def save_settings(source, output):
 def sa_index_calc(glen):
   """
   """
-  return min(14, math.log2(glen)/2 - 1)
+  return round(min(14, math.log2(glen)/2 - 1),0)
 
 def save_current_settings():
   """
@@ -250,7 +250,7 @@ def change_general_settings():
   general_settings = file_reader('general_settings')
   options = list(general_settings.keys())
   while True:
-    [print(f'{i}\t{v}\n') for i,v in enumerate(options)]
+    [print(f'{i}\t{v}\t{general_settings[v][0]}\n') for i,v in enumerate(options)]
     print('Which setting would you like to change?\n')
     print('Type exit to exit\n')
     choice = input()
@@ -261,7 +261,7 @@ def change_general_settings():
     except (ValueError, IndexError):
       print('Please enter either a number or exit!\n')
       continue
-    print(f"Please enter a new value for {options[choice]}\nCurrent value: {chosen[0]}\nDescription: {chosen[1]}")
+    print(f"Please enter a new value for {options[choice]}\nCurrent value: {chosen[0]}\nDescription: {chosen[1]}\n")
     new_value = input()
     if options[choice] == 'free_form':
       if new_value == '':
@@ -299,15 +299,16 @@ def change_pipeline_settings():
       print('Please enter a number within range!')
       continue
     configs = list(settings[chosen_stage].keys())
-    print(f'Index\tName\tCurrent_setting\tDescription\n')
-    [
-      print(f'{i}\t{v}\t{s}\t{d}\n') for i,v,d,s in zip(range(len(configs)),configs,
-      [i['description'] for i in settings[chosen_stage].values()],[i['value'] for i in settings[chosen_stage].values()])
-    ]
+    temp_config_df = pd.DataFrame({
+      'Setting name':configs,
+      'Description':[i['description'] for i in settings[chosen_stage].values()],
+      'Current setting':[i['value'] for i in settings[chosen_stage].values()]
+      })
+    print(tabulate(temp_config_df, headers = 'keys', tablefmt = 'psql'))
     if settings[chosen_stage] == {}:
       print(f'It seems no settings were added to {chosen_stage} yet\nto add some return first to the main menu by typing exit\n')
     else:
-      print(f'What would you like to change in {chosen_stage}?\nEnter the number next to the setting\n')
+      print(f'What would you like to change in {chosen_stage}?\nEnter the number next to the setting\n\nThe value may include several Keywords: _gtf, _fasta, _fastq, _fastq_pre, _fastq_dir, _fastq_dir_pre, _bam and _sam will be replaced with appropriate paths\n')
       change = int(input())
       try: chosen_setting = configs[change]
       except IndexError:
@@ -372,6 +373,15 @@ def change_pipeline():
     file_creator('run_order', order)
     print('Pipeline changed successfuly!\n')
 
+def key_fixer(key):
+  """
+  """
+  if len(key) > 1:
+    key = '--' + key.replace(' ','-')
+  else:
+    key = '-' + key
+  return key
+
 def add_new_pipeline_setting():
   """
   add a new setting menu, currently the user has to reconfigure every menu option.
@@ -389,15 +399,17 @@ def add_new_pipeline_setting():
   settings[chosen_step][new_name]['description'] = input()
   print(f'Please enter a key for {new_name} (a key is the name that needs to be added to the command, must be identical to the one defined in {chosen_step} docs\n')
   key = input()
+  if '-' not in key:
+    key = key_fixer(key)
   try: int(key)
   except ValueError: pass
   settings[chosen_step][new_name]['key'] = key
-  print(f'Please enter a value for {new_name} (if the setting is an on/off switch, enter nothing!)\nKeywords gtf, fasta, fastq, fastq_pre, fastq_dir, fastq_dir_pre, bam and sam will be replaced with appropriate paths\n')
+  print(f'Please enter a value for {new_name} (if the setting is an on/off switch, enter nothing!)\nYou can also enter a keyword which will be replaced with the appropriate file path, Keywords: _gtf, _fasta, _fastq, _fastq_pre, _fastq_dir, _fastq_dir_pre, _bam and _sam will be replaced with appropriate paths\n')
   value = input()
   settings[chosen_step][new_name]['value']  = value
   settings[chosen_step][new_name]['switch'] = 1
   file_creator('settings', settings) 
-  print('Setting added successfuly!\n')
+  print(f'Setting added successfuly!\nName\tKey\tValue\n{new_name}\t{key}\t{value}\n')
 
 def add_new_pipeline():
   """
@@ -525,7 +537,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
   org = org.upper()
   sample = f'{row.run_accession}_{i}_{org}'
   for command in order:
-    to_f_string = ['fasta', 'fasta_dir', 'gtf', 'command_input', 'fastq', 'fastq_pre', 'sample', 'fastq_dir', 'fastq_pre_dir', 'bam', 'sam', 'STAR_out', 'fastq1', 'fastq2']
+    to_f_string = ['_fasta', '_fasta_dir', '_gtf', '_command_input', '_fastq', '_fastq_pre', '_sample', '_fastq_dir', '_fastq_pre_dir', '_bam', '_sam', '_STAR_out', '_fastq1', '_fastq2']
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else (pipeline[command]['path'] +' ' + ' '.join(pipeline[command]['key'].split(' ')[1:]))
     command_outdir = pipeline[command]['outdir']
     command_inputdir = pipeline[command]['inputdir']
@@ -557,7 +569,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
     if settings[command] != {}:
       for k in settings[command].keys():
         if settings[command][k]['value'] in to_f_string:
-          settings[command][k]['value'] = eval(settings[command][k]["value"])
+          settings[command][k]['value'] = eval(settings[command][k]["value"].replace('_','',1))
       command_settings = ' '.join([\
         f'{v["key"]} {v["value"]} ' for v in settings[command].values() if v['switch'] == True])
     else:
@@ -626,14 +638,12 @@ def csh_maker(work_on, tsv_df, tsv_name):
     The df version of samples.tsv
   """
   tsv_dir = f"{PATH}{SLASH}output{SLASH}{tsv_name}"
-  master = open(f'{PATH}{SLASH}master.csh', 'w')
-  master.write('#!/bin/csh\n')
-  master.write('#$ -cwd\n')
-  master.write('#$ -q bioinfo.q\n')
-  master.write('#$ -N master.csh\n')
-  pipeline = file_reader('pipeline')
   general_settings = file_reader('general_settings')
+  master = open(f'{PATH}{SLASH}master.csh', 'w')
+  master.write(f'#!/bin/bash\n')
+  pipeline = file_reader('pipeline')
   [dir_checker('output' + '/' + tsv_name + '/' + i['outdir']) for i in pipeline.values() if i['outdir'] != '']
+  tsvs = []
   if '-' in work_on:
     work_on = [int(i) for i in work_on.split('-')]
     start = work_on[0]
@@ -658,7 +668,7 @@ def csh_maker(work_on, tsv_df, tsv_name):
       file.write(f'#$ -o {tsv_dir}{SLASH}stdout\n')
       file.write(f'#$ -e {tsv_dir}{SLASH}stderr\n')
       file.write(f'#$ -cwd\n')
-      file.write(f'#$ -N {row.run_accession}\n')
+      file.write(f'#$ -N {row.run_accession}_{i}\n')
       file.write(f'#$ -q {general_settings["qsub_queue"][0]}\n')
       file.write(general_settings["free_form"][0])
       file.write(f'echo \"Current organism: {row.scientific_name}\"\n\n')
@@ -670,8 +680,9 @@ def csh_maker(work_on, tsv_df, tsv_name):
 
       to_csh = csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org_name, tsv_dir)
       file.write(to_csh)
-      master.write(f'sleep 1s\n')
-      master.write(f'qsub {tsv_dir}{SLASH}run{i}.csh\n')
+      tsvs.append(f'{tsv_dir}{SLASH}run{i}.csh')
+
+  master.write(f'for file in {" ".join(tsvs)}\ndo\nqsub $file\ndone')
   master.close()
 
 def rows_of_links(tsv_path):
@@ -831,7 +842,7 @@ def defaults():
 {
   'trim':{
     'quality':{'description':'Trim low-quality ends from reads', 'key':'-q', 'value':20, 'switch':True},
-    'outdir':{'description':'Choose output directory', 'key':'-o', 'value':'fastq_dir', 'switch':True}
+    'outdir':{'description':'Choose output directory', 'key':'-o', 'value':'_fastq_dir', 'switch':True}
   },
   'bwa-align':{
     'seed':{'description':'Minimum seed length', 'key':'-k', 'value':19, 'switch':True},
@@ -843,50 +854,76 @@ def defaults():
   'index':{},
   'mpileup':{
     'quality':{'description':'Minimum base quality for a base to be considered', 'key':'-Q', 'value':30, 'switch':True},
-    'reference':{'description':'Fasta type ref file','key':'-f', 'value':'fasta', 'switch':True}
+    'reference':{'description':'Fasta type ref file','key':'-f', 'value':'_fasta', 'switch':True}
   },
   'fastqc':{
-    'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':'fastq_dir', 'switch':True}
+    'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':'_fastq_dir', 'switch':True}
   },
    'fastqc_pre':{
-    'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':f'fastq_pre_dir', 'switch':True}
+    'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':f'_fastq_pre_dir', 'switch':True}
   },
   'wget':{},
   'sort':{
-    'output':{'description':'Output directory', 'key' : '-o', 'value': 'bam', 'switch':True}
+    'output':{'description':'Output directory', 'key' : '-o', 'value': '_bam', 'switch':True}
   },
   'htseq-count':{
-    'format':{'description': 'alignment format (SAM or BAM)', 'key' : '-f', 'value' : 'bam', 'switch':True}
+    'ID':{'description': 'ID attribute to use', 'key' : '-i', 'value' : 'ID', 'switch':True},
+    'Additional attribute':{'description': 'Additional attribute to use', 'key':'--additional-attr', 'value':'gene','switch':True},
+    'Feature column name':{'description': 'Feature column name to use','key':'-t', 'value':'gene', 'switch':True},
+    'stranded':{'description': 'Whether the reads are stranded', 'key':'-s','value':'no','switch':True},
+    'format':{'description':'Format to read input in','key':'-f','value':'bam','switch':True},
+    'ambiguous':{'description':'How to handle ambiguous reads', 'key':'--nonunique','value':'all','switch':True}
   },
   'STAR-alignment':{
-    'genomeDir':{'description':'Input ref', 'key' : '--genomeDir', 'value':'fasta_dir', 'switch':True},
-    'readFilesIn':{'description':'Input fastq', 'key': '--readFilesIn', 'value':'fastq', 'switch':True},
-      "outSAMtype": {
-   "description": "output format",
-   "key": "--outSAMtype",
-   "switch": True,
-   "value": "BAM SortedByCoordinate"
-  },
-    "readFilesCommand": {
-   "description": "Input format",
-   "key": "--readFilesCommand",
-   "switch": True,
-   "value": "gunzip -c"
-  },
-    "runThreadN": {
-   "description": "The amount of threads to use",
-   "key": "--runThreadN",
-   "switch": True,
-   "value": 4
-  },
-  "outFileNamePrefix":
-  {
+    'genomeDir':
+    {
+    'description':'Input ref',
+    'key' : '--genomeDir',
+    'value':'_fasta_dir',
+    'switch':True
+    },
+    'readFilesIn':
+    {
+    'description':'Input fastq',
+    'key': '--readFilesIn',
+    'value':'_fastq',
+    'switch':True
+    },
+    "outSAMtype":
+    {
+    "description": "output format",
+    "key": "--outSAMtype",
+    "switch": True,
+    "value": "BAM SortedByCoordinate"
+    },
+    "readFilesCommand":
+    {
+    "description": "Input format",
+    "key": "--readFilesCommand",
+    "switch": True,
+    "value": "gunzip -c"
+    },
+    "runThreadN":
+    {
+    "description": "The amount of threads to use",
+    "key": "--runThreadN",
+    "switch": True,
+    "value": 4
+    },
+    "outFileNamePrefix":
+    {
     "description": "Output prefix",
     "key": '--outFileNamePrefix',
     'switch': True,
-    'value': 'STAR_out'
-  }
-  }
+    'value': '_STAR_out'
+    },
+    'limit sort RAM':
+    {
+    'description':'whatever',
+    'key':'--limitBAMsortRAM',
+    'value':1000000000,
+    'switch':True
+    }}
 }
   default_order = ['wget','fastqc_pre','trim','fastqc','bwa-align','view','sort','index','mpileup']
   default_main = {
@@ -990,10 +1027,8 @@ def main():
   work_on = input()
   csh_maker(work_on, tsv_df, tsv_name)
   save_settings(source = 'current', output = 'last_used')
-  print('Enter \"qsub master.csh\" into the console to run the commands\nIMPORTANT: Each sample will be executed simultaneously in qsub you run this command, make sure you dont run too many at once!\n')
+  print('Enter \"bash master.csh\" into the console to run the commands\nIMPORTANT: Each sample will be executed simultaneously in qsub you run this command, make sure you dont run too many at once!\n')
 
 
 if __name__ == '__main__':
   main()
-
-# %%
