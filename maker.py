@@ -9,15 +9,15 @@ the settings for each of the pipeline programs used, and the paths of the progra
 #########################################################################
 """
 #%%
-dash = '--------------------------------------------'
 import pandas as pd
 import sys, os, json, shutil, math
-PATH = os.getcwd()
 from Bio import SeqIO
 from Bio import Entrez
 from textwrap import wrap
 from ast import literal_eval
 from tabulate import tabulate
+DASH = '--------------------------------------------'
+PATH = os.getcwd()
 
 if sys.platform != 'win32':
     SLASH = '/'
@@ -30,7 +30,7 @@ try:
 except FileNotFoundError: raise FileNotFoundError('final.csv is required in the src folder for the program to operate.')
 def file_reader(filename, directory = 'current'):
   """
-  Read files in the format: X=Y to a dictionary
+  Read .json files in the format key:value to a dictionary
 
   Parameters
   ----------
@@ -102,6 +102,8 @@ def fasta_wrap(string, per = 60):
 
 def ref_maker(org_name):
   """
+  CURRENTLY UNUSED
+
   Create a fasta file for indexing purposes.
 
   Parameters
@@ -133,8 +135,16 @@ def ref_maker(org_name):
     ref.write(fasta_wrap(seq))
   return fasta, ID
 
+def tabulate_dict(dicty):
+  """
+  """
+  temp_df = pd.DataFrame(dicty)
+  return tabulate(temp_df, headers = 'keys', tablefmt = 'psql')
+
 def gff3_maker(org_name):
   """
+  CURRENTLY UNUSED
+
   Create a gtf(gff3) file if needed, return the path to the gtf file
   """
   ID = org_df.loc[org_name, 'RefSeq']
@@ -172,7 +182,7 @@ def save_current_settings():
   print("Please enter preset settings name\n")
   name = input()
   save_settings(source = 'current', output = name)
-  print('Settings saved successfuly!\n')
+  print('\nSettings saved successfuly!\n')
   return
 
 def ref_main(org_name):
@@ -202,7 +212,7 @@ def ref_main(org_name):
     pass
   choice = True
   while choice:
-    print('It seems a reference fasta+gtf do not exist in the default location\nTo create them automatically, press 1\nTo enter an index path, press 2\n')
+    print('It seems a reference fasta+gtf do not exist in the default location\nTo create them automatically, press 1\nNOTICE: The reference fasta+gtf will be for the MT only and in NCBI format!\nTo enter an index path, press 2\n')
     choice = input()
     try: choice = int(choice)
     except ValueError: print('Please enter 1 or 2 only')
@@ -250,7 +260,8 @@ def change_general_settings():
   general_settings = file_reader('general_settings')
   options = list(general_settings.keys())
   while True:
-    [print(f'{i}\t{v}\t{general_settings[v][0]}\n') for i,v in enumerate(options)]
+    temp_setting = {'Setting name' : options, 'Current setting' : [general_settings[v][0] for v in options]}
+    print(tabulate_dict(temp_setting))
     print('Which setting would you like to change?\n')
     print('Type exit to exit\n')
     choice = input()
@@ -299,16 +310,16 @@ def change_pipeline_settings():
       print('Please enter a number within range!')
       continue
     configs = list(settings[chosen_stage].keys())
-    temp_config_df = pd.DataFrame({
+    temp_config_df = {
       'Setting name':configs,
       'Description':[i['description'] for i in settings[chosen_stage].values()],
       'Current setting':[i['value'] for i in settings[chosen_stage].values()]
-      })
-    print(tabulate(temp_config_df, headers = 'keys', tablefmt = 'psql'))
+      }
+    print(tabulate_dict(temp_config_df))
     if settings[chosen_stage] == {}:
       print(f'It seems no settings were added to {chosen_stage} yet\nto add some return first to the main menu by typing exit\n')
     else:
-      print(f'What would you like to change in {chosen_stage}?\nEnter the number next to the setting\n\nThe value may include several Keywords: _gtf, _fasta, _fastq, _fastq_pre, _fastq_dir, _fastq_dir_pre, _bam and _sam will be replaced with appropriate paths\n')
+      print(f'What would you like to change in {chosen_stage}?\nEnter the number next to the setting\n')
       change = int(input())
       try: chosen_setting = configs[change]
       except IndexError:
@@ -321,7 +332,7 @@ def change_pipeline_settings():
         print(f'\nSetting switched to {not bool(setting_switch)}\n')
 
       else:
-        print(f'You chose: {chosen_setting}\nPlease choose a new value, current value {setting_value}:')
+        print(f'You chose: {chosen_setting}\nPlease choose a new value, current value: {setting_value}\n\nThe value may include several Keywords: _gtf, _fasta, _fastq, _fastq_pre, _fastq_dir, _fastq_dir_pre, _bam and _sam\n These keywords will be replaced with appropriate paths\n')
         new_val = input()
         settings[chosen_stage][chosen_setting]['value'] = new_val
         print('\nSetting changed successfuly!\n')
@@ -990,7 +1001,7 @@ def main():
     defaults()
   
 
-  print(f'{dash}\nWelcome to the semi-automatic .csh maker\n{dash}')
+  print(f'{DASH}\nWelcome to the semi-automatic .csh maker\n{DASH}')
   workflows = os.listdir(f'{PATH}{SLASH}config')
   while True:
     print('Please choose a pre-configured workflow\n')
