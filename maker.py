@@ -539,6 +539,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
     The string that contains all the commands - to be added to the csh file in main.
   """
   csh_str = ''
+  org_name = org
   org = org.split(' ')
   try:
     org = org[0][0] + org[1][0]
@@ -547,8 +548,9 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
     org = org[0][0] + org[1][0]
   org = org.upper()
   sample = f'{row.run_accession}_{i}_{org}'
+
+  to_f_string = ['_fasta', '_fasta_dir', '_gtf', '_command_input', '_fastq', '_fastq_pre', '_sample', '_fastq_dir', '_fastq_pre_dir', '_bam', '_sam', '_STAR_out', '_fastq1', '_fastq2', '_org_name']
   for command in order:
-    to_f_string = ['_fasta', '_fasta_dir', '_gtf', '_command_input', '_fastq', '_fastq_pre', '_sample', '_fastq_dir', '_fastq_pre_dir', '_bam', '_sam', '_STAR_out', '_fastq1', '_fastq2']
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else (pipeline[command]['path'] +' ' + ' '.join(pipeline[command]['key'].split(' ')[1:]))
     command_outdir = pipeline[command]['outdir']
     command_inputdir = pipeline[command]['inputdir']
@@ -932,7 +934,7 @@ def defaults():
     {
     'description':'whatever',
     'key':'--limitBAMsortRAM',
-    'value':1000000000,
+    'value':1205130643,
     'switch':True
     }}
 }

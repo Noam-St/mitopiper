@@ -43,9 +43,11 @@ def remove_files(clears, forced):
         [os.remove(os.path.join(direc, temp)) for temp in os.listdir(direc) if 'run' in temp]
 
 def main(args):
-  remove_files(args.clears, args.forced) 
+  remove_files(args.clears, args.forced)
+  print('\nAll done!\n')
 if __name__ == '__main__':
-  parser = argparse.ArgumentParser(description = __doc__)
+  parser = argparse.ArgumentParser(description = __doc__, prog = 'Maker.py cleanup')
+  parser.add_argument('--version', action='version', version = '%(prog)s version 1.0.0')
   parser.add_argument('clears', nargs = '+', default = ['stdout', 'stderr'], help = 'Choose which folders inside the sample directories to remove')
   parser.add_argument('--forced', action = 'store_true', default = False, help = 'Add this flag if you wish the program to run with no confirmations')
 
