@@ -552,7 +552,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
     org = org[0][0] + org[1][0]
   org = org.upper()
   sample = f'{row.run_accession}_{i}_{org}'
-  command_outputs = {}
+  command_outputs = {f'output_{command}':f'{tsv_dir}{SLASH}{pipeline[command]["outdir"]}{SLASH}{sample}{pipeline[command]["output_ext"]}' for command in pipeline.keys()}
   to_f_string = ['_fasta', '_fasta_dir', '_gtf', '_command_input', '_fastq', '_fastq_pre', '_sample', '_fastq_dir', '_fastq_pre_dir', '_bam', '_sam', '_STAR_out', '_fastq1', '_fastq2', '_org_name', '_command_output']
   for command in order:
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else (pipeline[command]['path'] +' ' + ' '.join(pipeline[command]['key'].split(' ')[1:]))
@@ -580,7 +580,6 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
     fasta_dir = os.path.dirname(fasta)
     command_input = f'{tsv_dir}{SLASH}{command_inputdir}{SLASH}{sample}*{input_ext}'
     command_output = f'{tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}{output_ext}'
-    command_outputs.update({f'output_{command}' : command_output})
     output_pipe = f' > {command_output}\n'
     for i,v in settings[command].items():
       if v['value'] == 'fasta': v['value'] = fasta
@@ -825,7 +824,7 @@ def defaults():
   'output_ext':'.pileup',
   'inputdir':'alignment',
   'input_ext':'.bam',
-  'structure':''
+  'structure':'key settings command_input output_pipe'
 },
 'sort':{
   'key': 'samtools sort',
