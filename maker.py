@@ -398,6 +398,7 @@ def add_new_pipeline_setting():
   add a new setting menu, currently the user has to reconfigure every menu option.
   """
   settings = file_reader('settings')
+  order = file_reader('run_order')
   setting_keys = list(settings.keys())
   [print(f'{i}\t{k}\n') for i,k in enumerate(setting_keys)]
   print('\nPlease type the pipeline step to add a setting to\n')
@@ -415,7 +416,10 @@ def add_new_pipeline_setting():
   try: int(key)
   except ValueError: pass
   settings[chosen_step][new_name]['key'] = key
-  print(f'Please enter a value for {new_name} (if the setting is an on/off switch, enter nothing!)\nYou can also enter a keyword which will be replaced with the appropriate file path, Keywords: _gtf, _fasta, _fastq, _fastq_pre, _fastq_dir, _fastq_dir_pre, _bam and _sam will be replaced with appropriate paths\n')
+  print(f'Please enter a value for {new_name} (if the setting is an on/off switch, enter nothing!)\nYou can also enter a keyword which will be replaced with the appropriate file path, Keywords: _gtf, _fasta, _fastq, _fastq_pre, _fastq_dir, _fastq_dir_pre, _bam and _sam, _command_output and _command_input will be replaced with appropriate paths\n')
+  print(f'Additionaly, you may add the combination of output_command_name to include the output of another command in the setting value\nNOTE: you are adding a setting to {chosen_step}. You can grab the output of the following commands with the current run order\n')
+  try: print('\t'.join(order[:order.index(chosen_step)]))
+  except ValueError: print('Current command isnt active!')
   value = input()
   settings[chosen_step][new_name]['value']  = value
   settings[chosen_step][new_name]['switch'] = 1
@@ -548,8 +552,8 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
     org = org[0][0] + org[1][0]
   org = org.upper()
   sample = f'{row.run_accession}_{i}_{org}'
-
-  to_f_string = ['_fasta', '_fasta_dir', '_gtf', '_command_input', '_fastq', '_fastq_pre', '_sample', '_fastq_dir', '_fastq_pre_dir', '_bam', '_sam', '_STAR_out', '_fastq1', '_fastq2', '_org_name']
+  command_outputs = {}
+  to_f_string = ['_fasta', '_fasta_dir', '_gtf', '_command_input', '_fastq', '_fastq_pre', '_sample', '_fastq_dir', '_fastq_pre_dir', '_bam', '_sam', '_STAR_out', '_fastq1', '_fastq2', '_org_name', '_command_output']
   for command in order:
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else (pipeline[command]['path'] +' ' + ' '.join(pipeline[command]['key'].split(' ')[1:]))
     command_outdir = pipeline[command]['outdir']
@@ -574,21 +578,28 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
     sam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}*.sam'
     STAR_out = f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}'
     fasta_dir = os.path.dirname(fasta)
-
+    command_input = f'{tsv_dir}{SLASH}{command_inputdir}{SLASH}{sample}*{input_ext}'
+    command_output = f'{tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}{output_ext}'
+    command_outputs.update({f'output_{command}' : command_output})
+    output_pipe = f' > {command_output}\n'
     for i,v in settings[command].items():
       if v['value'] == 'fasta': v['value'] = fasta
       if 'output_file' in i:
         v['value'] += SLASH + sample + output_ext
     if settings[command] != {}:
       for k in settings[command].keys():
-        if settings[command][k]['value'] in to_f_string:
-          settings[command][k]['value'] = eval(settings[command][k]["value"].replace('_','',1))
+        cur_val = settings[command][k]['value']
+        if cur_val in to_f_string:
+          cur_val = eval(cur_val.replace('_','',1))
+        elif cur_val in command_outputs.keys():
+          cur_val = command_outputs[cur_val]
+
+        settings[command][k]['value'] = cur_val
       command_settings = ' '.join([\
         f'{v["key"]} {v["value"]} ' for v in settings[command].values() if v['switch'] == True])
     else:
       command_settings=''
-    command_input = f'{tsv_dir}{SLASH}{command_inputdir}{SLASH}{sample}*{input_ext}'
-    command_output = f'{tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}{output_ext}'
+
     structure = pipeline[command]['structure']
     default_structure = f'{command_key} {command_settings} {command_input}'
     if structure == '':
@@ -622,7 +633,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
         csh_str+=f'{command_key} {command_settings} {fastq} > {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}.sam\n'
       else:
         csh_str+=structure
-        csh_str+=f' > {command_output}\n' if command_outdir != '' else '\n'
+        csh_str+='\n'
     else:
       if command == 'wget':
         csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}.fastq.gz ftp://{row.fastq_ftp}\n'
@@ -636,7 +647,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
         csh_str+=f'{command_key} {command_settings} {fastq} > {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}.sam\n'
       else:
         csh_str+=structure
-        csh_str+=f' > {command_output}\n' if command_outdir != '' else '\n'
+        csh_str += '\n'
   return csh_str
 
 def csh_maker(work_on, tsv_df, tsv_name):
@@ -836,7 +847,7 @@ def defaults():
   'output_ext':'.txt',
   'inputdir':'alignment',
   'input_ext':'.bam',
-  'structure': 'key settings input gtf'
+  'structure': 'key settings input gtf output_pipe'
 },
 'STAR-alignment':{
   'key':'STAR',
@@ -966,7 +977,6 @@ def tsv_handler():
       tsv = tsvs[int(tsv)]
       break
     except (IndexError, AttributeError, TypeError, ValueError):
-      print('Uhmm')
       tsv_path = f"{PATH}{SLASH}{tsv}.tsv"
       try:
         assert os.path.exists(tsv_path)
