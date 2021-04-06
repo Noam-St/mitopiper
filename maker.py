@@ -28,7 +28,7 @@ try:
   org_df.organism = org_df.organism.str.replace(' ','_')
   org_df = org_df.set_index('organism')
 except FileNotFoundError: raise FileNotFoundError('final.csv is required in the src folder for the program to operate.')
-def file_reader(filename, directory = 'current'):
+def file_reader(filename : str, directory : str = 'current') -> dict:
   """
   Read .json files in the format key:value to a dictionary
 
@@ -50,7 +50,7 @@ def file_reader(filename, directory = 'current'):
       format_dict = json.load(file)
   return format_dict
 
-def file_creator(filename, format_dict, directory = 'current'):
+def file_creator(filename : str, format_dict : dict, directory : str = 'current') -> None:
   """
   Create json files of the format_dict, place file in cwd
 
@@ -68,7 +68,7 @@ def file_creator(filename, format_dict, directory = 'current'):
   with open(filepath, 'w') as file:
     json.dump(format_dict, sort_keys = True, fp = file, indent = 1)
 
-def dir_checker(dirname):
+def dir_checker(dirname : str) -> None:
   """
   check if a directory exists, if it does not, create it.
 
@@ -81,7 +81,7 @@ def dir_checker(dirname):
   if not os.path.isdir(f'{PATH}{SLASH}{dirname}'):
     os.mkdir(f'{PATH}{SLASH}{dirname}')
 
-def fasta_wrap(string, per = 60):
+def fasta_wrap(string : str, per : int = 60) -> str:
   """
   Wraps a string to a default of 60 characters per line
 
@@ -100,7 +100,7 @@ def fasta_wrap(string, per = 60):
   """
   return '\n'.join(wrap(string, per))
 
-def ref_maker(org_name):
+def ref_maker(org_name : str) -> str:
   """
   CURRENTLY UNUSED
 
@@ -135,13 +135,13 @@ def ref_maker(org_name):
     ref.write(fasta_wrap(seq))
   return fasta, ID
 
-def tabulate_dict(dicty):
+def tabulate_dict(dicty : dict) -> tabulate:
   """
   """
   temp_df = pd.DataFrame(dicty)
   return tabulate(temp_df, headers = 'keys', tablefmt = 'psql')
 
-def gff3_maker(org_name):
+def gff3_maker(org_name : str) -> str:
   """
   CURRENTLY UNUSED
 
@@ -161,7 +161,7 @@ def gff3_maker(org_name):
     out_handle.close()
   return gtf
 
-def save_settings(source, output):
+def save_settings(source : str, output : str) -> None:
   """
   Transfer settings from source to output
   """
@@ -171,21 +171,21 @@ def save_settings(source, output):
       jsonfile = jsonfile.replace('.json','')
       file_creator(filename = jsonfile, format_dict = file_reader(filename = jsonfile, directory = source), directory = output)
 
-def sa_index_calc(glen):
+def sa_index_calc(glen : int) -> float:
   """
   """
   return round(min(14, math.log2(glen)/2 - 1),0)
 
-def save_current_settings():
+def save_current_settings() -> None:
   """
   """
-  print("Please enter preset settings name\n")
+  print("Please name your preset\n")
   name = input()
   save_settings(source = 'current', output = name)
   print('\nSettings saved successfuly!\n')
   return
 
-def ref_main(org_name):
+def ref_main(org_name : str) -> str:
   """
   Create a reference sequence .fasta file and return the path to it
 
@@ -212,7 +212,7 @@ def ref_main(org_name):
     pass
   choice = True
   while choice:
-    print('It seems a reference fasta+gtf do not exist in the default location\nTo create them automatically, press 1\nNOTICE: The reference fasta+gtf will be for the MT only and in NCBI format!\nTo enter an index path, press 2\n')
+    print('It seems a reference fasta+gtf do not exist in the default location\nTo create them automatically, press 1\nNOTICE: The reference fasta+gtf will be for the MT only and in NCBI format!\nTo enter pre-indexed fasta and gff pathes, press 2.\n')
     choice = input()
     try: choice = int(choice)
     except ValueError: print('Please enter 1 or 2 only')
@@ -242,7 +242,7 @@ def ref_main(org_name):
       print('Please enter the full path to the reference fasta\n')
       fasta = input()
       add_to_csh = ''
-      print('Please enter path to gtf file for this organism\nPress enter if none needed\n')
+      print('Please enter path to gtf file for this organism\nEnter nothing if annotations are not needed.\n')
       gtf = input()
     else:
       print('Please enter 1 or 2 only')
@@ -253,7 +253,7 @@ def ref_main(org_name):
     file_creator('refpaths', refs, 'global') #NOTE(Noam) Currently set to global, think about changing to local pre-configurations to enable multiple ref files for the same organism depending on preset.
     return add_to_csh
 
-def change_general_settings():
+def change_general_settings() -> None:
   """
   Change general settings defined on a per-run basis.
   """
@@ -286,7 +286,7 @@ def change_general_settings():
   file_creator(filename = 'general_settings', format_dict = general_settings)
   print("Setting changed successfuly!\n")
 
-def change_pipeline_settings():
+def change_pipeline_settings() -> None:
   """
   Settings change menu, in this menu you can reconfigure any of the setting options for any
   of the pipeline steps
@@ -294,6 +294,7 @@ def change_pipeline_settings():
   settings = file_reader('settings')
   pipeline = file_reader('pipeline')
   options = list(settings.keys())
+  order = file_reader('run_order')
   print(f"Welcome to the settings menu\n")
   while True:
     [print(f'{i}\t{v}\n') for i,v in enumerate(options) if pipeline[v]['switch']]
@@ -330,16 +331,18 @@ def change_pipeline_settings():
       if settings[chosen_stage][chosen_setting]['value'] == '':
         settings[chosen_stage][chosen_setting]['switch'] = not setting_switch
         print(f'\nSetting switched to {not bool(setting_switch)}\n')
-
       else:
-        print(f'You chose: {chosen_setting}\nPlease choose a new value, current value: {setting_value}\n\nThe value may include several Keywords: _gtf, _fasta, _fastq, _fastq_pre, _fastq_dir, _fastq_dir_pre, _bam and _sam\n These keywords will be replaced with appropriate paths\n')
+        print(f'You chose: {chosen_setting}\nPlease choose a new value, current value: {setting_value}\n\nThe value may include several Keywords: _gtf, _fasta, _fastq, _fastq_pre, _fastq_dir, _fastq_dir_pre, _bam and _sam\nThese keywords will be replaced with appropriate paths\n')
+        print(f'Additionally, you may add the combination of output_command_name or dir_command_name to include the output of another command in the setting value\nNOTE: you are adding a setting to {chosen_stage}. You can grab the output of the following commands with the current run order\n')
+        try: print('\t'.join(order[:order.index(chosen_stage)]))
+        except IndexError: print('Step isnt active!')
         new_val = input()
         settings[chosen_stage][chosen_setting]['value'] = new_val
         print('\nSetting changed successfuly!\n')
     
   file_creator('settings', settings)
 
-def change_pipeline():
+def change_pipeline() -> None:
   """
   Pipeline menu, in this menu you can remove/add commands to the pipeline or reorder it
   """
@@ -349,12 +352,12 @@ def change_pipeline():
   while running:
     print("Welcome to the pipeline customizer\nThe current pipeline is:\n")
     [print(f'{i}\n') for i in order]
-    print('To change the pipeline enter 1\nTo change the pipeline order enter 2\nTo exit pipeline enter 0\n')
+    print('To change the pipeline enter 1\nTo change the pipeline order enter 2\nTo exit this menu enter 0\n')
     try:
       running = int(input())
       if running == 1:
         pipeline_changes = {i:k for i,k in enumerate(pipeline.keys())}
-        print('To remove or add a feature, simply enter its number\nIMPORTANT: if you remove a command and add it later, it will be in the last position!\n')
+        print('To remove or add a feature, simply enter its number\nIMPORTANT: if you remove a command and add it later, it will appended in the last position!\n')
         [print(f'{i} {k} - current setting: {pipeline[k]["switch"]}\n') for i,k in zip(pipeline_changes.keys(), pipeline_changes.values())]
         to_change = pipeline_changes[int(input())]
         pipeline[to_change]['switch'] = not pipeline[to_change]['switch']
@@ -363,7 +366,7 @@ def change_pipeline():
       elif running == 2:
         print('The current run order is:\n')
         [print(f'{i}\t{v}') for i,v in enumerate(order)]
-        print('To move a command enter the number next to it\nNOTE: you can also reorder by entering a sequence of numbers seperated by space (i.e: \"0 3 5 ...\")\n')
+        print('To move a command enter the number next to it\nNOTE: you can also reorder quickly by entering a sequence of numbers seperated by space (i.e: \"0 3 5 ...\")\n')
         to_move = input()
         if not len(to_move) > 1:
           to_move = int(to_move)
@@ -384,7 +387,7 @@ def change_pipeline():
     file_creator('run_order', order)
     print('Pipeline changed successfuly!\n')
 
-def key_fixer(key):
+def key_fixer(key : str) -> str:
   """
   """
   if len(key) > 1:
@@ -393,7 +396,7 @@ def key_fixer(key):
     key = '-' + key
   return key
 
-def add_new_pipeline_setting():
+def add_new_pipeline_setting() -> None:
   """
   add a new setting menu, currently the user has to reconfigure every menu option.
   """
@@ -417,7 +420,7 @@ def add_new_pipeline_setting():
   except ValueError: pass
   settings[chosen_step][new_name]['key'] = key
   print(f'Please enter a value for {new_name} (if the setting is an on/off switch, enter nothing!)\nYou can also enter a keyword which will be replaced with the appropriate file path, Keywords: _gtf, _fasta, _fastq, _fastq_pre, _fastq_dir, _fastq_dir_pre, _bam and _sam, _command_output and _command_input will be replaced with appropriate paths\n')
-  print(f'Additionaly, you may add the combination of output_command_name to include the output of another command in the setting value\nNOTE: you are adding a setting to {chosen_step}. You can grab the output of the following commands with the current run order\n')
+  print(f'Additionaly, you may add the combination of output_command_name or dir_command_name to include the output or directory of another command in the setting value\nNOTE: you are adding a setting to {chosen_step}. You can grab the output of the following commands with the current run order\n')
   try: print('\t'.join(order[:order.index(chosen_step)]))
   except ValueError: print('Current command isnt active!')
   value = input()
@@ -426,7 +429,7 @@ def add_new_pipeline_setting():
   file_creator('settings', settings) 
   print(f'Setting added successfuly!\nName\tKey\tValue\n{new_name}\t{key}\t{value}\n')
 
-def add_new_pipeline():
+def add_new_pipeline() -> None:
   """
   Add new pipeline step menu, currently the user has to configure every option
   """
@@ -438,7 +441,7 @@ def add_new_pipeline():
   'output_ext': 'What extension is the command supposed to output? (i.e .bam)',
   'inputdir': 'If the command requires a file to run, what is the name of the directory it is in? (i.e alignment)',
   'input_ext': 'What is the extension of the file the command runs on? (i.e .sam)',
-  'structure':'Command structure, enter nothing for default format: key settings input\IMPORTANT: A non-default structure can only include the following keywords: sample, key, input, settings, gtf, fasta, fastq, fastq_pre fastq_dir, fastq_pre_dir, sam and bam seperated by a SINGLE space'
+  'structure':'Command structure, enter nothing for default format: key settings input\IMPORTANT: A non-default structure can only include the following keywords: sample, key, settings, gtf, fasta, fastq, fastq_pre fastq_dir, fastq_pre_dir, sam, bam, command_output, command_input and output_pipe seperated by a SINGLE space'
 }
 
   pipeline = file_reader('pipeline')
@@ -461,7 +464,7 @@ def add_new_pipeline():
   file_creator('settings', settings)
   print('\nPipeline step added successfuly!\n')
 
-def manually_change_ref_or_gtf():
+def manually_change_ref_or_gtf() -> None:
   """
   Manually change fasta or gtf path after assigning them through the regular process.
   """
