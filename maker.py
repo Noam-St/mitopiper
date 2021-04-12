@@ -8,14 +8,19 @@ the settings for each of the pipeline programs used, and the paths of the progra
 
 #########################################################################
 """
+import json
+import math
+import os
+import shutil
+import sys
+from ast import literal_eval
+from textwrap import wrap
+
 #%%
 import pandas as pd
-import sys, os, json, shutil, math
-from Bio import SeqIO
-from Bio import Entrez
-from textwrap import wrap
-from ast import literal_eval
+from Bio import Entrez, SeqIO
 from tabulate import tabulate
+
 DASH = '--------------------------------------------'
 PATH = os.getcwd()
 
@@ -36,7 +41,6 @@ def file_reader(filename : str, directory : str = 'current') -> dict:
   ----------
   filename : str
     PATH to txt file in the expected format
-  
   Returns
   -------
   format_dict : dict
@@ -89,10 +93,8 @@ def fasta_wrap(string : str, per : int = 60) -> str:
   ----------
   string : str
     The string to be wrapped
-  
-  int : per
+  per : int
     Amount of characters per line
-
   Returns
   -------
   str
@@ -110,7 +112,6 @@ def ref_maker(org_name : str) -> str:
   ----------
   org_name : str
     Name of the organism to name the file.
-  
   Returns
   -------
     Absolute path to the fasta file created.
@@ -173,11 +174,13 @@ def save_settings(source : str, output : str) -> None:
 
 def sa_index_calc(glen : int) -> float:
   """
+  Calculate the SA index according to STAR manual
   """
   return round(min(14, math.log2(glen)/2 - 1),0)
 
 def save_current_settings() -> None:
   """
+  Save the current settings preset
   """
   print("Please name your preset\n")
   name = input()
@@ -193,7 +196,6 @@ def ref_main(org_name : str) -> str:
     ----------
     org_name : str
       Name of the organism to make a reference file for
-
     Returns
     -------
     fasta : str
@@ -335,7 +337,7 @@ def change_pipeline_settings() -> None:
         print(f'You chose: {chosen_setting}\nPlease choose a new value, current value: {setting_value}\n\nThe value may include several Keywords: _gtf, _fasta, _fastq, _fastq_pre, _fastq_dir, _fastq_dir_pre, _bam and _sam\nThese keywords will be replaced with appropriate paths\n')
         print(f'Additionally, you may add the combination of output_command_name or dir_command_name to include the output of another command in the setting value\nNOTE: you are adding a setting to {chosen_stage}. You can grab the output of the following commands with the current run order\n')
         try: print('\t'.join(order[:order.index(chosen_stage)]))
-        except IndexError: print('Step isnt active!')
+        except ValueError: print('Step isnt active!')
         new_val = input()
         settings[chosen_stage][chosen_setting]['value'] = new_val
         print('\nSetting changed successfuly!\n')
@@ -389,6 +391,16 @@ def change_pipeline() -> None:
 
 def key_fixer(key : str) -> str:
   """
+  Fix a key that does not contain dashes or double dashes according to unix rules
+
+  Parameters
+  ----------
+  key : str
+    The key to fix
+  Returns
+  -------
+  key : str
+    The fixed key
   """
   if len(key) > 1:
     key = '--' + key.replace(' ','-')
@@ -527,6 +539,8 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
 
   Paremeters
   ----------
+  i : int
+    The index of the current row
   row : pd.Series
     A pandas series which corresponds to a single row in the sample tsv
   settings : dict
@@ -537,9 +551,14 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
     The run-order of all commands that are turned on
   fasta : str
     The path to the ref sequence fasta file
+  gtf : str
+    The path to the GTF file (usually GFF3)
   PAIRED : bool
     True if the sample is paired, false otherwise
-  
+  org : str
+    The name of the current organism
+  tsv_dif : str
+    The path the sample tsv is located in
   Returns
   -------
   csh_str : str
@@ -556,6 +575,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
   org = org.upper()
   sample = f'{row.run_accession}_{i}_{org}'
   command_outputs = {f'output_{command}':f'{tsv_dir}{SLASH}{pipeline[command]["outdir"]}{SLASH}{sample}{pipeline[command]["output_ext"]}' for command in pipeline.keys()}
+  command_dirs = {f'dir_{command}':f'{tsv_dir}{SLASH}{pipeline[command]["outdir"]}' for command in pipeline.keys()}
   to_f_string = ['_fasta', '_fasta_dir', '_gtf', '_command_input', '_fastq', '_fastq_pre', '_sample', '_fastq_dir', '_fastq_pre_dir', '_bam', '_sam', '_STAR_out', '_fastq1', '_fastq2', '_org_name', '_command_output']
   for command in order:
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else (pipeline[command]['path'] +' ' + ' '.join(pipeline[command]['key'].split(' ')[1:]))
@@ -595,6 +615,8 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
           cur_val = eval(cur_val.replace('_','',1))
         elif cur_val in command_outputs.keys():
           cur_val = command_outputs[cur_val]
+        elif cur_val in command_dirs.keys():
+          cur_val = command_dirs[cur_val]
 
         settings[command][k]['value'] = cur_val
       command_settings = ' '.join([\
@@ -608,13 +630,16 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
       structure = default_structure
     else:
       struc_list = structure.split(' ')
-      struc_list = ['command_' + i if i in ['input','key','settings'] else i for i in struc_list]
+      struc_list = ['command_' + i if i in ['input','key','settings', 'outdir', 'output'] else i for i in struc_list]
       for k,v in enumerate(struc_list):
-        struc_list[k] = eval(v)
-      try: pass
-      except NameError:
-        print(f'You entered an invalid command structure! reset to default, to change please re-create the pipeline step: {struc_list}') 
-        structure = default_structure
+        if v in command_outputs.keys():
+          struc_list[k] = command_outputs[v]
+        elif v in command_dirs.keys():
+          struc_list[k] = command_dirs[v]
+        elif v in to_f_string:
+          struc_list[k] = eval(v.replace('_','',1))
+        try: struc_list[k] = eval(v)
+        except NameError: pass
       structure = ' '.join(struc_list)
     csh_str+= f'echo \"Running {command}: {pipeline[command]["description"]} on {sample}\"\n'
     if PAIRED:
@@ -662,6 +687,8 @@ def csh_maker(work_on, tsv_df, tsv_name):
     The lines of .tsv that the user wishes to process
   tsv_df
     The df version of samples.tsv
+  tsv_name : str
+    The name of the tsv, given as input by the user
   """
   tsv_dir = f"{PATH}{SLASH}output{SLASH}{tsv_name}"
   general_settings = file_reader('general_settings')
@@ -726,6 +753,7 @@ def rows_of_links(tsv_path):
 
 def defaults():
   """
+  Set the defaults - hard coded.
   """
 
   dir_checker('config')
@@ -1004,6 +1032,12 @@ def tsv_handler():
 
 def main():
   """
+  Manage the program.
+  * Asks the user to choose workflow
+  * Asks for the tsv name or a choice of previously used tsvs
+  * Users can either access the config menu, handled by change_menu function or continue.
+  * If they continue, the users have to choose which TSV lines they wish to process.
+  * main runs csh_maker on each line and saves the settings at the end of runtime
   """
   dir_checker('output')
   dir_checker('src')
@@ -1053,7 +1087,6 @@ def main():
   csh_maker(work_on, tsv_df, tsv_name)
   save_settings(source = 'current', output = 'last_used')
   print('Enter \"bash master.csh\" into the console to run the commands\nIMPORTANT: Each sample will be executed simultaneously in qsub you run this command, make sure you dont run too many at once!\n')
-
 
 if __name__ == '__main__':
   main()
