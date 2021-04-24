@@ -40,6 +40,9 @@ def remove_files(clears, forced):
         except FileNotFoundError:
           print(f'Folder {c} does not exist in {os.path.basename(f)}!\n')
           continue
+        except IsADirectoryError:
+          print(f'Folder {c} contains a directory that cannot be deleted in {os.path.basename(f)}!\n!')
+          continue
         [os.remove(os.path.join(direc, temp)) for temp in os.listdir(direc) if 'run' in temp]
 
 def main(args):
