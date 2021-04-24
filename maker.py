@@ -1,4 +1,3 @@
-__author__ = 'Noam Shtolz'
 """
 #########################################################################
 
@@ -8,12 +7,10 @@ the settings for each of the pipeline programs used, and the paths of the progra
 
 #########################################################################
 """
-import json
-import math
-import os
-import shutil
-import sys
-from ast import literal_eval
+__author__ = 'Noam Shtolz'
+
+
+import sys, shutil, os, math, json
 from textwrap import wrap
 
 #%%
@@ -23,7 +20,6 @@ from tabulate import tabulate
 
 DASH = '--------------------------------------------'
 PATH = os.getcwd()
-
 if sys.platform != 'win32':
     SLASH = '/'
 else:
@@ -33,7 +29,9 @@ try:
   org_df.organism = org_df.organism.str.replace(' ','_')
   org_df = org_df.set_index('organism')
 except FileNotFoundError: raise FileNotFoundError('final.csv is required in the src folder for the program to operate.')
-def file_reader(filename : str, directory : str = 'current') -> dict:
+
+
+def file_reader(filename : str, directory : str = 'current') -> dict: 
   """
   Read .json files in the format key:value to a dictionary
 
@@ -54,6 +52,7 @@ def file_reader(filename : str, directory : str = 'current') -> dict:
       format_dict = json.load(file)
   return format_dict
 
+
 def file_creator(filename : str, format_dict : dict, directory : str = 'current') -> None:
   """
   Create json files of the format_dict, place file in cwd
@@ -72,6 +71,7 @@ def file_creator(filename : str, format_dict : dict, directory : str = 'current'
   with open(filepath, 'w') as file:
     json.dump(format_dict, sort_keys = True, fp = file, indent = 1)
 
+
 def dir_checker(dirname : str) -> None:
   """
   check if a directory exists, if it does not, create it.
@@ -84,6 +84,7 @@ def dir_checker(dirname : str) -> None:
   dirname = dirname.replace('/', SLASH)
   if not os.path.isdir(f'{PATH}{SLASH}{dirname}'):
     os.mkdir(f'{PATH}{SLASH}{dirname}')
+
 
 def fasta_wrap(string : str, per : int = 60) -> str:
   """
@@ -102,6 +103,7 @@ def fasta_wrap(string : str, per : int = 60) -> str:
   """
   return '\n'.join(wrap(string, per))
 
+
 def ref_maker(org_name : str) -> str:
   """
   CURRENTLY UNUSED
@@ -114,6 +116,7 @@ def ref_maker(org_name : str) -> str:
     Name of the organism to name the file.
   Returns
   -------
+  fasta : str
     Absolute path to the fasta file created.
   """
   ID = org_df.loc[org_name, 'RefSeq']
@@ -136,11 +139,13 @@ def ref_maker(org_name : str) -> str:
     ref.write(fasta_wrap(seq))
   return fasta, ID
 
+
 def tabulate_dict(dicty : dict) -> tabulate:
   """
   """
   temp_df = pd.DataFrame(dicty)
   return tabulate(temp_df, headers = 'keys', tablefmt = 'psql')
+
 
 def gff3_maker(org_name : str) -> str:
   """
@@ -162,6 +167,7 @@ def gff3_maker(org_name : str) -> str:
     out_handle.close()
   return gtf
 
+
 def save_settings(source : str, output : str) -> None:
   """
   Transfer settings from source to output
@@ -172,11 +178,13 @@ def save_settings(source : str, output : str) -> None:
       jsonfile = jsonfile.replace('.json','')
       file_creator(filename = jsonfile, format_dict = file_reader(filename = jsonfile, directory = source), directory = output)
 
+
 def sa_index_calc(glen : int) -> float:
   """
   Calculate the SA index according to STAR manual
   """
   return round(min(14, math.log2(glen)/2 - 1),0)
+
 
 def save_current_settings() -> None:
   """
@@ -187,6 +195,7 @@ def save_current_settings() -> None:
   save_settings(source = 'current', output = name)
   print('\nSettings saved successfuly!\n')
   return
+
 
 def ref_main(org_name : str) -> str:
   """
@@ -255,6 +264,7 @@ def ref_main(org_name : str) -> str:
     file_creator('refpaths', refs, 'global') #NOTE(Noam) Currently set to global, think about changing to local pre-configurations to enable multiple ref files for the same organism depending on preset.
     return add_to_csh
 
+
 def change_general_settings() -> None:
   """
   Change general settings defined on a per-run basis.
@@ -288,10 +298,10 @@ def change_general_settings() -> None:
   file_creator(filename = 'general_settings', format_dict = general_settings)
   print("Setting changed successfuly!\n")
 
+
 def change_pipeline_settings() -> None:
   """
-  Settings change menu, in this menu you can reconfigure any of the setting options for any
-  of the pipeline steps
+  Settings change menu, in this menu you can reconfigure any of the setting options for any of the pipeline steps
   """
   settings = file_reader('settings')
   pipeline = file_reader('pipeline')
@@ -344,6 +354,7 @@ def change_pipeline_settings() -> None:
     
   file_creator('settings', settings)
 
+
 def change_pipeline() -> None:
   """
   Pipeline menu, in this menu you can remove/add commands to the pipeline or reorder it
@@ -389,6 +400,7 @@ def change_pipeline() -> None:
     file_creator('run_order', order)
     print('Pipeline changed successfuly!\n')
 
+
 def key_fixer(key : str) -> str:
   """
   Fix a key that does not contain dashes or double dashes according to unix rules
@@ -407,6 +419,7 @@ def key_fixer(key : str) -> str:
   else:
     key = '-' + key
   return key
+
 
 def add_new_pipeline_setting() -> None:
   """
@@ -440,6 +453,7 @@ def add_new_pipeline_setting() -> None:
   settings[chosen_step][new_name]['switch'] = 1
   file_creator('settings', settings) 
   print(f'Setting added successfuly!\nName\tKey\tValue\n{new_name}\t{key}\t{value}\n')
+
 
 def add_new_pipeline() -> None:
   """
@@ -475,6 +489,7 @@ def add_new_pipeline() -> None:
   file_creator('pipeline', pipeline)
   file_creator('settings', settings)
   print('\nPipeline step added successfuly!\n')
+
 
 def manually_change_ref_or_gtf() -> None:
   """
@@ -514,6 +529,7 @@ def manually_change_ref_or_gtf() -> None:
     break
   file_creator(filename = 'refpaths', format_dict = ref, directory = 'global') 
 
+
 def change_menu():
   """
   Main reconfiguration menu, sends to (currently 4) sub-menus, after exiting sub-menus, returns
@@ -532,6 +548,7 @@ def change_menu():
     try: menu[choice]()
     except IndexError:
       print("Please only choose one of the listed options!\n")
+
 
 def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv_dir):
   """
@@ -677,13 +694,14 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
         csh_str += '\n'
   return csh_str
 
+
 def csh_maker(work_on, tsv_df, tsv_name):
   """
   Makes a single .csh file for each line of .tsv, and a master.csh to be run by qsub
 
   Parameters
   ----------
-  work_on : int/str
+  work_on : int/str/list
     The lines of .tsv that the user wishes to process
   tsv_df
     The df version of samples.tsv
@@ -701,14 +719,20 @@ def csh_maker(work_on, tsv_df, tsv_name):
     work_on = [int(i) for i in work_on.split('-')]
     start = work_on[0]
     end = work_on[1]
+    work_on = range(start, end)
   elif work_on == 'all':
     end = len(tsv_df)
     start = 0
+    work_on = range(start, end)
+  elif type(work_on) == list:
+    pass
   else:
     work_on = int(work_on)
-    start = work_on
-    end = start+1
-  for i,row in tsv_df.iloc[start:end,:].iterrows():
+    if work_on > len(tsv_df):
+      print("Row entered is out of bounds! Running on last row\n\n")
+      work_on = len(tsv_df) - 1
+    work_on = range(work_on, work_on + 1)
+  for i,row in tsv_df.iloc[work_on, :].iterrows():
     settings = file_reader('settings')
     pipeline = file_reader('pipeline')
     order = file_reader('run_order')
@@ -738,6 +762,7 @@ def csh_maker(work_on, tsv_df, tsv_name):
   master.write(f'for file in {" ".join(tsvs)}\ndo\nqsub $file\ndone')
   master.close()
 
+
 def rows_of_links(tsv_path):
   """
   """
@@ -750,6 +775,7 @@ def rows_of_links(tsv_path):
     tsv_df.fastq_ftp = lines
     tsv_df.scientific_name = input()
     tsv_df.run_accession = 0 #PLACEHOLDER TODO define run accession (FINSIH THIS FUNCTION)
+
 
 def defaults():
   """
@@ -1029,15 +1055,20 @@ def tsv_handler():
   return new_tsv_path, tsv
 
 
-
 def main():
   """
-  Manage the program.
-  * Asks the user to choose workflow
-  * Asks for the tsv name or a choice of previously used tsvs
+  Manage the program
+  
+  * Asks the user to choose workflow.
+
+  * Asks for the tsv name or a choice of previously used tsvs.
+
   * Users can either access the config menu, handled by change_menu function or continue.
+
   * If they continue, the users have to choose which TSV lines they wish to process.
-  * main runs csh_maker on each line and saves the settings at the end of runtime
+
+  * main runs csh_maker on each line and saves the settings at the end of runtime.
+
   """
   dir_checker('output')
   dir_checker('src')
@@ -1047,8 +1078,6 @@ def main():
 
   if not os.path.exists(f'{PATH}{SLASH}config{SLASH}default'):
     defaults()
-  
-
   print(f'{DASH}\nWelcome to the semi-automatic .csh maker\n{DASH}')
   workflows = os.listdir(f'{PATH}{SLASH}config')
   while True:
@@ -1076,17 +1105,25 @@ def main():
   change = int(input())
   if change:
     change_menu()
-  print(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\n')
+  print(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\nTo work on specific rows, enter a list of rows seperated by a SINGLE space (1 2 3 4)\n')
   wanted_cols = ['index', 'scientific_name', 'run_accession', 'sample_title', 'library_strategy', 'library_selection', 'read_count']
   colnames = ['Index', 'ID', 'Sample accession', 'Sample', 'Library Strategy', 'Library Selection', 'Read Count']
   actual_cols = [i for i in wanted_cols if i in tsv_df.columns]
   sliced_df = tsv_df.loc[:, actual_cols]
   print(tabulate(sliced_df, headers = 'keys', tablefmt = 'psql'))
-
-  work_on = input()
+  while True:
+    work_on = input()
+    if ' ' in work_on:
+      try:
+        work_on = [int(i) for i in work_on.split(' ')]
+      except ValueError:
+        print('The list of rows to work on must only consist of integers seperated by a SINGLE SPACE!\nTry again\n')
+        continue
+    break
   csh_maker(work_on, tsv_df, tsv_name)
   save_settings(source = 'current', output = 'last_used')
   print('Enter \"bash master.csh\" into the console to run the commands\nIMPORTANT: Each sample will be executed simultaneously in qsub you run this command, make sure you dont run too many at once!\n')
+
 
 if __name__ == '__main__':
   main()
