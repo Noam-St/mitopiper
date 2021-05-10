@@ -214,7 +214,6 @@ def ref_main(org_name : str) -> str:
   """
   refs = file_reader('refpaths', 'global')
   pipeline = file_reader('pipeline')
-
   try:
     refs[org_name]['refpath']
     refs[org_name]['gtfpath']
@@ -229,7 +228,10 @@ def ref_main(org_name : str) -> str:
     except ValueError: print('Please enter 1 or 2 only')
     if choice == 1:
       dir_checker(f'src{SLASH}mtDNA_ref{SLASH}{org_name}')
-      ID = org_df.loc[org_name, 'RefSeq']
+      try: ID = org_df.loc[org_name, 'RefSeq']
+      except KeyError:
+        print(f"Warning:\tIndex can not be created for {org_name}!\n")
+        return False
       fasta = f'{PATH}{SLASH}src{SLASH}mtDNA_ref{SLASH}{org_name}{SLASH}{org_name}.fasta'
       os.system(f'wget -O {fasta} \"https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi?db=nuccore&report=fasta&id={ID}\"\n')
       temp_fasta = open(fasta, 'r')
@@ -729,15 +731,22 @@ def csh_maker(work_on, tsv_df, tsv_name):
   else:
     work_on = int(work_on)
     if work_on > len(tsv_df):
-      print("Row entered is out of bounds! Running on last row\n\n")
+      print("Error:\tRow entered is out of bounds! Running on last row\n\n")
       work_on = len(tsv_df) - 1
     work_on = range(work_on, work_on + 1)
+  bad_orgs = []
   for i,row in tsv_df.iloc[work_on, :].iterrows():
     settings = file_reader('settings')
     pipeline = file_reader('pipeline')
     order = file_reader('run_order')
     org_name = row.scientific_name
-
+    if org_name in bad_orgs:
+      print(f'Warning:\tSkipped organism {org_name} because it does not exist in final.csv!\n\n')
+      continue
+    csh_add_ref = ref_main(org_name)
+    if csh_add_ref == False:
+      bad_orgs.append(org_name)
+      continue
     if len(row.fastq_ftp.split(';')) > 1: PAIRED = True
     else : PAIRED = False
     with open(f'{tsv_dir}{SLASH}run{i}.csh', 'w') as file:
@@ -749,7 +758,6 @@ def csh_maker(work_on, tsv_df, tsv_name):
       file.write(f'#$ -q {general_settings["qsub_queue"][0]}\n')
       file.write(general_settings["free_form"][0])
       file.write(f'echo \"Current organism: {row.scientific_name}\"\n\n')
-      csh_add_ref = ref_main(org_name)
       if csh_add_ref != '': file.write(csh_add_ref)
       refs = file_reader('refpaths', 'global')
       fasta = refs[org_name]['refpath']
