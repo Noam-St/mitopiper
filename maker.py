@@ -757,6 +757,7 @@ def csh_maker(work_on, tsv_df, tsv_name):
       file.write(f'#$ -cwd\n')
       file.write(f'#$ -N {row.run_accession}_{i}\n')
       file.write(f'#$ -q {general_settings["qsub_queue"][0]}\n')
+      file.write(f'#$ -S /bin/bash')
       file.write(general_settings["free_form"][0])
       file.write(f'echo \"Current organism: {row.scientific_name}\"\n\n')
       if csh_add_ref != '': file.write(csh_add_ref)
