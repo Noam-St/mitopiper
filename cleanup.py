@@ -5,8 +5,7 @@ The program will clean up all folders listed and automatically remove any run*.c
 """
 
 import os, sys, argparse
-
-PATH = os.getcwd()
+PATH = os.path.dirname(os.path.realpath(__file__))
 
 if sys.platform != 'win32':
     SLASH = '/'

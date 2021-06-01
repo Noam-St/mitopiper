@@ -757,7 +757,8 @@ def csh_maker(work_on, tsv_df, tsv_name):
       file.write(f'#$ -cwd\n')
       file.write(f'#$ -N {row.run_accession}_{i}\n')
       file.write(f'#$ -q {general_settings["qsub_queue"][0]}\n')
-      file.write(f'#$ -S /bin/bash')
+      file.write(f'#$ -S /bin/bash\n')
+      file.write(f'#$ -V\n')
       file.write(general_settings["free_form"][0])
       file.write(f'echo \"Current organism: {row.scientific_name}\"\n\n')
       if csh_add_ref != '': file.write(csh_add_ref)
@@ -858,7 +859,7 @@ def defaults():
   'output_ext':'.sam',
   'inputdir':'post_trim',
   'input_ext':'.fq.gz',
-  'structure':'key settings fasta fastq'
+  'structure':'key settings fasta fastq output_pipe'
 },
 'view':{
   'key':'samtools view',
@@ -869,7 +870,7 @@ def defaults():
   'output_ext':'.bam',
   'inputdir':'alignment',
   'input_ext':'.sam',
-  'structure':''
+  'structure':'key settings _sam output_pipe'
 },
 'index':{
   'key':'samtools index',
