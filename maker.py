@@ -434,7 +434,7 @@ def add_new_pipeline_setting() -> None:
   print('\nPlease type the pipeline step to add a setting to\n')
   step = int(input())
   chosen_step = setting_keys[step]
-  print(f'You chose {chosen_step}\nPlease enter the setting name\n')
+  print(f"You chose {chosen_step}\nPlease enter the setting name\n")
   new_name = input()
   settings[chosen_step][new_name] = {}
   print(f'Please enter a description for {new_name}\n')
@@ -457,7 +457,7 @@ def add_new_pipeline_setting() -> None:
   print(f'Setting added successfuly!\nName\tKey\tValue\n{new_name}\t{key}\t{value}\n')
 
 
-def add_new_pipeline() -> None:
+def add_new_pipeline_step() -> None:
   """
   Add new pipeline step menu, currently the user has to configure every option
   """
@@ -539,7 +539,7 @@ def change_menu():
   """
   choice = True
   print('####################\n\nWelcome to the configuration menu\n')
-  menu = [lambda :0, change_general_settings, change_pipeline_settings, change_pipeline, add_new_pipeline_setting, add_new_pipeline,manually_change_ref_or_gtf, save_current_settings]
+  menu = [lambda :0, change_general_settings, change_pipeline_settings, change_pipeline, add_new_pipeline_setting, add_new_pipeline_step,manually_change_ref_or_gtf, save_current_settings]
   while choice:
     [print(f"Enter {i+1}\tto {x.__name__}\n") for i,x in enumerate(menu[1:])]
     print("Enter 0\t to exit\n")
