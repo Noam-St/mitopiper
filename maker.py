@@ -1037,7 +1037,7 @@ def tsv_handler():
 
   while True:
     print('Please enter TSV file name (without extension) or the number next to a pre-existing TSV file.\nIMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: the tsv must be in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
-    tsvs = os.listdir(f'{PATH}{SLASH}output')
+    tsvs = sorted(os.listdir(f'{PATH}{SLASH}output'))
     [print(f'{i}\t{v}') for i,v in enumerate(tsvs) if os.path.isdir(f'{PATH}{SLASH}output{SLASH}{v}')]
     tsv = input()
     try:
@@ -1090,7 +1090,7 @@ def main():
   if not os.path.exists(f'{PATH}{SLASH}config{SLASH}default'):
     defaults()
   print(f'{DASH}\nWelcome to the semi-automatic .csh maker\n{DASH}')
-  workflows = os.listdir(f'{PATH}{SLASH}config')
+  workflows = sorted(os.listdir(f'{PATH}{SLASH}config'))
   while True:
     print('Please choose a pre-configured workflow\n')
     [print(f'{i}\t{v}') for i,v in enumerate(workflows) if (v not in  ('global','current')) and (os.path.isdir(f'{PATH}{SLASH}config{SLASH}{v}'))]
