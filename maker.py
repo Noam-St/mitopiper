@@ -140,7 +140,7 @@ def ref_maker(org_name : str) -> str:
   return fasta, ID
 
 
-def tabulate_dict(dicty : dict) -> tabulate:
+def tabulate_dict(dicty: dict) -> tabulate:
   """
   """
   temp_df = pd.DataFrame(dicty)
@@ -168,7 +168,7 @@ def gff3_maker(org_name : str) -> str:
   return gtf
 
 
-def save_settings(source : str, output : str) -> None:
+def save_settings(source: str, output: str) -> None:
   """
   Transfer settings from source to output
   """
@@ -251,18 +251,22 @@ def ref_main(org_name : str) -> str:
       gtf = f'{PATH}{SLASH}src{SLASH}mtDNA_ref{SLASH}{org_name}{SLASH}{org_name}.gff3'
       GTF_command = f'wget -O {gtf} \"https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi?db=nuccore&report=gff3&id={ID}\"\n'
       add_to_csh = GTF_command + STAR_command + BWA_command 
+      chrminfo = ''
     elif choice == 2:
       print('Please enter the full path to the reference fasta\n')
       fasta = input()
       add_to_csh = ''
-      print('Please enter path to gtf file for this organism\nEnter nothing if annotations are not needed.\n')
+      print('Please enter path to gtf file for this organism\nEnter nothing if annotations are not required.\n')
       gtf = input()
+      print('Please enter path to ChromInfo file for this organism\nEnter nothing if chromosome info is not required.\n')
+      chrminfo = input()
     else:
       print('Please enter 1 or 2 only')
  
     refs[org_name] = {}
     refs[org_name]['refpath'] = fasta
     refs[org_name]['gtfpath'] = gtf
+    refs[org_name]['chrominfopath'] = chrominfo
     file_creator('refpaths', refs, 'global') #NOTE(Noam) Currently set to global, think about changing to local pre-configurations to enable multiple ref files for the same organism depending on preset.
     return add_to_csh
 
@@ -328,7 +332,7 @@ def change_pipeline_settings() -> None:
     temp_config_df = {
       'Setting name':configs,
       'Description':[i['description'] for i in settings[chosen_stage].values()],
-      'Current setting':[i['value'] for i in settings[chosen_stage].values()]
+      'Current setting':[i['value'] if i['value'] != '' else i['Switch'] for i in settings[chosen_stage].values()]
       }
     print(tabulate_dict(temp_config_df))
     if settings[chosen_stage] == {}:
@@ -346,7 +350,7 @@ def change_pipeline_settings() -> None:
         settings[chosen_stage][chosen_setting]['switch'] = not setting_switch
         print(f'\nSetting switched to {not bool(setting_switch)}\n')
       else:
-        print(f'You chose: {chosen_setting}\nPlease choose a new value, current value: {setting_value}\n\nThe value may include several Keywords: _gtf, _fasta, _fastq, _fastq_pre, _fastq_dir, _fastq_dir_pre, _bam and _sam\nThese keywords will be replaced with appropriate paths\n')
+        print(f'You chose: {chosen_setting}\nPlease choose a new value, current value: {setting_value}\n\nThe value may include several Keywords: _gtf, _chrominfo, _fasta, _fastq, _fastq_pre, _fastq_sample_path_no_ext, _fastq_dir, _fastq_pre_dir, _bam and _sam\nThese keywords will be replaced with appropriate paths\n')
         print(f'Additionally, you may add the combination of output_command_name or dir_command_name to include the output of another command in the setting value\nNOTE: you are adding a setting to {chosen_stage}. You can grab the output of the following commands with the current run order\n')
         try: print('\t'.join(order[:order.index(chosen_stage)]))
         except ValueError: print('Step isnt active!')
@@ -446,7 +450,7 @@ def add_new_pipeline_setting() -> None:
   try: int(key)
   except ValueError: pass
   settings[chosen_step][new_name]['key'] = key
-  print(f'Please enter a value for {new_name} (if the setting is an on/off switch, enter nothing!)\nYou can also enter a keyword which will be replaced with the appropriate file path, Keywords: _gtf, _fasta, _fastq, _fastq_pre, _fastq_dir, _fastq_dir_pre, _bam and _sam, _command_output and _command_input will be replaced with appropriate paths\n')
+  print(f'Please enter a value for {new_name} (if the setting is an on/off switch, enter nothing!)\nYou can also enter a keyword which will be replaced with the appropriate file path, Keywords: _gtf, _fasta, _fastq, _fastq_pre, _fastq_dir, _fastq_dir_pre, _bam and _sam, _chrominfo, _command_output and _command_input will be replaced with appropriate paths\nYou can use _if_SE or _if_PE if the setting is an on/off flag that only appears when SE or PE respectively\n')
   print(f'Additionaly, you may add the combination of output_command_name or dir_command_name to include the output or directory of another command in the setting value\nNOTE: you are adding a setting to {chosen_step}. You can grab the output of the following commands with the current run order\n')
   try: print('\t'.join(order[:order.index(chosen_step)]))
   except ValueError: print('Current command isnt active!')
@@ -511,16 +515,16 @@ def manually_change_ref_or_gtf() -> None:
     except IndexError:
       print("Please enter an organism from the list!\n")
       continue
-    print('Would you like to change gtf, fasta or both?\n')
-    work_on = ['ref', 'gtf', 'both']
+    print('Would you like to change gtf, fasta, chromInfo all?\n')
+    work_on = ['ref', 'gtf', 'chrominfo', 'all']
     [print(f'{i}\t{v}\n') for i,v in enumerate(work_on)]
     choice = input()
     try: work_on = work_on[int(choice)]
     except IndexError:
       print('Please enter one of the possible options!\n')
       continue
-    if work_on == 'both':
-      work_on = ['ref', 'gtf']
+    if work_on == 'all':
+      work_on = ['ref', 'gtf', 'chrominfo']
     else:
       work_on = [work_on]
     for i in work_on:
@@ -552,7 +556,7 @@ def change_menu():
       print("Please only choose one of the listed options!\n")
 
 
-def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv_dir):
+def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, PAIRED, org, tsv_dir):
   """
   Create a csh fomratted string designed to be run by qsub, works differnetly for PAIRED and unPAIRED samples.
 
@@ -595,7 +599,9 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
   sample = f'{row.run_accession}_{i}_{org}'
   command_outputs = {f'output_{command}':f'{tsv_dir}{SLASH}{pipeline[command]["outdir"]}{SLASH}{sample}{pipeline[command]["output_ext"]}' for command in pipeline.keys()}
   command_dirs = {f'dir_{command}':f'{tsv_dir}{SLASH}{pipeline[command]["outdir"]}' for command in pipeline.keys()}
-  to_f_string = ['_fasta', '_fasta_dir', '_gtf', '_command_input', '_fastq', '_fastq_pre', '_sample', '_fastq_dir', '_fastq_pre_dir', '_bam', '_sam', '_STAR_out', '_fastq1', '_fastq2', '_org_name', '_command_output','_STAR_final_log']
+  to_f_string = [
+  '_fasta', '_fasta_dir', '_gtf', '_command_input', '_command_output', '_command_output_dir_path', '_command_input_dir_path','_fastq', '_fastq_pre', '_sample', '_fastq_sample_path_no_ext','_fastq_dir', '_fastq_pre_dir', '_bam', '_sam', '_STAR_out', '_fastq1', '_fastq2', '_org_name','_STAR_final_log', '_chrominfo'
+  ]
   for command in order:
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else (pipeline[command]['path'] +' ' + ' '.join(pipeline[command]['key'].split(' ')[1:]))
     command_outdir = pipeline[command]['outdir']
@@ -615,6 +621,9 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
       fastq_pre_dir = f'{tsv_dir}{SLASH}{pipeline["wget"]["outdir"]}'
       fastq1 = fastq
       fastq2 = fastq
+    fastq_sample_path_no_ext = f'{fastq_pre_dir}{SLASH}{sample}'
+    if_SE = False if PAIRED else True
+    if_PE = True if PAIRED else False
 
     bam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}*.bam'
     sam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}*.sam'
@@ -623,6 +632,9 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
     fasta_dir = os.path.dirname(fasta)
     command_input = f'{tsv_dir}{SLASH}{command_inputdir}{SLASH}{sample}*{input_ext}'
     command_output = f'{tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}{output_ext}'
+    command_output_dir_path = f'{tsv_dir}{SLASH}{command_outdir}'
+    command_input_dir_path = f'{tsv_dir}{SLASH}{command_outdir}'
+
     output_pipe = f' > {command_output}\n'
     for i,v in settings[command].items():
       if v['value'] == 'fasta': v['value'] = fasta
@@ -637,7 +649,12 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org, tsv
           cur_val = command_outputs[cur_val]
         elif cur_val in command_dirs.keys():
           cur_val = command_dirs[cur_val]
-
+        elif cur_val == '_if_SE':
+          settings[command][k]['switch'] = False if PAIRED else True
+          cur_val = ''
+        elif cur_val == '_if_PE':
+          settings[command][k]['switch'] = True if PAIRED else False
+          cur_val = ''
         settings[command][k]['value'] = cur_val
       command_settings = ' '.join([\
         f'{v["key"]} {v["value"]} ' for v in settings[command].values() if v['switch'] == True])
@@ -765,8 +782,12 @@ def csh_maker(work_on, tsv_df, tsv_name):
       refs = file_reader('refpaths', 'global')
       fasta = refs[org_name]['refpath']
       gtf = refs[org_name]['gtfpath']
+      try:
+        chrominfo = refs[org_name]['chrominfopath']
+      except KeyError:
+        chrominfo = ''
 
-      to_csh = csh_commands(i, row, settings, pipeline, order, fasta, gtf, PAIRED, org_name, tsv_dir)
+      to_csh = csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, PAIRED, org_name, tsv_dir)
       file.write(to_csh)
       tsvs.append(f'{tsv_dir}{SLASH}run{i}.csh')
 
