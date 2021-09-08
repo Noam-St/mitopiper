@@ -14,6 +14,7 @@ import sys, shutil, os, math, json, re
 from textwrap import wrap
 
 #%%
+import snoop
 import pandas as pd
 from Bio import Entrez, SeqIO
 from tabulate import tabulate
@@ -1083,7 +1084,7 @@ def tsv_input() -> list:
       try:
         assert os.path.exists(tsv_path)
         tsvs.append(tsv)
-        tsv_inds = tsvs.index(tsv)
+        tsv = tsvs.index(tsv)
         break
       except AssertionError:
         try:
@@ -1092,9 +1093,9 @@ def tsv_input() -> list:
         except AssertionError: print("Please enter a valid TSV file name!\n")
         continue
     else:
-      tsv_inds = input_to_range(tsv, len(tsvs))
-    tsvs = [v for i, v in enumerate(tsvs) if i in tsv_inds]
-    break
+      break
+  tsv_inds = input_to_range(tsv, len(tsvs))
+  tsvs = [v for i, v in enumerate(tsvs) if i in tsv_inds]
   return tsvs
        
 def tsv_handler(tsv):
