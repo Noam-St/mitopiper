@@ -10,7 +10,7 @@ the settings for each of the pipeline programs used, and the paths of the progra
 __author__ = 'Noam Shtolz'
 
 
-import sys, shutil, os, math, json
+import sys, shutil, os, math, json, re
 from textwrap import wrap
 
 #%%
@@ -212,6 +212,10 @@ def ref_main(org_name : str) -> str:
     add_to_csh : str
       string to add to the csh (incase the user chooses to automatically create a fasta)
   """
+  dir_checker('config/global')
+  if not os.path.exists(os.path.join(PATH, 'config', 'global', 'refpaths.json')):
+    file_creator('refpaths', {}, directory = 'global')
+
   refs = file_reader('refpaths', 'global')
   pipeline = file_reader('pipeline')
   try:
@@ -232,7 +236,7 @@ def ref_main(org_name : str) -> str:
       except KeyError:
         print(f"Warning:\tIndex can not be created for {org_name}!\n")
         return False
-      fasta = f'{PATH}{SLASH}src{SLASH}mtDNA_ref{SLASH}{org_name}{SLASH}{org_name}.fasta'
+      fasta = os.path.join(PATH, 'src', 'mtDNA_ref', org_name, f'{org_name}.fasta')
       os.system(f'wget -O {fasta} \"https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi?db=nuccore&report=fasta&id={ID}\"\n')
       temp_fasta = open(fasta, 'r')
       glen = len(''.join([i.rstrip('\n') for i in temp_fasta.readlines()[1:]]))
@@ -251,7 +255,7 @@ def ref_main(org_name : str) -> str:
       gtf = f'{PATH}{SLASH}src{SLASH}mtDNA_ref{SLASH}{org_name}{SLASH}{org_name}.gff3'
       GTF_command = f'wget -O {gtf} \"https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi?db=nuccore&report=gff3&id={ID}\"\n'
       add_to_csh = GTF_command + STAR_command + BWA_command 
-      chrminfo = ''
+      chrominfo = ''
     elif choice == 2:
       print('Please enter the full path to the reference fasta\n')
       fasta = input()
@@ -259,7 +263,7 @@ def ref_main(org_name : str) -> str:
       print('Please enter path to gtf file for this organism\nEnter nothing if annotations are not required.\n')
       gtf = input()
       print('Please enter path to ChromInfo file for this organism\nEnter nothing if chromosome info is not required.\n')
-      chrminfo = input()
+      chrominfo = input()
     else:
       print('Please enter 1 or 2 only')
  
@@ -332,7 +336,7 @@ def change_pipeline_settings() -> None:
     temp_config_df = {
       'Setting name':configs,
       'Description':[i['description'] for i in settings[chosen_stage].values()],
-      'Current setting':[i['value'] if i['value'] != '' else i['Switch'] for i in settings[chosen_stage].values()]
+      'Current setting':[i['value'] if i['value'] != '' else i['switch'] for i in settings[chosen_stage].values()]
       }
     print(tabulate_dict(temp_config_df))
     if settings[chosen_stage] == {}:
@@ -714,7 +718,35 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, PAIRE
         csh_str += '\n'
   return csh_str
 
-
+def input_to_range(user_in : str, list_size : int) -> list:
+  """
+  """
+  try:
+    user_in = int(user_in)
+    if user_in > list_size:
+      print("Error:\tRow entered is out of bounds! Running on last row\n\n")
+      user_in = list_size - 1
+    user_in = list(range(user_in, user_in + 1))
+  except ValueError:
+    if '-' in user_in: #Input is a range of numbers (x-y)
+      user_in = [int(i) for i in user_in.split('-')]
+      start = user_in[0]
+      end = user_in[1]
+      user_in = list(range(start, end))
+    elif user_in == 'all': #Input is all of the list
+      start = 0
+      end = list_size
+      user_in = list(range(start, end))
+    elif ' ' in user_in: #Input is a list of numbers (indicating specific indices)
+        try:
+          user_in = [int(i) for i in user_in.split(' ')]
+        except ValueError:
+          print('The list of rows to work on must only consist of integers seperated by a SINGLE SPACE!\nTry again\n')
+          return []
+  finally:
+    return user_in
+        
+  
 def csh_maker(work_on, tsv_df, tsv_name):
   """
   Makes a single .csh file for each line of .tsv, and a master.csh to be run by qsub
@@ -730,28 +762,9 @@ def csh_maker(work_on, tsv_df, tsv_name):
   """
   tsv_dir = f"{PATH}{SLASH}output{SLASH}{tsv_name}"
   general_settings = file_reader('general_settings')
-  master = open(f'{PATH}{SLASH}master.csh', 'w')
-  master.write(f'#!/bin/bash\n')
   pipeline = file_reader('pipeline')
   [dir_checker('output' + '/' + tsv_name + '/' + i['outdir']) for i in pipeline.values() if i['outdir'] != '']
   tsvs = []
-  if '-' in work_on:
-    work_on = [int(i) for i in work_on.split('-')]
-    start = work_on[0]
-    end = work_on[1]
-    work_on = range(start, end)
-  elif work_on == 'all':
-    end = len(tsv_df)
-    start = 0
-    work_on = range(start, end)
-  elif type(work_on) == list:
-    pass
-  else:
-    work_on = int(work_on)
-    if work_on > len(tsv_df):
-      print("Error:\tRow entered is out of bounds! Running on last row\n\n")
-      work_on = len(tsv_df) - 1
-    work_on = range(work_on, work_on + 1)
   bad_orgs = []
   for i,row in tsv_df.iloc[work_on, :].iterrows():
     settings = file_reader('settings')
@@ -790,11 +803,15 @@ def csh_maker(work_on, tsv_df, tsv_name):
       to_csh = csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, PAIRED, org_name, tsv_dir)
       file.write(to_csh)
       tsvs.append(f'{tsv_dir}{SLASH}run{i}.csh')
+  return tsvs
 
-  master.write(f'for file in {" ".join(tsvs)}\ndo\nqsub $file\ndone')
-  master.close()
-
-
+def make_master_file(tsvs):
+  """
+  """
+  with open(os.path.join(PATH, 'master.csh'), 'w') as master:
+    master.write(f'#!/bin/bash\n')
+    master.write(f'for file in {" ".join(tsvs)}\ndo\nqsub $file\ndone')
+  
 def rows_of_links(tsv_path):
   """
   """
@@ -825,7 +842,7 @@ def defaults():
   #  API = input()
   #  file_creator('credentials', {'Email':EMAIL, 'API':API}, directory = 'default')
   
-  default_pipe =\
+  DEFAULT_PIPE =\
 {
 'wget' : {
   'key':'wget',
@@ -950,7 +967,7 @@ def defaults():
 }
 }
 
-  default_settings =\
+  DEFAULT_SETTINGS =\
 {
   'trim':{
     'quality':{'description':'Trim low-quality ends from reads', 'key':'-q', 'value':20, 'switch':True},
@@ -1037,44 +1054,54 @@ def defaults():
     'switch':True
     }}
 }
-  default_order = ['wget','fastqc_pre','trim','fastqc','bwa-align','view','sort','index','mpileup']
-  default_main = {
+  DEFAULT_ORDER = ['wget','fastqc_pre','trim','fastqc','bwa-align','view','sort','index','mpileup']
+  DEFAULT_MAIN =\
+  {
   'qsub_queue' : ['bioinfo.q', 'choose which cluster queue to send the jobs into'],
   'environment':['bash', 'choose the linux environment to use'],
   'free_form':['', 'any command you type here will be added to every single .csh file created, enter nothing to wipe setting']
-}
-  defaults = (default_pipe, default_settings, default_order, default_main)
+  }
+  DEFAULTS = (DEFAULT_PIPE, DEFAULT_SETTINGS, DEFAULT_ORDER, DEFAULT_MAIN)
   
   file_creator('refpaths', {}, directory = 'global')
   configs = ['pipeline', 'settings', 'run_order', 'general_settings']
   for i,config in enumerate(configs):
-    file_creator(config, defaults[i], directory = 'default')
+    file_creator(config, DEFAULTS[i], directory = 'default')
 
-
-def tsv_handler():
+def tsv_input() -> list:
   """
-  TODO HERE, This function will set up a sample directory tree for each sample, based on the tsv name.
+  Recieve the requested tsvs from the user and return them as a list of tsv names
   """
 
   while True:
-    print('Please enter TSV file name (without extension) or the number next to a pre-existing TSV file.\nIMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: the tsv must be in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
+    print('Please enter TSV file name (without extension) or the number next to a pre-existing TSV file.\nIf you want to work on several TSVs at once, you can do this by entering either a range of numbers separated by a dash (x-y).\nSeveral numbers separated by space (x y z).\n Or the word \"all\".\nIMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: all the tsvs must be in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
     tsvs = sorted(os.listdir(f'{PATH}{SLASH}output'))
     [print(f'{i}\t{v}') for i,v in enumerate(tsvs) if os.path.isdir(f'{PATH}{SLASH}output{SLASH}{v}')]
     tsv = input()
-    try:
-      tsv = tsvs[int(tsv)]
-      break
-    except (IndexError, AttributeError, TypeError, ValueError):
+    if re.match(r'\D+', tsv) and tsv != 'all': #If the input is the name of a new TSV file
       tsv_path = f"{PATH}{SLASH}{tsv}.tsv"
       try:
         assert os.path.exists(tsv_path)
+        tsvs.append(tsv)
+        tsv_inds = tsvs.index(tsv)
         break
       except AssertionError:
         try:
           assert os.path.exists(tsv_path.replace('.tsv','.txt'))
           break
         except AssertionError: print("Please enter a valid TSV file name!\n")
-      
+        continue
+    else:
+      tsv_inds = input_to_range(tsv, len(tsvs))
+    tsvs = [v for i, v in enumerate(tsvs) if i in tsv_inds]
+    break
+  return tsvs
+       
+def tsv_handler(tsv):
+  """
+  Allow the user to choose which TSV they wish to work on, return the path to the moved tsv and the name of the tsv, return either a name of a specific tsv or a list of indices to work on
+  """
+  tsv_path = os.path.join(PATH, tsv + '.tsv')
   dir_checker('output/' + tsv)
   dir_checker('output/' + tsv + '/' + 'stderr')
   dir_checker('output/' + tsv + '/' + 'stdout')
@@ -1122,37 +1149,37 @@ def main():
       break
     except (IndexError, ValueError, TypeError):
       print('Please enter the number next to the configuration name\n\n')
-
-  tsv_path, tsv_name = tsv_handler()
-  tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
-  try: tsv_df.scientific_name = tsv_df.scientific_name.str.replace(' ','_')
-  except AttributeError:
-    formats = [rows_of_links]
-    print("It appears your file is not in EBI format.\n")
-    [print(f'Enter {i}\tto {v.__name__}' for i,v in enumerate(formats))]
-    choice = input()
-    tsv_df = formats[choice](tsv_path)
-    
+  tsvs = tsv_input()    
   print('Please enter 1 to enter the configuration menu.\nEnter 0 to continue\n')
   change = int(input())
   if change:
     change_menu()
-  print(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\nTo work on specific rows, enter a list of rows seperated by a SINGLE space (1 2 3 4)\n')
-  wanted_cols = ['index', 'scientific_name', 'run_accession', 'sample_title', 'library_strategy', 'library_selection', 'read_count']
-  colnames = ['Index', 'ID', 'Sample accession', 'Sample', 'Library Strategy', 'Library Selection', 'Read Count']
-  actual_cols = [i for i in wanted_cols if i in tsv_df.columns]
-  sliced_df = tsv_df.loc[:, actual_cols]
-  print(tabulate(sliced_df, headers = 'keys', tablefmt = 'psql'))
-  while True:
-    work_on = input()
-    if ' ' in work_on:
-      try:
-        work_on = [int(i) for i in work_on.split(' ')]
-      except ValueError:
-        print('The list of rows to work on must only consist of integers seperated by a SINGLE SPACE!\nTry again\n')
+  run_list = []
+  for tsv in tsvs:
+    tsv_path, tsv_name = tsv_handler(tsv)
+    tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
+    try: tsv_df.scientific_name = tsv_df.scientific_name.str.replace(' ','_')
+    except AttributeError:
+      formats = [rows_of_links]
+      print("It appears your file is not in EBI format.\n")
+      [print(f'Enter {i}\tto {v.__name__}' for i,v in enumerate(formats))]
+      choice = input()
+      tsv_df = formats[choice](tsv_path)
+
+    print(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\nTo work on specific rows, enter a list of rows seperated by a SINGLE space (1 2 3 4)\n')
+    wanted_cols = ['index', 'scientific_name', 'run_accession', 'sample_title', 'library_strategy', 'library_selection', 'read_count']
+    colnames = ['Index', 'ID', 'Sample accession', 'Sample', 'Library Strategy', 'Library Selection', 'Read Count']
+    actual_cols = [i for i in wanted_cols if i in tsv_df.columns]
+    sliced_df = tsv_df.loc[:, actual_cols]
+    print(tabulate(sliced_df, headers = 'keys', tablefmt = 'psql'))
+    while True:
+      work_on = input()
+      work_on = input_to_range(work_on, len(tsv_df))
+      if work_on == []:
         continue
-    break
-  csh_maker(work_on, tsv_df, tsv_name)
+      break
+    run_list += csh_maker(work_on, tsv_df, tsv_name)
+  make_master_file(run_list)
   save_settings(source = 'current', output = 'last_used')
   print('Enter \"bash master.csh\" into the console to run the commands\nIMPORTANT: Each sample will be executed simultaneously in qsub you run this command, make sure you dont run too many at once!\n')
 
