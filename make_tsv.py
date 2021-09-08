@@ -109,7 +109,6 @@ def main(args):
     print(f'File name\t{NAME}\n')
     print('To run pipeline on the samples, launch maker.py and select the appropriate name.\nThe created TSV file is already located within the sample folder, and the sample files were transferred into the sample file location.')
 
-
 def path_check(path : str) -> str:
     """
     Check whether the path is valid
