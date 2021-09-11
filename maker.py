@@ -19,18 +19,30 @@ import pandas as pd
 from Bio import Entrez, SeqIO
 from tabulate import tabulate
 
-DASH = '--------------------------------------------'
+DASH = '##############################################'
 PATH = os.getcwd()
 if sys.platform != 'win32':
     SLASH = '/'
 else:
     SLASH = '\\'
 try:
-  org_df = pd.read_csv(f'{PATH}{SLASH}src{SLASH}final.csv')
+  org_df = pd.read_csv(os.path.join(PATH, 'src', 'final.csv'))
   org_df.organism = org_df.organism.str.replace(' ','_')
   org_df = org_df.set_index('organism')
 except FileNotFoundError: raise FileNotFoundError('final.csv is required in the src folder for the program to operate.')
 
+def pprint(string):
+  """
+  Pretty print a string by adding newlines and sorrounding it with dashes
+  """
+  if '\n' in string:
+    lens = [len(i) for i in string.split('\n')]
+    string_len = max(lens)
+  else:
+    string_len = len(string)
+
+  dashes = ''.join(['#' for i in range(string_len)])
+  print(f'{dashes}\n{string}\n{dashes}\n')
 
 def file_reader(filename : str, directory : str = 'current') -> dict: 
   """
@@ -143,6 +155,7 @@ def ref_maker(org_name : str) -> str:
 
 def tabulate_dict(dicty: dict) -> tabulate:
   """
+  Recieve a dictionary and return a pretty-printed table where each column is a key and the values are spread into rows.
   """
   temp_df = pd.DataFrame(dicty)
   return tabulate(temp_df, headers = 'keys', tablefmt = 'psql')
@@ -440,7 +453,7 @@ def add_new_pipeline_setting() -> None:
   order = file_reader('run_order')
   setting_keys = list(settings.keys())
   [print(f'{i}\t{k}\n') for i,k in enumerate(setting_keys)]
-  print('\nPlease type the pipeline step to add a setting to\n')
+  print(f'{DASH}\nPlease type the pipeline step to add a setting to\n{DASH}')
   step = int(input())
   chosen_step = setting_keys[step]
   print(f"You chose {chosen_step}\nPlease enter the setting name\n")
@@ -512,7 +525,7 @@ def manually_change_ref_or_gtf() -> None:
     return
   keys = list(ref.keys())
   while True:
-    print("Please choose an organism to add reference fasta or gtf path to\nEnter exit to return to main menu")
+    pprint("Please choose an organism to add reference fasta or gtf path to\nEnter exit to return to main menu")
     [print(f'{i}\t{v}\n') for i,v in enumerate(keys)]
     org = input()
     if org == 'exit': break
@@ -547,7 +560,7 @@ def change_menu():
   the user here.
   """
   choice = True
-  print('####################\n\nWelcome to the configuration menu\n')
+  pprint('Welcome to the configuration menu!')
   menu = [lambda :0, change_general_settings, change_pipeline_settings, change_pipeline, add_new_pipeline_setting, add_new_pipeline_step,manually_change_ref_or_gtf, save_current_settings]
   while choice:
     [print(f"Enter {i+1}\tto {x.__name__}\n") for i,x in enumerate(menu[1:])]
@@ -1075,7 +1088,8 @@ def tsv_input() -> list:
   """
 
   while True:
-    print('Please enter TSV file name (without extension) or the number next to a pre-existing TSV file.\nIf you want to work on several TSVs at once, you can do this by entering either a range of numbers separated by a dash (x-y).\nSeveral numbers separated by space (x y z).\n Or the word \"all\".\nIMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: all the tsvs must be in the following format:\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\nThe format is available for download from the EBI website\n')
+    pprint('Please enter TSV file name (without extension) or the number next to a pre-existing TSV file.\nIf you want to work on several TSVs at once you can do this by entering either a range of numbers separated by a dash (x-y).\nSeveral numbers separated by space (x y z), or the word \"all\".')
+    print(f'IMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: all the tsvs must be in the following format:\n\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\n\nThe format is available for download from the EBI website\n')
     tsvs = sorted(os.listdir(f'{PATH}{SLASH}output'))
     [print(f'{i}\t{v}') for i,v in enumerate(tsvs) if os.path.isdir(f'{PATH}{SLASH}output{SLASH}{v}')]
     tsv = input()
@@ -1138,7 +1152,7 @@ def main():
 
   if not os.path.exists(f'{PATH}{SLASH}config{SLASH}default'):
     defaults()
-  print(f'{DASH}\nWelcome to the semi-automatic .csh maker\n{DASH}')
+  pprint(f'Welcome to the semi-automatic .csh maker')
   workflows = sorted(os.listdir(f'{PATH}{SLASH}config'))
   while True:
     print('Please choose a pre-configured workflow\n')
@@ -1151,7 +1165,7 @@ def main():
     except (IndexError, ValueError, TypeError):
       print('Please enter the number next to the configuration name\n\n')
   tsvs = tsv_input()    
-  print('Please enter 1 to enter the configuration menu.\nEnter 0 to continue\n')
+  pprint('Please enter 1 to enter the configuration menu.\nEnter 0 to continue\n')
   change = int(input())
   if change:
     change_menu()
@@ -1167,7 +1181,7 @@ def main():
       choice = input()
       tsv_df = formats[choice](tsv_path)
 
-    print(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\nTo work on specific rows, enter a list of rows seperated by a SINGLE space (1 2 3 4)\n')
+    pprint(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\nTo work on specific rows, enter a list of rows seperated by a SINGLE space (1 2 3 4)')
     wanted_cols = ['index', 'scientific_name', 'run_accession', 'sample_title', 'library_strategy', 'library_selection', 'read_count']
     colnames = ['Index', 'ID', 'Sample accession', 'Sample', 'Library Strategy', 'Library Selection', 'Read Count']
     actual_cols = [i for i in wanted_cols if i in tsv_df.columns]
@@ -1187,3 +1201,5 @@ def main():
 
 if __name__ == '__main__':
   main()
+
+# %%
