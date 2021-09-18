@@ -82,7 +82,7 @@ def file_creator(filename : str, format_dict : dict, directory : str = 'current'
   else:
     filepath = f'{PATH}{SLASH}config{SLASH}{directory}{SLASH}{filename}.json'
   with open(filepath, 'w') as file:
-    json.dump(format_dict, sort_keys = True, fp = file, indent = 1)
+    json.dump(format_dict, sort_keys = True, fp = file, indent = 4)
 
 
 def dir_checker(dirname : str) -> None:
