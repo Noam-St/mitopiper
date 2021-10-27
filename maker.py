@@ -282,9 +282,9 @@ def ref_main(org_name : str) -> str:
       print('Please enter 1 or 2 only')
  
     refs[org_name] = {}
-    refs[org_name]['refpath'] = fasta
-    refs[org_name]['gtfpath'] = gtf
-    refs[org_name]['chrominfopath'] = chrominfo
+    refs[org_name]['refpath'] = fasta.replace(r'"', '')
+    refs[org_name]['gtfpath'] = fasta.replace(r'"', '')
+    refs[org_name]['chrominfopath'] = fasta.replace(r'"', '')
     file_creator('refpaths', refs, 'global') #NOTE(Noam) Currently set to global, think about changing to local pre-configurations to enable multiple ref files for the same organism depending on preset.
     return add_to_csh
 
@@ -647,7 +647,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, PAIRE
     sam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}*.sam'
     STAR_out = f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}'
     STAR_final_log = f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}Log.final.out'
-    fasta_dir = os.path.dirname(fasta)
+    fasta_dir = os.path.dirname(fasta).replace(r'"', '')
     command_input = f'{tsv_dir}{SLASH}{command_inputdir}{SLASH}{sample}*{input_ext}'
     command_output = f'{tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}{output_ext}'
     command_output_dir_path = f'{tsv_dir}{SLASH}{command_outdir}'
