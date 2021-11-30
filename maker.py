@@ -219,6 +219,7 @@ def ref_main(org_name : str) -> str:
     ----------
     org_name : str
       Name of the organism to make a reference file for
+    
     Returns
     -------
     fasta : str
@@ -283,8 +284,8 @@ def ref_main(org_name : str) -> str:
  
     refs[org_name] = {}
     refs[org_name]['refpath'] = fasta.replace(r'"', '')
-    refs[org_name]['gtfpath'] = fasta.replace(r'"', '')
-    refs[org_name]['chrominfopath'] = fasta.replace(r'"', '')
+    refs[org_name]['gtfpath'] = gtf.replace(r'"', '')
+    refs[org_name]['chrominfopath'] = chrominfo.replace(r'"', '')
     file_creator('refpaths', refs, 'global') #NOTE(Noam) Currently set to global, think about changing to local pre-configurations to enable multiple ref files for the same organism depending on preset.
     return add_to_csh
 
