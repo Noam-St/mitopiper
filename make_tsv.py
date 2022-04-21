@@ -72,7 +72,8 @@ def fix_names(org, NAME):
         initials = initials[0][0] + initials[1][0]
     except IndexError:
         initials = initials[0].split('_')
-        initials = initials[0][0] + initials[1][0]
+        try: initials = initials[0][0] + initials[1][0]
+        except IndexError: initials = initials[0][0]
     initials = initials.upper()
 
     tsv_df = pd.read_csv(os.path.join(PATH, 'output', NAME, f'{NAME}.tsv'), sep = '\t')

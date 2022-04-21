@@ -10,7 +10,7 @@ the settings for each of the pipeline programs used, and the paths of the progra
 __author__ = 'Noam Shtolz'
 
 
-import sys, shutil, os, math, json, re
+import sys, shutil, os, math, json, re, glob
 from textwrap import wrap
 
 #%%
@@ -84,6 +84,27 @@ def file_creator(filename : str, format_dict : dict, directory : str = 'current'
   with open(filepath, 'w') as file:
     json.dump(format_dict, sort_keys = True, fp = file, indent = 4)
 
+def validate_configs():
+  """
+  Iterate over all config folders, make sure that all the keys in each .json file match the keys within the default config, if it doesn't add the new key and re-save the config
+  """
+  resave = False
+  config_names = ['settings', 'pipeline', 'general_settings']
+  for dir in os.listdir(f'{PATH}{SLASH}config'):
+    if dir not in ['default', 'global']:
+      for file in os.listdir(f'{PATH}{SLASH}config{SLASH}{dir}'):
+        file = file.replace('.json','')
+        if file in config_names:
+          file_dict = file_reader(file, dir)
+          def_dict = file_reader(file, 'default')
+          for key in def_dict:
+            if key not in file_dict:
+              file_dict[key] = def_dict[key]
+              resave = True
+        if resave:
+          print('Resaved successfully')
+          file_creator(file, file_dict, dir)
+          resave = False
 
 def dir_checker(dirname : str) -> None:
   """
@@ -309,15 +330,18 @@ def change_general_settings() -> None:
     except (ValueError, IndexError):
       print('Please enter either a number or exit!\n')
       continue
-    print(f"Please enter a new value for {options[choice]}\nCurrent value: {chosen[0]}\nDescription: {chosen[1]}\n")
-    new_value = input()
-    if options[choice] == 'free_form':
-      if new_value == '':
-        chosen[0] = ''
-      else:
-        chosen[0] += new_value + '\n'
+    if options[choice] == 'ignore_paired_end':
+      chosen[0] = not chosen[0]
     else:
-      chosen[0] = new_value
+      print(f"Please enter a new value for {options[choice]}\nCurrent value: {chosen[0]}\nDescription: {chosen[1]}\n")
+      new_value = input()
+      if options[choice] == 'free_form':
+        if new_value == '':
+          chosen[0] = ''
+        else:
+          chosen[0] += new_value + '\n'
+      else:
+        chosen[0] = new_value
     general_settings[options[choice]] = chosen
 
   file_creator(filename = 'general_settings', format_dict = general_settings)
@@ -334,7 +358,7 @@ def change_pipeline_settings() -> None:
   order = file_reader('run_order')
   print(f"Welcome to the settings menu\n")
   while True:
-    [print(f'{i}\t{v}\n') for i,v in enumerate(options) if pipeline[v]['switch']]
+    [print(f'{i}\t{v}') for i,v in enumerate(options) if pipeline[v]['switch']]
     print('To change settings for a specific step, enter the number next to it\n')
     print('Type exit to exit\n')
     choice = input()
@@ -369,7 +393,7 @@ def change_pipeline_settings() -> None:
         settings[chosen_stage][chosen_setting]['switch'] = not setting_switch
         print(f'\nSetting switched to {not bool(setting_switch)}\n')
       else:
-        print(f'You chose: {chosen_setting}\nPlease choose a new value, current value: {setting_value}\n\nThe value may include several Keywords: _gtf, _chrominfo, _fasta, _fastq, _fastq_pre, _fastq_sample_path_no_ext, _fastq_dir, _fastq_pre_dir, _bam and _sam\nThese keywords will be replaced with appropriate paths\n')
+        print(f'You chose: {chosen_setting}\nPlease choose a new value, current value: {setting_value}\n\nThe value may include several Keywords: _gtf, _chrominfo, _fasta, _fastq, _fastq_pre, _fastq_sample_path_no_ext, _fastq_dir, _fastq_pre_dir, _bam, _sam, _org_name\nThese keywords will be replaced with appropriate paths\n')
         print(f'Additionally, you may add the combination of output_command_name or dir_command_name to include the output of another command in the setting value\nNOTE: you are adding a setting to {chosen_stage}. You can grab the output of the following commands with the current run order\n')
         try: print('\t'.join(order[:order.index(chosen_stage)]))
         except ValueError: print('Step isnt active!')
@@ -527,7 +551,7 @@ def manually_change_ref_or_gtf() -> None:
   keys = list(ref.keys())
   while True:
     pprint("Please choose an organism to add reference fasta or gtf path to\nEnter exit to return to main menu")
-    [print(f'{i}\t{v}\n') for i,v in enumerate(keys)]
+    [print(f'{i}\t{v}') for i,v in enumerate(keys)]
     org = input()
     if org == 'exit': break
     try: org = keys[int(org)]
@@ -536,8 +560,9 @@ def manually_change_ref_or_gtf() -> None:
       continue
     print('Would you like to change gtf, fasta, chromInfo all?\n')
     work_on = ['ref', 'gtf', 'chrominfo', 'all']
-    [print(f'{i}\t{v}\n') for i,v in enumerate(work_on)]
-    choice = input()
+    [print(f'{i}\t{v}') for i,v in enumerate(work_on)]
+    choice = int(input())
+    
     try: work_on = work_on[int(choice)]
     except IndexError:
       print('Please enter one of the possible options!\n')
@@ -554,6 +579,46 @@ def manually_change_ref_or_gtf() -> None:
     break
   file_creator(filename = 'refpaths', format_dict = ref, directory = 'global') 
 
+def copy_settings_and_pipeline_from_one_config_to_another() -> None:
+  """
+  Copy all existing pipeline steps and settings from an existing pipeline to another existing pipeline without running over them.
+  """
+  all_configs = [i for i in os.listdir(os.path.join(PATH, 'config')) if i not in ['default', 'current', 'global', 'last_used']]
+
+  print('You chose to copy settings and pipeline steps from one config to another.\nNOTE: this will not overwrite existing settings and steps!\n\nEnter "exit" to return to main menu')
+  while True:
+    print('Please enter the name of the pipeline you want to copy the steps and settings from!\n')
+    [print(f'{i}\t{v}') for i,v in enumerate(all_configs)]
+    try:
+      copy_from = input()
+      if copy_from == 'exit': return
+      print('Great! Now enter the name of the config you want to copy the steps and settings to!\n')
+      copy_to = input()
+      copy_from = int(copy_from)
+      copy_to = int(copy_to)
+      copy_from = all_configs[copy_from]
+      copy_to = all_configs[copy_to]
+      break
+    except (IndexError, ValueError):
+      print('Please enter valid configs from the list!\n')
+      continue
+
+  from_pipeline = file_reader('pipeline', copy_from)
+  from_settings = file_reader('settings', copy_from)
+  to_pipeline = file_reader('pipeline', copy_to)
+  to_settings = file_reader('settings', copy_to)
+
+  # Only copy pipeline steps that are not already in the pipeline and settings that are not already in the settings
+  for k,v in from_pipeline.items():
+    if k not in to_pipeline.keys():
+      to_pipeline[k] = v
+  for k,v in from_settings.items():
+    if k not in to_settings.keys():
+      to_settings[k] = v
+  file_creator('pipeline', to_pipeline, copy_to)
+  file_creator('settings', to_settings, copy_to)
+  print(f'\nSettings and pipeline steps copied to {copy_to} from {copy_from} successfuly!\n')
+
 
 def change_menu():
   """
@@ -562,7 +627,7 @@ def change_menu():
   """
   choice = True
   pprint('Welcome to the configuration menu!')
-  menu = [lambda :0, change_general_settings, change_pipeline_settings, change_pipeline, add_new_pipeline_setting, add_new_pipeline_step,manually_change_ref_or_gtf, save_current_settings]
+  menu = [lambda :0, change_general_settings, change_pipeline_settings, change_pipeline, add_new_pipeline_setting, add_new_pipeline_step,manually_change_ref_or_gtf, save_current_settings, copy_settings_and_pipeline_from_one_config_to_another]
   while choice:
     [print(f"Enter {i+1}\tto {x.__name__}\n") for i,x in enumerate(menu[1:])]
     print("Enter 0\t to exit\n")
@@ -613,7 +678,10 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, PAIRE
     org = org[0][0] + org[1][0]
   except IndexError:
     org = org[0].split('_')
-    org = org[0][0] + org[1][0]
+    try:
+      org = org[0][0] + org[1][0]
+    except IndexError:
+      org = org[0][0]
   org = org.upper()
   sample = f'{row.run_accession}_{i}_{org}'
   command_outputs = {f'output_{command}':f'{tsv_dir}{SLASH}{pipeline[command]["outdir"]}{SLASH}{sample}{pipeline[command]["output_ext"]}' for command in pipeline.keys()}
@@ -621,6 +689,8 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, PAIRE
   to_f_string = [
   '_fasta', '_fasta_dir', '_gtf', '_command_input', '_command_output', '_command_output_dir_path', '_command_input_dir_path','_fastq', '_fastq_pre', '_sample', '_fastq_sample_path_no_ext','_fastq_dir', '_fastq_pre_dir', '_bam', '_sam', '_STAR_out', '_fastq1', '_fastq2', '_org_name','_STAR_final_log', '_chrominfo'
   ]
+  if not PAIRED:
+    row.fastq_ftp = row.fastq_ftp.split(';')[0]
   for command in order:
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else (pipeline[command]['path'] +' ' + ' '.join(pipeline[command]['key'].split(' ')[1:]))
     command_outdir = pipeline[command]['outdir']
@@ -795,12 +865,17 @@ def csh_maker(work_on, tsv_df, tsv_name):
       continue
     if len(row.fastq_ftp.split(';')) > 1: PAIRED = True
     else : PAIRED = False
+    try:
+      if general_settings['ignore_paired_end'][0]:
+        PAIRED = False
+    except KeyError:
+      pass
     with open(f'{tsv_dir}{SLASH}run{i}.csh', 'w') as file:
       file.write(f'#!/bin/{general_settings["environment"][0]}\n')
       file.write(f'#$ -o {tsv_dir}{SLASH}stdout\n')
       file.write(f'#$ -e {tsv_dir}{SLASH}stderr\n')
       file.write(f'#$ -cwd\n')
-      file.write(f'#$ -N {row.run_accession}_{i}\n')
+      file.write(f'#$ -N s_{row.run_accession}_{i}\n')
       file.write(f'#$ -q {general_settings["qsub_queue"][0]}\n')
       file.write(f'#$ -S /bin/bash\n')
       file.write(f'#$ -V\n')
@@ -1072,6 +1147,7 @@ def defaults():
   DEFAULT_ORDER = ['wget','fastqc_pre','trim','fastqc','bwa-align','view','sort','index','mpileup']
   DEFAULT_MAIN =\
   {
+  'ignore_paired_end': [False, 'Ignore paired-end reads'],
   'qsub_queue' : ['bioinfo.q', 'choose which cluster queue to send the jobs into'],
   'environment':['bash', 'choose the linux environment to use'],
   'free_form':['', 'any command you type here will be added to every single .csh file created, enter nothing to wipe setting']
@@ -1082,7 +1158,7 @@ def defaults():
   configs = ['pipeline', 'settings', 'run_order', 'general_settings']
   for i,config in enumerate(configs):
     file_creator(config, DEFAULTS[i], directory = 'default')
-
+  
 def tsv_input() -> list:
   """
   Recieve the requested tsvs from the user and return them as a list of tsv names
@@ -1153,6 +1229,7 @@ def main():
 
   if not os.path.exists(f'{PATH}{SLASH}config{SLASH}default'):
     defaults()
+  validate_configs()
   pprint(f'Welcome to the semi-automatic .csh maker')
   workflows = sorted(os.listdir(f'{PATH}{SLASH}config'))
   while True:
