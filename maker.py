@@ -12,8 +12,6 @@ __author__ = 'Noam Shtolz'
 
 import sys, shutil, os, math, json, re, glob
 from textwrap import wrap
-
-#%%
 import snoop
 import pandas as pd
 from Bio import Entrez, SeqIO
@@ -772,7 +770,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, PAIRE
       ftps = row.fastq_ftp.split(';')
       if command == 'wget':
         for i in range(2):
-          csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}.fastq.gz ftp://{ftps[i]}\n'
+          csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}.fastq.gz {ftps[i]}\n'
           csh_str+='sleep 30s\n'
       elif command == 'trim':
         csh_str+=f'{command_key} {command_settings} --paired {fastq_pre}\n'
@@ -863,8 +861,13 @@ def csh_maker(work_on, tsv_df, tsv_name):
     if csh_add_ref == False:
       bad_orgs.append(org_name)
       continue
-    if len(row.fastq_ftp.split(';')) > 1: PAIRED = True
-    else : PAIRED = False
+    try:
+      if len(row.fastq_ftp.split(';')) > 1:
+        PAIRED = True
+      else:
+        PAIRED = False
+    except AttributeError:
+      print(f'Error:\tNo fastq_ftp found for sample {i} of organism {org_name} ! Skipping...\n\n')
     try:
       if general_settings['ignore_paired_end'][0]:
         PAIRED = False
