@@ -18,6 +18,7 @@ def gen_id():
     MIN = 1000000
     num = random.randint(MIN, MAX)
     return 'SRR' + str(num)
+
 def make_tsv(sample_files, org, libstrat):
     """
     """
@@ -98,7 +99,6 @@ def fix_names(org, NAME):
             new = os.path.join(PATH, 'output', NAME, 'fastq', f'{f}_{c}_{initials}.fastq.gz')
             os.rename(old, new)
         c+=1
-
 
 
 def main(args):

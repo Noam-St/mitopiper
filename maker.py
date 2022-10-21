@@ -13,6 +13,7 @@ __author__ = 'Noam Shtolz'
 import sys, shutil, os, math, json, re, glob
 from textwrap import wrap
 import snoop
+import consts
 import pandas as pd
 from Bio import Entrez, SeqIO
 from tabulate import tabulate
@@ -44,7 +45,7 @@ def pprint(string):
 
 def file_reader(filename : str, directory : str = 'current') -> dict: 
   """
-  Read .json files in the format key:value to a dictionary
+  Read .json files in the format key:value from a dictionary
 
   Parameters
   ----------
@@ -56,13 +57,12 @@ def file_reader(filename : str, directory : str = 'current') -> dict:
     Dictionary with the left side of the equal sign as key and right side as value
   """
   if directory == '':
-    with open(f'{PATH}{SLASH}config{SLASH}{filename}.json', 'r') as file:
+    with open(os.path.join(PATH, 'config', filename + '.json'), 'r') as file:
       format_dict = json.load(file)
   else:
-    with open(f'{PATH}{SLASH}config{SLASH}{directory}{SLASH}{filename}.json', 'r') as file:
+    with open(os.path.join(PATH, 'config', directory, filename + '.json'), 'r') as file:
       format_dict = json.load(file)
   return format_dict
-
 
 def file_creator(filename : str, format_dict : dict, directory : str = 'current') -> None:
   """
@@ -76,9 +76,9 @@ def file_creator(filename : str, format_dict : dict, directory : str = 'current'
     Dictionary by-which to write the file in this format: key=value
   """
   if directory == '':
-    filepath = f'{PATH}{SLASH}config{SLASH}{filename}.json'
+    filepath = os.path.join(PATH, 'config', filename + '.json')
   else:
-    filepath = f'{PATH}{SLASH}config{SLASH}{directory}{SLASH}{filename}.json'
+    filepath = os.path.join(PATH, 'config', directory, filename + '.json')
   with open(filepath, 'w') as file:
     json.dump(format_dict, sort_keys = True, fp = file, indent = 4)
 
@@ -88,9 +88,9 @@ def validate_configs():
   """
   resave = False
   config_names = ['settings', 'pipeline', 'general_settings']
-  for dir in os.listdir(f'{PATH}{SLASH}config'):
+  for dir in os.listdir(os.path.join(PATH, 'config')):
     if dir not in ['default', 'global']:
-      for file in os.listdir(f'{PATH}{SLASH}config{SLASH}{dir}'):
+      for file in os.listdir(os.path.join(PATH, 'config', dir)):
         file = file.replace('.json','')
         if file in config_names:
           file_dict = file_reader(file, dir)
@@ -116,7 +116,6 @@ def dir_checker(dirname : str) -> None:
   dirname = dirname.replace('/', SLASH)
   if not os.path.isdir(f'{PATH}{SLASH}{dirname}'):
     os.mkdir(f'{PATH}{SLASH}{dirname}')
-
 
 def fasta_wrap(string : str, per : int = 60) -> str:
   """
@@ -171,14 +170,12 @@ def ref_maker(org_name : str) -> str:
     ref.write(fasta_wrap(seq))
   return fasta, ID
 
-
 def tabulate_dict(dicty: dict) -> tabulate:
   """
   Recieve a dictionary and return a pretty-printed table where each column is a key and the values are spread into rows.
   """
   temp_df = pd.DataFrame(dicty)
   return tabulate(temp_df, headers = 'keys', tablefmt = 'psql')
-
 
 def gff3_maker(org_name : str) -> str:
   """
@@ -200,24 +197,21 @@ def gff3_maker(org_name : str) -> str:
     out_handle.close()
   return gtf
 
-
 def save_settings(source: str, output: str) -> None:
   """
   Transfer settings from source to output
   """
   dir_checker('config/' + output)
-  for jsonfile in os.listdir(f'{PATH}{SLASH}config{SLASH}{source}'):
+  for jsonfile in os.listdir(os.path.join(PATH, 'config', source)):
     if '.json' in jsonfile:
       jsonfile = jsonfile.replace('.json','')
       file_creator(filename = jsonfile, format_dict = file_reader(filename = jsonfile, directory = source), directory = output)
-
 
 def sa_index_calc(glen : int) -> float:
   """
   Calculate the SA index according to STAR manual
   """
   return round(min(14, math.log2(glen)/2 - 1),0)
-
 
 def save_current_settings() -> None:
   """
@@ -228,7 +222,6 @@ def save_current_settings() -> None:
   save_settings(source = 'current', output = name)
   print('\nSettings saved successfuly!\n')
   return
-
 
 def ref_main(org_name : str) -> str:
   """
@@ -249,7 +242,6 @@ def ref_main(org_name : str) -> str:
   dir_checker('config/global')
   if not os.path.exists(os.path.join(PATH, 'config', 'global', 'refpaths.json')):
     file_creator('refpaths', {}, directory = 'global')
-
   refs = file_reader('refpaths', 'global')
   pipeline = file_reader('pipeline')
   try:
@@ -935,268 +927,58 @@ def defaults():
   #  API = input()
   #  file_creator('credentials', {'Email':EMAIL, 'API':API}, directory = 'default')
   
-  DEFAULT_PIPE =\
-{
-'wget' : {
-  'key':'wget',
-  'description':'Download command',
-  'switch':True,
-  'path':r'',
-  'outdir':'fastq',
-  'output_ext':'',
-  'inputdir':'',
-  'input_ext':'',
-  'structure':''
-},
-'trim' : {
-  'key':'trim_galore',
-  'description':'Trims adapters',
-  'switch':True,
-  'path':r'',
-  'outdir':'post_trim',
-  'output_ext':'.fq.gz',
-  'inputdir':'fastq',
-  'input_ext':'.fastq',
-  'structure':'key settings fastq_pre'
-},
-'fastqc':{
-  'key':'fastqc',
-  'description':'Create a readable quality report in html format',
-  'switch':True,
-  'path':r'/gpfs0/biores/apps/FastQC_v0.11.7/fastqc',
-  'outdir':'post_trim',
-  'output_ext':'',
-  'inputdir':'',
-  'input_ext':'',
-  'structure':''
-},
-'fastqc_pre':{
-  'key':'fastqc',
-  'switch':True,
-  'description':'Create a readable quality report in html format',
-  'path':r'/gpfs0/biores/apps/FastQC_v0.11.7/fastqc',
-  'outdir':'fastq',
-  'output_ext':'',
-  'inputdir':'',
-  'input_ext':'',
-  'structure':''
-},
-'bwa-align' : {
-  'key':'bwa mem',
-  'description':'Align reads to reference',
-  'switch':True,
-  'path':r'',
-  'outdir':'alignment',
-  'output_ext':'.sam',
-  'inputdir':'post_trim',
-  'input_ext':'.fq.gz',
-  'structure':'key settings fasta fastq output_pipe'
-},
-'view':{
-  'key':'samtools view',
-  'description':'Convert sam to bam',
-  'switch':True,
-  'path':r'',
-  'outdir':'alignment',
-  'output_ext':'.bam',
-  'inputdir':'alignment',
-  'input_ext':'.sam',
-  'structure':'key settings _sam output_pipe'
-},
-'index':{
-  'key':'samtools index',
-  'description':'Index bam for fast access via samtools',
-  'switch':True,
-  'path':r'',
-  'outdir':'alignment',
-  'output_ext':'.bam.bai',
-  'inputdir':'alignment',
-  'input_ext':'.bam',
-  'structure':''
-},
-'mpileup':{
-  'key':'samtools mpileup',
-  'description':'Create a readable mpileup format',
-  'switch':True,
-  'path':r'',
-  'outdir':'pileup',
-  'output_ext':'.pileup',
-  'inputdir':'alignment',
-  'input_ext':'.bam',
-  'structure':'key settings command_input output_pipe'
-},
-'sort':{
-  'key': 'samtools sort',
-  'description':'Sort reads',
-  'switch':True,
-  'path':r'',
-  'outdir':'',
-  'output_ext':'',
-  'inputdir':'alignment',
-  'input_ext':'.bam',
-  'structure':'key settings command_input'
-},
-'htseq-count':{
-  'key': 'htseq-count',
-  'description': 'Measure expression',
-  'switch': False,
-  'path': r'',
-  'outdir':'count',
-  'output_ext':'.txt',
-  'inputdir':'alignment',
-  'input_ext':'.bam',
-  'structure': 'key settings input gtf output_pipe'
-},
-'STAR-alignment':{
-  'key':'STAR',
-  'description':'Align reads to ref',
-  'switch': False,
-  'path': '/gpfs0/biores/apps/STAR/STAR-v2.5.3a/bin/Linux_x86_64/STAR',
-  'outdir':'',
-  'output_ext':'',
-  'inputdir':'post_trim',
-  'input_ext':'.fq.gz',
-  'structure':'key settings'
-}
-}
+  DEFAULT_PIPE = consts.DEFAULT_PIPE
 
-  DEFAULT_SETTINGS =\
-{
-  'trim':{
-    'quality':{'description':'Trim low-quality ends from reads', 'key':'-q', 'value':20, 'switch':True},
-    'outdir':{'description':'Choose output directory', 'key':'-o', 'value':'_fastq_dir', 'switch':True}
-  },
-  'bwa-align':{
-    'seed':{'description':'Minimum seed length', 'key':'-k', 'value':19, 'switch':True},
-  },
-  'view':{
-    'header':{'description':'Include the header in the output', 'key':'-h', 'value':'', 'switch':True},
-    'bam':{'description':'Output in BAM format', 'key':'-b', 'value':'', 'switch':True}
-  },
-  'index':{},
-  'mpileup':{
-    'quality':{'description':'Minimum base quality for a base to be considered', 'key':'-Q', 'value':30, 'switch':True},
-    'reference':{'description':'Fasta type ref file','key':'-f', 'value':'_fasta', 'switch':True}
-  },
-  'fastqc':{
-    'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':'_fastq_dir', 'switch':True}
-  },
-   'fastqc_pre':{
-    'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':f'_fastq_pre_dir', 'switch':True}
-  },
-  'wget':{},
-  'sort':{
-    'output':{'description':'Output directory', 'key' : '-o', 'value': '_bam', 'switch':True}
-  },
-  'htseq-count':{
-    'ID':{'description': 'ID attribute to use', 'key' : '-i', 'value' : 'ID', 'switch':True},
-    'Additional attribute':{'description': 'Additional attribute to use', 'key':'--additional-attr', 'value':'gene','switch':True},
-    'Feature column name':{'description': 'Feature column name to use','key':'-t', 'value':'gene', 'switch':True},
-    'stranded':{'description': 'Whether the reads are stranded', 'key':'-s','value':'no','switch':True},
-    'format':{'description':'Format to read input in','key':'-f','value':'bam','switch':True},
-    'ambiguous':{'description':'How to handle ambiguous reads', 'key':'--nonunique','value':'all','switch':True}
-  },
-  'STAR-alignment':{
-    'genomeDir':
-    {
-    'description':'Input ref',
-    'key' : '--genomeDir',
-    'value':'_fasta_dir',
-    'switch':True
-    },
-    'readFilesIn':
-    {
-    'description':'Input fastq',
-    'key': '--readFilesIn',
-    'value':'_fastq',
-    'switch':True
-    },
-    "outSAMtype":
-    {
-    "description": "output format",
-    "key": "--outSAMtype",
-    "switch": True,
-    "value": "BAM SortedByCoordinate"
-    },
-    "readFilesCommand":
-    {
-    "description": "Input format",
-    "key": "--readFilesCommand",
-    "switch": True,
-    "value": "gunzip -c"
-    },
-    "runThreadN":
-    {
-    "description": "The amount of threads to use",
-    "key": "--runThreadN",
-    "switch": True,
-    "value": 4
-    },
-    "outFileNamePrefix":
-    {
-    "description": "Output prefix",
-    "key": '--outFileNamePrefix',
-    'switch': True,
-    'value': '_STAR_out'
-    },
-    'limit sort RAM':
-    {
-    'description':'whatever',
-    'key':'--limitBAMsortRAM',
-    'value':1205130643,
-    'switch':True
-    }}
-}
-  DEFAULT_ORDER = ['wget','fastqc_pre','trim','fastqc','bwa-align','view','sort','index','mpileup']
-  DEFAULT_MAIN =\
-  {
-  'ignore_paired_end': [False, 'Ignore paired-end reads'],
-  'qsub_queue' : ['bioinfo.q', 'choose which cluster queue to send the jobs into'],
-  'environment':['bash', 'choose the linux environment to use'],
-  'free_form':['', 'any command you type here will be added to every single .csh file created, enter nothing to wipe setting']
-  }
+  DEFAULT_SETTINGS = consts.DEFAULT_SETTINGS
+  DEFAULT_ORDER = consts.DEFAULT_ORDER
+  DEFAULT_MAIN = consts.DEFAULT_MAIN
+  
   DEFAULTS = (DEFAULT_PIPE, DEFAULT_SETTINGS, DEFAULT_ORDER, DEFAULT_MAIN)
   
   file_creator('refpaths', {}, directory = 'global')
   configs = ['pipeline', 'settings', 'run_order', 'general_settings']
   for i,config in enumerate(configs):
     file_creator(config, DEFAULTS[i], directory = 'default')
-  
-def tsv_input() -> list:
+
+@snoop 
+def metadata_input() -> list:
   """
   Recieve the requested tsvs from the user and return them as a list of tsv names
   """
 
   while True:
-    pprint('Please enter TSV file name (without extension) or the number next to a pre-existing TSV file.\nIf you want to work on several TSVs at once you can do this by entering either a range of numbers separated by a dash (x-y).\nSeveral numbers separated by space (x y z), or the word \"all\".')
-    print(f'IMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: all the tsvs must be in the following format:\n\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\n\nThe format is available for download from the EBI website\n')
+    pprint('Please enter metadata file name (without extension) or the number next to a pre-existing metadata file.\nIf you want to work on several metadata files at once you can do this by entering either a range of numbers separated by a dash (x-y).\nSeveral numbers separated by space (x y z), or the word \"all\".')
+    print(f'IMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: all the metadata files must be in the following format:\n\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\n\nThe format is available for download from the EBI website\n')
     tsvs = sorted(os.listdir(f'{PATH}{SLASH}output'))
     [print(f'{i}\t{v}') for i,v in enumerate(tsvs) if os.path.isdir(f'{PATH}{SLASH}output{SLASH}{v}')]
     tsv = input()
     if re.match(r'\D+', tsv) and tsv != 'all': #If the input is the name of a new TSV file
+      # If file does not include extension, remove it
+      tsv = tsv.split('.')[0]
       tsv_path = f"{PATH}{SLASH}{tsv}.tsv"
       try:
         assert os.path.exists(tsv_path)
-        tsvs.append(tsv)
-        tsv = tsvs.index(tsv)
-        break
       except AssertionError:
-        try:
-          assert os.path.exists(tsv_path.replace('.tsv','.txt'))
-          break
-        except AssertionError: print("Please enter a valid TSV file name!\n")
-        continue
+        try: assert os.path.exists(tsv_path.replace('.tsv','.txt'))
+        except AssertionError:
+          print("Please enter a valid TSV file name!\n")
+          continue
+      tsvs.append(tsv)
+      tsv = tsvs.index(tsv)
+      break
     else:
       break
   tsv_inds = input_to_range(tsv, len(tsvs))
   tsvs = [v for i, v in enumerate(tsvs) if i in tsv_inds]
   return tsvs
        
-def tsv_handler(tsv):
+def metadata_handler(tsv):
   """
-  Allow the user to choose which TSV they wish to work on, return the path to the moved tsv and the name of the tsv, return either a name of a specific tsv or a list of indices to work on
+  Allow the user to choose which metadata file they wish to work on, return the path to the moved the metadata file and the name of the metadata file, return either a name of a specific metadata file or a list of indices to work on
   """
   tsv_path = os.path.join(PATH, tsv + '.tsv')
+  if not os.path.exists(tsv_path):
+    tsv_path = tsv_path.replace('.tsv', '.txt')
   dir_checker('output/' + tsv)
   dir_checker('output/' + tsv + '/' + 'stderr')
   dir_checker('output/' + tsv + '/' + 'stdout')
@@ -1245,14 +1027,14 @@ def main():
       break
     except (IndexError, ValueError, TypeError):
       print('Please enter the number next to the configuration name\n\n')
-  tsvs = tsv_input()    
+  tsvs = metadata_input()    
   pprint('Please enter 1 to enter the configuration menu.\nEnter 0 to continue\n')
   change = int(input())
   if change:
     change_menu()
   run_list = []
   for tsv in tsvs:
-    tsv_path, tsv_name = tsv_handler(tsv)
+    tsv_path, tsv_name = metadata_handler(tsv)
     tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
     try: tsv_df.scientific_name = tsv_df.scientific_name.str.replace(' ','_')
     except AttributeError:
