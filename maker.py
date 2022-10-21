@@ -940,7 +940,7 @@ def defaults():
   for i,config in enumerate(configs):
     file_creator(config, DEFAULTS[i], directory = 'default')
 
-@snoop 
+ 
 def metadata_input() -> list:
   """
   Recieve the requested tsvs from the user and return them as a list of tsv names
