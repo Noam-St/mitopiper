@@ -10,7 +10,7 @@ the settings for each of the pipeline programs used, and the paths of the progra
 __author__ = 'Noam Shtolz'
 
 
-import sys, shutil, os, math, json, re, glob
+import sys, shutil, os, math, json, re
 from textwrap import wrap
 import snoop
 import consts

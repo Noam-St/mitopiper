@@ -147,7 +147,9 @@ DEFAULT_SETTINGS =\
 'fastqc_pre':{
 'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':f'_fastq_pre_dir', 'switch':True}
 },
-'wget':{},
+'wget':{
+  'continue' : {'description':'Continue getting a partially-downloaded file', 'key':'-c', 'value':'', 'switch':True}
+  },
 'sort':{
 'output':{'description':'Output directory', 'key' : '-o', 'value': '_bam', 'switch':True}
 },
