@@ -126,23 +126,55 @@ DEFAULT_PIPE =\
 DEFAULT_SETTINGS =\
 {
 'trim':{
-'quality':{'description':'Trim low-quality ends from reads', 'key':'-q', 'value':20, 'switch':True},
-'outdir':{'description':'Choose output directory', 'key':'-o', 'value':'_fastq_dir', 'switch':True}
+  'quality':{
+    'description':'Trim low-quality ends from reads',
+    'key':'-q',
+    'value':20,
+    'switch':True},
+  'outdir':{
+    'description':'Choose output directory',
+    'key':'-o',
+    'value':'_fastq_dir',
+    'switch':True}
 },
 'bwa-align':{
-'seed':{'description':'Minimum seed length', 'key':'-k', 'value':19, 'switch':True},
+  'seed':{
+    'description':'Minimum seed length',
+    'key':'-k',
+    'value':19,
+    'switch':True},
 },
 'view':{
-'header':{'description':'Include the header in the output', 'key':'-h', 'value':'', 'switch':True},
-'bam':{'description':'Output in BAM format', 'key':'-b', 'value':'', 'switch':True}
+  'header':{
+    'description':'Include the header in the output',
+    'key':'-h',
+    'value':'',
+    'switch':True},
+  'bam':{
+    'description':'Output in BAM format',
+    'key':'-b',
+    'value':'',
+    'switch':True}
 },
 'index':{},
 'mpileup':{
-'quality':{'description':'Minimum base quality for a base to be considered', 'key':'-Q', 'value':30, 'switch':True},
-'reference':{'description':'Fasta type ref file','key':'-f', 'value':'_fasta', 'switch':True}
+  'quality':{
+    'description':'Minimum base quality for a base to be considered', 
+    'key':'-Q',
+    'value':30,
+    'switch':True},
+  'reference':{
+    'description':'Fasta type ref file',
+    'key':'-f',
+    'value':'_fasta',
+    'switch':True}
 },
 'fastqc':{
-'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':'_fastq_dir', 'switch':True}
+  'outdir':{
+    'description':'Output directory',
+    'key' : '--outdir',
+    'value':'_fastq_dir',
+    'switch':True}
 },
 'fastqc_pre':{
 'outdir':{'description':'Output directory', 'key' : '--outdir', 'value':f'_fastq_pre_dir', 'switch':True}
@@ -151,30 +183,54 @@ DEFAULT_SETTINGS =\
   'continue' : {'description':'Continue getting a partially-downloaded file', 'key':'-c', 'value':'', 'switch':True}
   },
 'sort':{
-'output':{'description':'Output directory', 'key' : '-o', 'value': '_bam', 'switch':True}
+'output':{
+  'description':'Output directory',
+  'key' : '-o',
+  'value': '_bam',
+  'switch':True}
 },
 'htseq-count':{
-'ID':{'description': 'ID attribute to use', 'key' : '-i', 'value' : 'ID', 'switch':True},
-'Additional attribute':{'description': 'Additional attribute to use', 'key':'--additional-attr', 'value':'gene','switch':True},
-'Feature column name':{'description': 'Feature column name to use','key':'-t', 'value':'gene', 'switch':True},
-'stranded':{'description': 'Whether the reads are stranded', 'key':'-s','value':'no','switch':True},
-'format':{'description':'Format to read input in','key':'-f','value':'bam','switch':True},
-'ambiguous':{'description':'How to handle ambiguous reads', 'key':'--nonunique','value':'all','switch':True}
+  'ID':{
+    'description': 'ID attribute to use',
+    'key' : '-i', 'value' : 'ID', 'switch':True},
+  'Additional attribute':{
+    'description': 'Additional attribute to use',
+    'key':'--additional-attr',
+    'value':'gene',
+    'switch':True},
+  'Feature column name':{
+    'description': 'Feature column name to use',
+    'key':'-t',
+    'value':'gene',
+    'switch':True},
+  'stranded':{
+    'description': 'Whether the reads are stranded',
+    'key':'-s',
+    'value':'no',
+    'switch':True},
+  'format':{
+    'description':'Format to read input in',
+    'key':'-f',
+    'value':'bam',
+    'switch':True},
+  'ambiguous':{
+    'description':'How to handle ambiguous reads',
+    'key':'--nonunique',
+    'value':'all',
+    'switch':True}
 },
 'STAR-alignment':{
-'genomeDir':
-{
-'description':'Input ref',
-'key' : '--genomeDir',
-'value':'_fasta_dir',
-'switch':True
+  'genomeDir':{
+    'description':'Input ref',
+    'key' : '--genomeDir',
+    'value':'_fasta_dir',
+    'switch':True
 },
-'readFilesIn':
-{
-'description':'Input fastq',
-'key': '--readFilesIn',
-'value':'_fastq',
-'switch':True
+  'readFilesIn':{
+    'description':'Input fastq',
+    'key': '--readFilesIn',
+    'value':'_fastq',
+    'switch':True
 },
 "outSAMtype":
 {
@@ -212,6 +268,13 @@ DEFAULT_SETTINGS =\
 'switch':True
 }}
 }
+# Add an "order" key to each of the settings in the DEFAULT_SETTINGS dictionary
+for cmd in DEFAULT_SETTINGS:
+  c=1
+  for param in DEFAULT_SETTINGS[cmd]:
+    DEFAULT_SETTINGS[cmd][param]['order']=c
+    c+=1
+
 DEFAULT_ORDER = ['wget','fastqc_pre','trim','fastqc','bwa-align','view','sort','index','mpileup']
 
 DEFAULT_MAIN = \

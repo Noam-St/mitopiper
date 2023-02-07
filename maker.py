@@ -17,6 +17,9 @@ import consts
 import pandas as pd
 from Bio import Entrez, SeqIO
 from tabulate import tabulate
+from importlib import reload
+
+reload(consts)
 
 DASH = '##############################################'
 PATH = os.getcwd()
@@ -25,21 +28,47 @@ if sys.platform != 'win32':
 else:
     SLASH = '\\'
 try:
+  # Read in the final.csv file, which contains the organism names and their corresponding mt reference
   org_df = pd.read_csv(os.path.join(PATH, 'src', 'final.csv'))
   org_df.organism = org_df.organism.str.replace(' ','_')
   org_df = org_df.set_index('organism')
-except FileNotFoundError: raise FileNotFoundError('final.csv is required in the src folder for the program to operate.')
+  org_df_exists = True
+except FileNotFoundError:
+  print('final.csv is required in the src folder for the script to automatically download mt references')
+  org_df_exists = False
+
+def check_input(n, options, special = None):
+  """
+  Recieve a user input that is supposed to be a number within a certain range.
+  Make sure the input is convertable to int and within the range.
+  """
+  try:
+    n = int(n)
+  # If the user enters a non-integer, the program will ask them to enter a valid option
+  except ValueError:
+    print(f'Error: {n} is not a number!\nPlease only choose one of the listed options!\n')
+    return False
+  try: options[n]
+  except IndexError:
+    print(f"Error: the number {n} is out of range!\nPlease only choose one of the listed options!\n")
+    return False
+  if special != None:
+    if options[n] in special:
+      print(f'Error: {n} is not a valid option!\nPlease only choose one of the listed options!\n')
+      return False
+  return True
 
 def pprint(string):
   """
   Pretty print a string by adding newlines and sorrounding it with dashes
   """
+  # If the string contains newlines, find the longest line and use that as the length of the string
   if '\n' in string:
     lens = [len(i) for i in string.split('\n')]
     string_len = max(lens)
   else:
     string_len = len(string)
-
+  # Add dashes to the edges of the string
   dashes = ''.join(['#' for i in range(string_len)])
   print(f'{dashes}\n{string}\n{dashes}\n')
 
@@ -56,9 +85,11 @@ def file_reader(filename : str, directory : str = 'current') -> dict:
   format_dict : dict
     Dictionary with the left side of the equal sign as key and right side as value
   """
+  # If the directory argument is empty, read the file directly from the config folder TODO(Noam): Check if this is necessary...
   if directory == '':
     with open(os.path.join(PATH, 'config', filename + '.json'), 'r') as file:
       format_dict = json.load(file)
+  # If the directory argument is not empty, read the file from the config folder, then the directory folder
   else:
     with open(os.path.join(PATH, 'config', directory, filename + '.json'), 'r') as file:
       format_dict = json.load(file)
@@ -75,8 +106,10 @@ def file_creator(filename : str, format_dict : dict, directory : str = 'current'
   format_dict : dict
     Dictionary by-which to write the file in this format: key=value
   """
+  # If the directory argument is empty, create the file directly in the config folder #TODO(Noam): Again, check if this is necessary...
   if directory == '':
     filepath = os.path.join(PATH, 'config', filename + '.json')
+  # If the directory argument is not empty, create the file in the config folder, then the directory folder
   else:
     filepath = os.path.join(PATH, 'config', directory, filename + '.json')
   with open(filepath, 'w') as file:
@@ -87,15 +120,22 @@ def validate_configs():
   Iterate over all config folders, make sure that all the keys in each .json file match the keys within the default config, if it doesn't add the new key and re-save the config
   """
   resave = False
-  config_names = ['settings', 'pipeline', 'general_settings']
+  # List of config files to check
+  CONFIG_NAMES = ['settings', 'pipeline', 'general_settings']
+  # Iterate over all config folders
   for dir in os.listdir(os.path.join(PATH, 'config')):
+    # Ignore the default and global folders
     if dir not in ['default', 'global']:
+      # Iterate over all files in the current config folder
       for file in os.listdir(os.path.join(PATH, 'config', dir)):
+        # Remove the .json extension from the file name
         file = file.replace('.json','')
-        if file in config_names:
+        # If the file is one of the config files to check, read it and the default config, then compare the keys with the default config
+        if file in CONFIG_NAMES:
           file_dict = file_reader(file, dir)
           def_dict = file_reader(file, 'default')
           for key in def_dict:
+            # If the key is not in the file, add it and re-save the file
             if key not in file_dict:
               file_dict[key] = def_dict[key]
               resave = True
@@ -342,12 +382,14 @@ def change_pipeline_settings() -> None:
   """
   Settings change menu, in this menu you can reconfigure any of the setting options for any of the pipeline steps
   """
+  # Grab the current settings
   settings = file_reader('settings')
   pipeline = file_reader('pipeline')
   options = list(settings.keys())
   order = file_reader('run_order')
   print(f"Welcome to the settings menu\n")
   while True:
+    # Print the current settings that are turned on
     [print(f'{i}\t{v}') for i,v in enumerate(options) if pipeline[v]['switch']]
     print('To change settings for a specific step, enter the number next to it\n')
     print('Type exit to exit\n')
@@ -355,7 +397,7 @@ def change_pipeline_settings() -> None:
     if choice == 'exit': break
     try: choice = int(choice)
     except ValueError:
-      print('Please enter either a number or exit!\n')
+      print('Error: Only numbers are accepted, Please enter either a number or exit!\n')
       continue
     try: chosen_stage = options[choice]
     except IndexError:
@@ -394,7 +436,7 @@ def change_pipeline_settings() -> None:
   file_creator('settings', settings)
 
 
-def change_pipeline() -> None:
+def modify_pipeline() -> None:
   """
   Pipeline menu, in this menu you can remove/add commands to the pipeline or reorder it
   """
@@ -617,17 +659,19 @@ def change_menu():
   """
   choice = True
   pprint('Welcome to the configuration menu!')
-  menu = [lambda :0, change_general_settings, change_pipeline_settings, change_pipeline, add_new_pipeline_setting, add_new_pipeline_step,manually_change_ref_or_gtf, save_current_settings, copy_settings_and_pipeline_from_one_config_to_another]
+  # Menu options as a list of functions, the user chooses a number to choose a function
+  menu = [lambda : 0, change_general_settings, change_pipeline_settings, modify_pipeline, add_new_pipeline_setting, add_new_pipeline_step, manually_change_ref_or_gtf, save_current_settings, copy_settings_and_pipeline_from_one_config_to_another]
   while choice:
     [print(f"Enter {i+1}\tto {x.__name__}\n") for i,x in enumerate(menu[1:])]
-    print("Enter 0\t to exit\n")
+    print("Enter 0\tto exit\n")
     try:
       choice = int(input())
+    # If the user enters a non-integer, the program will ask them to enter a valid option
     except ValueError:
-      print('Please only choose one of the listed options!\n')
+      print(f'Error: {choice} is not a number!\nPlease only choose one of the listed options!\n')
     try: menu[choice]()
     except IndexError:
-      print("Please only choose one of the listed options!\n")
+      print(f"Error! the number {choice} is out of range!\nPlease only choose one of the listed options!\n")
 
 
 def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, PAIRED, org, tsv_dir):
@@ -910,49 +954,38 @@ def rows_of_links(tsv_path):
     tsv_df.scientific_name = input()
     tsv_df.run_accession = 0 #PLACEHOLDER TODO define run accession (FINSIH THIS FUNCTION)
 
-
 def defaults():
   """
   Set the defaults - hard coded.
   """
-
   dir_checker('config')
-  dir_checker('config/default')
-  dir_checker('config/global')
+  dir_checker(os.path.join('config', 'default'))
+  dir_checker(os.path.join('config','global'))
 
-  #if not os.path.exists(f"{PATH}{SLASH}config{SLASH}default{SLASH}creds.json"):
-  #  print("Please enter your NCBI account email:\n")
-  #  EMAIL = input()
-  #  print("Please enter your NCBI API key: (can be found in the NCBI account page)\n")
-  #  API = input()
-  #  file_creator('credentials', {'Email':EMAIL, 'API':API}, directory = 'default')
-  
   DEFAULT_PIPE = consts.DEFAULT_PIPE
-
   DEFAULT_SETTINGS = consts.DEFAULT_SETTINGS
   DEFAULT_ORDER = consts.DEFAULT_ORDER
   DEFAULT_MAIN = consts.DEFAULT_MAIN
-  
   DEFAULTS = (DEFAULT_PIPE, DEFAULT_SETTINGS, DEFAULT_ORDER, DEFAULT_MAIN)
-  
   file_creator('refpaths', {}, directory = 'global')
   configs = ['pipeline', 'settings', 'run_order', 'general_settings']
   for i,config in enumerate(configs):
     file_creator(config, DEFAULTS[i], directory = 'default')
 
- 
 def metadata_input() -> list:
   """
   Recieve the requested tsvs from the user and return them as a list of tsv names
   """
 
   while True:
-    pprint('Please enter metadata file name (without extension) or the number next to a pre-existing metadata file.\nIf you want to work on several metadata files at once you can do this by entering either a range of numbers separated by a dash (x-y).\nSeveral numbers separated by space (x y z), or the word \"all\".')
-    print(f'IMPORTANT: The tsv must be in a folder named samples (the folder was created if it doesnt exist)\nIMPORTANT: all the metadata files must be in the following format:\n\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\n\nThe format is available for download from the EBI website\n')
+    print('\nPlease enter metadata file name (without extension) or the number next to a pre-existing metadata file.\nIf you want to work on several metadata files at once you can do this by entering either a range of numbers separated by a dash (x-y),\nseveral numbers separated by space (x y z), or the word \"all\".\n')
+    print(f'IMPORTANT: The metadata file must be in a the same folder as this script!\nIMPORTANT: all the metadata files must be in the following format:\n\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\n\nThe format is available for download from the EBI website\n')
+    # List all previously used experiments
     tsvs = sorted(os.listdir(f'{PATH}{SLASH}output'))
     [print(f'{i}\t{v}') for i,v in enumerate(tsvs) if os.path.isdir(f'{PATH}{SLASH}output{SLASH}{v}')]
     tsv = input()
-    if re.match(r'\D+', tsv) and tsv != 'all': #If the input is the name of a new TSV file
+    #If the input is the name of a new TSV file read it
+    if re.match(r'\D+', tsv) and tsv != 'all':
       # If file does not include extension, remove it
       tsv = tsv.split('.')[0]
       tsv_path = f"{PATH}{SLASH}{tsv}.tsv"
@@ -961,7 +994,7 @@ def metadata_input() -> list:
       except AssertionError:
         try: assert os.path.exists(tsv_path.replace('.tsv','.txt'))
         except AssertionError:
-          print("Please enter a valid TSV file name!\n")
+          print("Error: File name does not exist!\nPlease enter a valid TSV file name!\n")
           continue
       tsvs.append(tsv)
       tsv = tsvs.index(tsv)
@@ -993,7 +1026,7 @@ def metadata_handler(tsv):
 
 def main():
   """
-  Manage the program
+  Run the program
   
   * Asks the user to choose workflow.
 
@@ -1006,30 +1039,43 @@ def main():
   * main runs csh_maker on each line and saves the settings at the end of runtime.
 
   """
+  # Check if the required directories exist, if not create them
   dir_checker('output')
   dir_checker('src')
-  dir_checker('src/mtDNA_ref')
-  dir_checker('src/genbank')
-  dir_checker('src/samples')
+  dir_checker(os.path.join('src', 'mtDNA_ref'))
+  dir_checker(os.path.join('src', 'genbank'))
 
+  # Check if the default config exists, if not create it
   if not os.path.exists(f'{PATH}{SLASH}config{SLASH}default'):
     defaults()
   validate_configs()
-  pprint(f'Welcome to the semi-automatic .csh maker')
+  pprint(f'Welcome to the semi-automatic .csh maker!')
+  # Check if the user has a pre-configured workflow and if so, ask if they want to use it
   workflows = sorted(os.listdir(f'{PATH}{SLASH}config'))
   while True:
-    print('Please choose a pre-configured workflow\n')
+    print('Please choose a pre-configured workflow from the list below:\n')
+    # Print the list of all workflows a part for the global and current directories which are used internally by the program
     [print(f'{i}\t{v}') for i,v in enumerate(workflows) if (v not in  ('global','current')) and (os.path.isdir(f'{PATH}{SLASH}config{SLASH}{v}'))]
     workflow = input()
-    try:
-      workflow = workflows[int(workflow)] 
-      save_settings(source = workflow, output = 'current')
-      break
-    except (IndexError, ValueError, TypeError):
-      print('Please enter the number next to the configuration name\n\n')
-  tsvs = metadata_input()    
-  pprint('Please enter 1 to enter the configuration menu.\nEnter 0 to continue\n')
-  change = int(input())
+    # Test the input
+    valid = check_input(workflow, workflows, special = ('global','current'))
+    if not valid:
+      continue
+    workflow = workflows[int(workflow)] 
+    # Save the chosen workflow in the "current" directory
+    save_settings(source = workflow, output = 'current')
+    break
+  tsvs = metadata_input()
+  while True:
+    print('Main menu')    
+    pprint('Enter 1 to change the configuration\nEnter 0 to continue to sample selection\n')
+    change = input()
+    valid = check_input(change, [0,1])
+    if not valid:
+      continue
+    change = int(change)
+    break
+  # If the user wants to change the configuration, run the change_menu function
   if change:
     change_menu()
   run_list = []
@@ -1064,5 +1110,7 @@ def main():
 
 if __name__ == '__main__':
   main()
+
+# %%
 
 # %%
