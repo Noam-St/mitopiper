@@ -18,6 +18,7 @@ import pandas as pd
 from Bio import Entrez, SeqIO
 from tabulate import tabulate
 from importlib import reload
+import random
 
 reload(consts)
 
@@ -184,7 +185,14 @@ def validate_configs():
             if key not in file_dict:
               file_dict[key] = def_dict[key]
               resave = True
-          # TODO(Noam): Add a check for the "order" parameter in each config file.
+          # TODO(Noam): Add a check for the "order" parameter in each config file. 
+          if file == 'settings':
+            rnd_stage = random.choice([i for i in file_dict.keys() if file_dict[i] != {}])
+            rnd_stage_param = random.choice(list(file_dict[rnd_stage].keys()))
+            if 'order' not in file_dict[rnd_stage][rnd_stage_param].keys():
+              resave = True
+              for stage in file_dict.keys():
+                file_dict[stage] = assign_order(file_dict[stage])
         if resave:
           print('Resaved successfully')
           file_creator(file, file_dict, dir)
@@ -219,7 +227,6 @@ def fasta_wrap(string : str, per : int = 60) -> str:
     The wrapped string  
   """
   return '\n'.join(wrap(string, per))
-
 
 def ref_maker(org_name : str) -> str:
   """
@@ -428,6 +435,13 @@ def change_order(stage, settings):
   """
   Change the order of the parameters for a given stage.
   Save the new order to the settings file.
+
+  Parameters
+  ----------
+  stage : str
+    The stage to change the order of.
+  settings : dict
+    The settings dictionary.
   """
   stage_params = settings[stage]
   print(f'To change the order in which the parameters appear for {stage}, enter the number next to it.\nNOTE: you can also reorder quickly by entering a sequence of numbers seperated by space (i.e: \"0 3 5 ...\")\n')
@@ -463,6 +477,14 @@ def change_order(stage, settings):
       stage_params[param]['switch'] = False
   settings[stage] = stage_params
   file_creator('settings', settings)
+
+def assign_order(stage_dict):
+  """
+  Assign a random order to the parameters in a given stage.
+  """
+  for i,v in enumerate(stage_dict.keys()):
+    stage_dict[v]['order'] = i
+  return stage_dict
 
 def change_pipeline_settings() -> None:
   """
@@ -1136,6 +1158,7 @@ def main():
     defaults()
   validate_configs()
   pprint(f'Welcome to the semi-automatic .csh maker for pipelines!')
+  tsvs = metadata_input()
   # Check if the user has a pre-configured workflow and if so, ask if they want to use it
   workflows = sorted(os.listdir(f'{PATH}{SLASH}config'))
   while True:
@@ -1151,7 +1174,6 @@ def main():
     # Save the chosen workflow in the "current" directory
     save_settings(source = workflow, output = 'current')
     break
-  tsvs = metadata_input()
   while True:
     print('Main menu')    
     pprint('Enter 1 to change the configuration\nEnter 0 to continue to sample selection\n')
@@ -1196,7 +1218,3 @@ def main():
 
 if __name__ == '__main__':
   main()
-
-# %%
-
-# %%
