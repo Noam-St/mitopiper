@@ -270,7 +270,7 @@ DEFAULT_SETTINGS =\
 }
 # Add an "order" key to each of the settings in the DEFAULT_SETTINGS dictionary
 for cmd in DEFAULT_SETTINGS:
-  c=1
+  c=0
   for param in DEFAULT_SETTINGS[cmd]:
     DEFAULT_SETTINGS[cmd][param]['order']=c
     c+=1
