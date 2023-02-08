@@ -426,17 +426,43 @@ def change_general_settings() -> None:
 
 def change_order(stage, settings):
   """
+  Change the order of the parameters for a given stage.
+  Save the new order to the settings file.
   """
   stage_params = settings[stage]
-  print('To move a parameter please enter the number next to it\nNOTE: you can also reorder quickly by entering a sequence of numbers seperated by space (i.e: \"0 3 5 ...\")\n')
+  print(f'To change the order in which the parameters appear for {stage}, enter the number next to it.\nNOTE: you can also reorder quickly by entering a sequence of numbers seperated by space (i.e: \"0 3 5 ...\")\n')
   stage_df = pd.DataFrame.from_dict(stage_params, orient = 'index').sort_values('order')[['order', 'description']]
+  # Create a sorted list of parameters according to their order
+  order = list(stage_df.index)
   print(tabulate(stage_df, headers = 'keys', tablefmt = 'psql'))
-  file_creator('settings', settings)
   while True:
     choice = input()
     if choice == 'exit': break
-    choice = input_to_list(choice)
-
+    choice = input_to_list(choice, len(order))
+    if choice == []: continue
+    else: break
+  if not len(choice) > 1:
+    choice = int(choice[0])
+    print(f'Who would you like to replace {order[choice]} with?\n')
+    while True:
+      where = input()
+      valid = check_input(where, order)
+      if not valid: continue
+      else: break
+    where = int(where)
+    temp = order[where]
+    order[where] = order[choice]
+    order[choice] = temp
+  else:
+    order = [order[i] for i in choice]
+  # Apply the order to the settings
+  for i,v in enumerate(order):
+    stage_params[v]['order'] = i
+  for param in stage_params:
+    if param not in order:
+      stage_params[param]['switch'] = False
+  settings[stage] = stage_params
+  file_creator('settings', settings)
 
 def change_pipeline_settings() -> None:
   """
@@ -509,16 +535,20 @@ def modify_pipeline() -> None:
   Pipeline menu, in this menu you can remove/add commands to the pipeline or reorder it
   """
   running = True
+  # Grab the current pipeline and run order
   pipeline = file_reader('pipeline')
   order = file_reader('run_order')
   while running:
     print("Welcome to the pipeline customizer\nThe current pipeline order is:\n")
+    # Print the current pipeline order
     [print(f'\t{v}') for v in order]
     print('To change the pipeline enter 1\nTo change the pipeline order enter 2\nTo exit this menu enter 0\n')
     running = input()
+    # Check if the input is valid
     valid = check_input(running, [0,1,2])
     if not valid: continue
     running = int(running)
+    # IF the user chose to activate/inactivate specific pipeline steps
     if running == 1:
       pipeline_changes = {i:k for i,k in enumerate(pipeline.keys())}
       print('To remove or add a feature, simply enter its number\nIMPORTANT: if you remove a command and add it later, it will appended in the last position!\n')
@@ -537,21 +567,30 @@ def modify_pipeline() -> None:
         pipeline[step]['switch'] = not pipeline[step]['switch']
         if i not in order:
           order.append(step)
+    # If the user chose to reorder the pipeline
     elif running == 2:
       print('The current run order is:\n')
       [print(f'{i}\t{v}') for i,v in enumerate(order)]
       print('To move a command enter the number next to it\nNOTE: you can also reorder quickly by entering a sequence of numbers seperated by space (i.e: \"0 3 5 ...\")\n')
-      to_move = input()
-      valid = check_input(to_move, order)
+      while True:
+        to_move = input()
+        to_move = input_to_list(to_move, len(order))
+        if to_move == []: continue
+        else: break
       if not len(to_move) > 1:
-        to_move = int(to_move)
+        to_move = int(to_move[0])
         print(f'Who would you like to replace {order[to_move]} with?\n')
-        where = int(input())
+        while True:
+          where = input()
+          valid = check_input(where, order)
+          if not valid: continue
+          else: break
+        where = int(where)
         temp = order[where]
         order[where] = order[to_move]
         order[to_move] = temp
       else:
-        order = [order[int(i)] for i in to_move.split(' ')]
+        order = [order[i] for i in to_move]
         for i in pipeline.keys():
           if i not in order:
             pipeline[i]['switch'] = False
