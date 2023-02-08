@@ -37,11 +37,15 @@ except FileNotFoundError:
   print('final.csv is required in the src folder for the script to automatically download mt references')
   org_df_exists = False
 
-def check_input(n, options, special = None):
+def check_input(n, options, special = None, allow = None):
   """
   Recieve a user input that is supposed to be a number within a certain range.
   Make sure the input is convertable to int and within the range.
   """
+  # If the user enters an allowed input, the program will return True
+  if allow != None:
+    if n in allow:
+      return True
   try:
     n = int(n)
   # If the user enters a non-integer, the program will ask them to enter a valid option
@@ -57,6 +61,47 @@ def check_input(n, options, special = None):
       print(f'Error: {n} is not a valid option!\nPlease only choose one of the listed options!\n')
       return False
   return True
+
+def input_to_list(user_in : str, list_size : int) -> list:
+  """
+  Converts user input to a list of numbers
+  """
+  try:
+    user_in = int(user_in)
+    if user_in > list_size:
+      print("Error:\tRow entered is out of bounds! Running on last row\n\n")
+      user_in = list_size - 1
+    user_in = list(range(user_in, user_in + 1))
+  except ValueError:
+    if '-' in user_in: #Input is a range of numbers (x-y)
+      user_in = [int(i) for i in user_in.split('-')]
+      start = user_in[0]
+      end = user_in[1]
+      user_in = list(range(start, end))
+    elif user_in == 'all': #Input is all of the list
+      start = 0
+      end = list_size
+      user_in = list(range(start, end))
+    elif ' ' in user_in: #Input is a list of numbers (indicating specific indices)
+      try:
+        user_in = [int(i) for i in user_in.split(' ')]
+      except ValueError:
+        print('The list of rows to work on must only consist of integers seperated by a SINGLE SPACE!\nTry again\n')
+        return []
+    elif ',' in user_in:
+      try:
+        user_in = [int(i) for i in user_in.split(',')]
+      except ValueError:
+        print('The list of rows to work on must only consist of integers seperated by a SINGLE SPACE!\nTry again\n')
+        return []
+    else:
+      print('The list of rows to work on must only consist of integers seperated by a SINGLE SPACE!\nTry again\n')
+      return []
+  # If the user enters a list longer than the total length of the list, it will be truncated
+  if len(user_in) > list_size:
+    user_in = user_in[:list_size]
+    print('Warning: list length is longer than the total number of rows in the tsv. Truncating list\n\n')
+  return user_in
 
 def pprint(string):
   """
@@ -139,6 +184,7 @@ def validate_configs():
             if key not in file_dict:
               file_dict[key] = def_dict[key]
               resave = True
+          # TODO(Noam): Add a check for the "order" parameter in each config file.
         if resave:
           print('Resaved successfully')
           file_creator(file, file_dict, dir)
@@ -345,21 +391,22 @@ def change_general_settings() -> None:
   """
   Change general settings defined on a per-run basis.
   """
+  # Read the general settings file
   general_settings = file_reader('general_settings')
+  # Create a list of the options
   options = list(general_settings.keys())
   while True:
-    temp_setting = {'Setting name' : options, 'Current setting' : [general_settings[v][0] for v in options]}
+    temp_setting = {'Name' : options, 'Value' : [general_settings[v][0] for v in options]}
     print(tabulate_dict(temp_setting))
     print('Which setting would you like to change?\n')
     print('Type exit to exit\n')
     choice = input()
     if choice == 'exit': break
-    try:
-      choice = int(choice)
-      chosen = general_settings[options[choice]]
-    except (ValueError, IndexError):
-      print('Please enter either a number or exit!\n')
-      continue
+    valid = check_input(choice, options)
+    if not valid: continue
+    choice = int(choice)
+    chosen = general_settings[options[choice]]
+    # If the setting is a boolean, change it to the opposite
     if options[choice] == 'ignore_paired_end':
       chosen[0] = not chosen[0]
     else:
@@ -377,6 +424,19 @@ def change_general_settings() -> None:
   file_creator(filename = 'general_settings', format_dict = general_settings)
   print("Setting changed successfuly!\n")
 
+def change_order(stage, settings):
+  """
+  """
+  stage_params = settings[stage]
+  print('To move a parameter please enter the number next to it\nNOTE: you can also reorder quickly by entering a sequence of numbers seperated by space (i.e: \"0 3 5 ...\")\n')
+  stage_df = pd.DataFrame.from_dict(stage_params, orient = 'index').sort_values('order')[['order', 'description']]
+  print(tabulate(stage_df, headers = 'keys', tablefmt = 'psql'))
+  file_creator('settings', settings)
+  while True:
+    choice = input()
+    if choice == 'exit': break
+    choice = input_to_list(choice)
+
 
 def change_pipeline_settings() -> None:
   """
@@ -391,44 +451,52 @@ def change_pipeline_settings() -> None:
   while True:
     # Print the current settings that are turned on
     [print(f'{i}\t{v}') for i,v in enumerate(options) if pipeline[v]['switch']]
-    print('To change settings for a specific step, enter the number next to it\n')
+    print('To change settings for a specific step, or their order, enter the number next to it\n')
     print('Type exit to exit\n')
     choice = input()
+    valid = check_input(choice, options, special = [v for v in options if pipeline[v]['switch'] == False], allow = ['exit'])
+    if not valid: continue
     if choice == 'exit': break
-    try: choice = int(choice)
-    except ValueError:
-      print('Error: Only numbers are accepted, Please enter either a number or exit!\n')
-      continue
-    try: chosen_stage = options[choice]
-    except IndexError:
-      print('Please enter a number within range!')
-      continue
+    choice = int(choice)
+    chosen_stage = options[choice]
     configs = list(settings[chosen_stage].keys())
+    # Create a temporary dataframe to print the settings
     temp_config_df = {
-      'Setting name':configs,
+      'Name':configs,
       'Description':[i['description'] for i in settings[chosen_stage].values()],
-      'Current setting':[i['value'] if i['value'] != '' else i['switch'] for i in settings[chosen_stage].values()]
+      'Value':[i['value'] if i['value'] != '' else i['switch'] for i in settings[chosen_stage].values()]
       }
     print(tabulate_dict(temp_config_df))
+    # If there are no settings for this stage, print a message and return to the main menu
     if settings[chosen_stage] == {}:
       print(f'It seems no settings were added to {chosen_stage} yet\nto add some return first to the main menu by typing exit\n')
+    # If there are settings, print them and ask the user which one they would like to change
     else:
-      print(f'What would you like to change in {chosen_stage}?\nEnter the number next to the setting\n')
-      change = int(input())
-      try: chosen_setting = configs[change]
-      except IndexError:
-        print('Please enter a number within range!')
-        continue
+      print(f'Which setting would you like to modify in {chosen_stage}?\nEnter the number next to the setting\nNOTE: To reorder the setting\'s parameters, enter r\n')
+      while True:
+        change = input()
+        valid = check_input(change, configs, allow = ['r'])
+        if not valid: continue
+        # If the user chose to reorder the settings, call the change_order function and return to the main menu
+        if change == 'r': change_order(chosen_stage, settings); return 
+        break
+      change = int(change)
+      # Grab the chosen setting, its current value and its switch (on/off)
+      chosen_setting = configs[change]
       setting_value = settings[chosen_stage][chosen_setting]['value']
       setting_switch = settings[chosen_stage][chosen_setting]['switch']
-      if settings[chosen_stage][chosen_setting]['value'] == '':
+      # If the setting is a boolean, change it to the opposite
+      if setting_value == '':
         settings[chosen_stage][chosen_setting]['switch'] = not setting_switch
-        print(f'\nSetting switched to {not bool(setting_switch)}\n')
+        print(f'\nBoolean setting switched to {not bool(setting_switch)}\n')
       else:
-        print(f'You chose: {chosen_setting}\nPlease choose a new value, current value: {setting_value}\n\nThe value may include several Keywords: _gtf, _chrominfo, _fasta, _fastq, _fastq_pre, _fastq_sample_path_no_ext, _fastq_dir, _fastq_pre_dir, _bam, _sam, _org_name\nThese keywords will be replaced with appropriate paths\n')
-        print(f'Additionally, you may add the combination of output_command_name or dir_command_name to include the output of another command in the setting value\nNOTE: you are adding a setting to {chosen_stage}. You can grab the output of the following commands with the current run order\n')
+        print(f'You chose: {chosen_setting}')
+        print('Please choose a new value, current value: {setting_value}\n')
+        print('The value may include several Keywords:\n_gtf, _chrominfo, _fasta, _fastq, _fastq_pre, _fastq_sample_path_no_ext, _fastq_dir, _fastq_pre_dir, _bam, _sam, _org_name\nThese keywords will be replaced with appropriate paths\n')
+        print(f'Additionally, you may add the combination of output_command_name or dir_command_name to include the output of another command in the setting value\nNOTE: you are adding a setting to {chosen_stage}. You can grab the output of the following commands with the current run order')
         try: print('\t'.join(order[:order.index(chosen_stage)]))
-        except ValueError: print('Step isnt active!')
+        except ValueError: print('This step is not active!')
+        print(f'EXAMPLE: dir_{order[order.index(chosen_stage)-1]}\n')
         new_val = input()
         settings[chosen_stage][chosen_setting]['value'] = new_val
         print('\nSetting changed successfuly!\n')
@@ -444,38 +512,49 @@ def modify_pipeline() -> None:
   pipeline = file_reader('pipeline')
   order = file_reader('run_order')
   while running:
-    print("Welcome to the pipeline customizer\nThe current pipeline is:\n")
-    [print(f'{i}\n') for i in order]
+    print("Welcome to the pipeline customizer\nThe current pipeline order is:\n")
+    [print(f'\t{v}') for v in order]
     print('To change the pipeline enter 1\nTo change the pipeline order enter 2\nTo exit this menu enter 0\n')
-    try:
-      running = int(input())
-      if running == 1:
-        pipeline_changes = {i:k for i,k in enumerate(pipeline.keys())}
-        print('To remove or add a feature, simply enter its number\nIMPORTANT: if you remove a command and add it later, it will appended in the last position!\n')
-        [print(f'{i} {k} - current setting: {pipeline[k]["switch"]}\n') for i,k in zip(pipeline_changes.keys(), pipeline_changes.values())]
-        to_change = pipeline_changes[int(input())]
-        pipeline[to_change]['switch'] = not pipeline[to_change]['switch']
-        if to_change not in order:
-          order.append(to_change)
-      elif running == 2:
-        print('The current run order is:\n')
-        [print(f'{i}\t{v}') for i,v in enumerate(order)]
-        print('To move a command enter the number next to it\nNOTE: you can also reorder quickly by entering a sequence of numbers seperated by space (i.e: \"0 3 5 ...\")\n')
-        to_move = input()
-        if not len(to_move) > 1:
-          to_move = int(to_move)
-          print(f'Who would you like to replace {order[to_move]} with?\n')
-          where = int(input())
-          temp = order[where]
-          order[where] = order[to_move]
-          order[to_move] = temp
-        else:
-          order = [order[int(i)] for i in to_move.split(' ')]
-          for i in pipeline.keys():
-            if i not in order:
-              pipeline[i]['switch'] = False
-    except ValueError:
-      print('Please enter a number!\n')
+    running = input()
+    valid = check_input(running, [0,1,2])
+    if not valid: continue
+    running = int(running)
+    if running == 1:
+      pipeline_changes = {i:k for i,k in enumerate(pipeline.keys())}
+      print('To remove or add a feature, simply enter its number\nIMPORTANT: if you remove a command and add it later, it will appended in the last position!\n')
+      print('ACTIVE COMMANDS:\n')
+      [print(f'{i} {k}\n') for i,k in zip(pipeline_changes.keys(), pipeline_changes.values()) if pipeline[k]['switch']]
+      print('INACTIVE COMMANDS:\n')
+      [print(f'{i} {k}\n') for i,k in zip(pipeline_changes.keys(), pipeline_changes.values()) if not pipeline[k]['switch']]
+      while True:
+        to_change = input()
+        to_change = input_to_list(to_change, len(pipeline_changes))
+        if to_change == []: continue
+        else: break
+      print(to_change)
+      for i in to_change:
+        step = pipeline_changes[i]
+        pipeline[step]['switch'] = not pipeline[step]['switch']
+        if i not in order:
+          order.append(step)
+    elif running == 2:
+      print('The current run order is:\n')
+      [print(f'{i}\t{v}') for i,v in enumerate(order)]
+      print('To move a command enter the number next to it\nNOTE: you can also reorder quickly by entering a sequence of numbers seperated by space (i.e: \"0 3 5 ...\")\n')
+      to_move = input()
+      valid = check_input(to_move, order)
+      if not len(to_move) > 1:
+        to_move = int(to_move)
+        print(f'Who would you like to replace {order[to_move]} with?\n')
+        where = int(input())
+        temp = order[where]
+        order[where] = order[to_move]
+        order[to_move] = temp
+      else:
+        order = [order[int(i)] for i in to_move.split(' ')]
+        for i in pipeline.keys():
+          if i not in order:
+            pipeline[i]['switch'] = False
     order = [i for i in order if pipeline[i]['switch']]
     file_creator('pipeline', pipeline)
     file_creator('run_order', order)
@@ -654,7 +733,7 @@ def copy_settings_and_pipeline_from_one_config_to_another() -> None:
 
 def change_menu():
   """
-  Main reconfiguration menu, sends to (currently 4) sub-menus, after exiting sub-menus, returns
+  Main reconfiguration menu, sends to sub-menus, after exiting sub-menus, returns
   the user here.
   """
   choice = True
@@ -664,14 +743,11 @@ def change_menu():
   while choice:
     [print(f"Enter {i+1}\tto {x.__name__}\n") for i,x in enumerate(menu[1:])]
     print("Enter 0\tto exit\n")
-    try:
-      choice = int(input())
-    # If the user enters a non-integer, the program will ask them to enter a valid option
-    except ValueError:
-      print(f'Error: {choice} is not a number!\nPlease only choose one of the listed options!\n')
-    try: menu[choice]()
-    except IndexError:
-      print(f"Error! the number {choice} is out of range!\nPlease only choose one of the listed options!\n")
+    choice = input()
+    valid = check_input(choice, menu)
+    if not valid: continue
+    else: choice = int(choice)
+    menu[choice]()
 
 
 def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, PAIRED, org, tsv_dir):
@@ -835,36 +911,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, PAIRE
       else:
         csh_str+=structure
         csh_str += '\n'
-  return csh_str
-
-def input_to_range(user_in : str, list_size : int) -> list:
-  """
-  """
-  try:
-    user_in = int(user_in)
-    if user_in > list_size:
-      print("Error:\tRow entered is out of bounds! Running on last row\n\n")
-      user_in = list_size - 1
-    user_in = list(range(user_in, user_in + 1))
-  except ValueError:
-    if '-' in user_in: #Input is a range of numbers (x-y)
-      user_in = [int(i) for i in user_in.split('-')]
-      start = user_in[0]
-      end = user_in[1]
-      user_in = list(range(start, end))
-    elif user_in == 'all': #Input is all of the list
-      start = 0
-      end = list_size
-      user_in = list(range(start, end))
-    elif ' ' in user_in: #Input is a list of numbers (indicating specific indices)
-        try:
-          user_in = [int(i) for i in user_in.split(' ')]
-        except ValueError:
-          print('The list of rows to work on must only consist of integers seperated by a SINGLE SPACE!\nTry again\n')
-          return []
-  finally:
-    return user_in
-        
+  return csh_str  
   
 def csh_maker(work_on, tsv_df, tsv_name):
   """
@@ -1001,7 +1048,7 @@ def metadata_input() -> list:
       break
     else:
       break
-  tsv_inds = input_to_range(tsv, len(tsvs))
+  tsv_inds = input_to_list(tsv, len(tsvs))
   tsvs = [v for i, v in enumerate(tsvs) if i in tsv_inds]
   return tsvs
        
@@ -1049,7 +1096,7 @@ def main():
   if not os.path.exists(f'{PATH}{SLASH}config{SLASH}default'):
     defaults()
   validate_configs()
-  pprint(f'Welcome to the semi-automatic .csh maker!')
+  pprint(f'Welcome to the semi-automatic .csh maker for pipelines!')
   # Check if the user has a pre-configured workflow and if so, ask if they want to use it
   workflows = sorted(os.listdir(f'{PATH}{SLASH}config'))
   while True:
@@ -1098,7 +1145,7 @@ def main():
     print(tabulate(sliced_df, headers = 'keys', tablefmt = 'psql'))
     while True:
       work_on = input()
-      work_on = input_to_range(work_on, len(tsv_df))
+      work_on = input_to_list(work_on, len(tsv_df))
       if work_on == []:
         continue
       break
