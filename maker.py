@@ -375,9 +375,12 @@ def ref_main(org_name : str) -> str:
       GTF_command = f'wget -O {gtf} \"https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi?db=nuccore&report=gff3&id={ID}\"\n'
       add_to_csh = GTF_command + STAR_command + BWA_command 
       chrominfo = ''
+      nuc_fasta = ''
     elif choice == 2:
-      print('Please enter the full path to the reference fasta\n')
+      print('Please enter the full path to the main reference fasta\n')
       fasta = input()
+      print('Please enter the full path to the nuclear reference fasta\nNOTE: This is only required if you wish to map to both the nuclear and mitochondrial genomes separately\n')
+      nuc_fasta = input()
       add_to_csh = ''
       print('Please enter path to gtf file for this organism\nEnter nothing if annotations are not required.\n')
       gtf = input()
@@ -388,6 +391,7 @@ def ref_main(org_name : str) -> str:
  
     refs[org_name] = {}
     refs[org_name]['refpath'] = fasta.replace(r'"', '')
+    refs[org_name]['nuc_refpath'] = nuc_fasta.replace(r'"', '')
     refs[org_name]['gtfpath'] = gtf.replace(r'"', '')
     refs[org_name]['chrominfopath'] = chrominfo.replace(r'"', '')
     file_creator('refpaths', refs, 'global') #NOTE(Noam) Currently set to global, think about changing to local pre-configurations to enable multiple ref files for the same organism depending on preset.
@@ -585,7 +589,6 @@ def modify_pipeline() -> None:
         to_change = input_to_list(to_change, len(pipeline_changes))
         if to_change == []: continue
         else: break
-      print(to_change)
       for i in to_change:
         step = pipeline_changes[i]
         pipeline[step]['switch'] = not pipeline[step]['switch']
@@ -692,7 +695,7 @@ def add_new_pipeline_step() -> None:
   'output_ext': 'What extension is the command supposed to output? (i.e .bam)',
   'inputdir': 'If the command requires a file to run, what is the name of the directory it is in? (i.e alignment)',
   'input_ext': 'What is the extension of the file the command runs on? (i.e .sam)',
-  'structure':'Command structure, enter nothing for default format: key settings input\IMPORTANT: A non-default structure can only include the following keywords: sample, key, settings, gtf, fasta, fastq, fastq_pre fastq_dir, fastq_pre_dir, sam, bam, command_output, command_input and output_pipe seperated by a SINGLE space'
+  'structure':'Command structure, enter nothing for default format: key settings input\nIMPORTANT: A non-default structure can only include the following keywords: sample, key, settings, gtf, fasta, fastq, fastq_pre fastq_dir, fastq_pre_dir, sam, bam, command_output, command_input and output_pipe seperated by a SINGLE space'
 }
 
   pipeline = file_reader('pipeline')
@@ -734,8 +737,10 @@ def manually_change_ref_or_gtf() -> None:
     except IndexError:
       print("Please enter an organism from the list!\n")
       continue
+    print(f'Current reference pathes for {org}:\n')
+    print(tabulate(pd.DataFrame.from_dict(ref[org], orient='index').T, headers='keys', tablefmt='psql', showindex=False))
     print('Would you like to change gtf, fasta, chromInfo all?\n')
-    work_on = ['ref', 'gtf', 'chrominfo', 'all']
+    work_on = ['ref', 'nuc_ref', 'gtf', 'chrominfo', 'all']
     [print(f'{i}\t{v}') for i,v in enumerate(work_on)]
     choice = int(input())
     
@@ -744,7 +749,7 @@ def manually_change_ref_or_gtf() -> None:
       print('Please enter one of the possible options!\n')
       continue
     if work_on == 'all':
-      work_on = ['ref', 'gtf', 'chrominfo']
+      work_on = ['ref', 'nuc_ref', 'gtf', 'chrominfo']
     else:
       work_on = [work_on]
     for i in work_on:
@@ -815,7 +820,7 @@ def change_menu():
     menu[choice]()
 
 
-def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, PAIRED, org, tsv_dir):
+def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta_nuc, PAIRED, org, tsv_dir):
   """
   Create a csh fomratted string designed to be run by qsub, works differnetly for PAIRED and unPAIRED samples.
 
@@ -862,7 +867,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, PAIRE
   command_outputs = {f'output_{command}':f'{tsv_dir}{SLASH}{pipeline[command]["outdir"]}{SLASH}{sample}{pipeline[command]["output_ext"]}' for command in pipeline.keys()}
   command_dirs = {f'dir_{command}':f'{tsv_dir}{SLASH}{pipeline[command]["outdir"]}' for command in pipeline.keys()}
   to_f_string = [
-  '_fasta', '_fasta_dir', '_gtf', '_command_input', '_command_output', '_command_output_dir_path', '_command_input_dir_path','_fastq', '_fastq_pre', '_sample', '_fastq_sample_path_no_ext','_fastq_dir', '_fastq_pre_dir', '_bam', '_sam', '_STAR_out', '_fastq1', '_fastq2', '_org_name','_STAR_final_log', '_chrominfo'
+  '_fasta', '_fasta_dir', '_fasta_nuc', '_gtf', '_command_input', '_command_output', '_command_output_dir_path', '_command_input_dir_path','_fastq', '_fastq_pre', '_sample', '_fastq_sample_path_no_ext','_fastq_dir', '_fastq_pre_dir', '_bam', '_sam', '_STAR_out', '_fastq1', '_fastq2', '_org_name','_STAR_final_log', '_chrominfo'
   ]
   if not PAIRED:
     row.fastq_ftp = row.fastq_ftp.split(';')[0]
@@ -902,6 +907,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, PAIRE
     output_pipe = f' > {command_output}\n'
     for i,v in settings[command].items():
       if v['value'] == 'fasta': v['value'] = fasta
+      if v['value'] == 'fasta_nuc': v['value'] = fasta_nuc
       if 'output_file' in i:
         v['value'] += SLASH + sample + output_ext
     if settings[command] != {}:
@@ -978,7 +984,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, PAIRE
         csh_str += '\n'
   return csh_str  
   
-def csh_maker(work_on, tsv_df, tsv_name):
+def sample_lvl_csh_maker(work_on, tsv_df, tsv_name):
   """
   Makes a single .csh file for each line of .tsv, and a master.csh to be run by qsub
 
@@ -997,7 +1003,9 @@ def csh_maker(work_on, tsv_df, tsv_name):
   [dir_checker('output' + '/' + tsv_name + '/' + i['outdir']) for i in pipeline.values() if i['outdir'] != '']
   tsvs = []
   bad_orgs = []
-  for i,row in tsv_df.iloc[work_on, :].iterrows():
+  samples_df = tsv_df.iloc[work_on, :]
+
+  for i,row in samples_df.iterrows():
     settings = file_reader('settings')
     pipeline = file_reader('pipeline')
     order = file_reader('run_order')
@@ -1037,11 +1045,14 @@ def csh_maker(work_on, tsv_df, tsv_name):
       fasta = refs[org_name]['refpath']
       gtf = refs[org_name]['gtfpath']
       try:
+        fasta_nuc = refs[org_name]['ref_nucpath']
+      except KeyError:
+        fasta_nuc = ''
+      try:
         chrominfo = refs[org_name]['chrominfopath']
       except KeyError:
         chrominfo = ''
-
-      to_csh = csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, PAIRED, org_name, tsv_dir)
+      to_csh = csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta_nuc, PAIRED, org_name, tsv_dir)
       file.write(to_csh)
       tsvs.append(f'{tsv_dir}{SLASH}run{i}.csh')
   return tsvs
@@ -1148,7 +1159,7 @@ def main():
 
   * If they continue, the users have to choose which TSV lines they wish to process.
 
-  * main runs csh_maker on each line and saves the settings at the end of runtime.
+  * main runs sample_lvl_csh_maker on each line and saves the settings at the end of runtime.
 
   """
   # Check if the required directories exist, if not create them
@@ -1203,8 +1214,8 @@ def main():
       tsv_df = formats[choice](tsv_path)
 
     pprint(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\nTo work on specific rows, enter a list of rows seperated by a SINGLE space (1 2 3 4)')
-    wanted_cols = ['index', 'scientific_name', 'run_accession', 'sample_title', 'library_strategy', 'library_selection', 'read_count']
-    colnames = ['Index', 'ID', 'Sample accession', 'Sample', 'Library Strategy', 'Library Selection', 'Read Count']
+    wanted_cols = ['index', 'scientific_name', 'run_accession', 'sample_accession', 'sample_title', 'library_strategy', 'library_selection', 'read_count']
+    colnames = ['Index', 'ID', 'Run accession', 'Sample accession', 'Sample', 'Library Strategy', 'Library Selection', 'Read Count']
     actual_cols = [i for i in wanted_cols if i in tsv_df.columns]
     sliced_df = tsv_df.loc[:, actual_cols]
     print(tabulate(sliced_df, headers = 'keys', tablefmt = 'psql'))
@@ -1214,7 +1225,8 @@ def main():
       if work_on == []:
         continue
       break
-    run_list += csh_maker(work_on, tsv_df, tsv_name)
+    run_list += sample_lvl_csh_maker(work_on, tsv_df, tsv_name)
+
   make_master_file(run_list)
   save_settings(source = 'current', output = 'last_used')
   print('Enter \"bash master.csh\" into the console to run the commands\nIMPORTANT: Each sample will be executed simultaneously in qsub you run this command, make sure you dont run too many at once!\n')
