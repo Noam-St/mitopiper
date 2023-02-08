@@ -431,7 +431,7 @@ def change_general_settings() -> None:
   file_creator(filename = 'general_settings', format_dict = general_settings)
   print("Setting changed successfuly!\n")
 
-def change_order(stage, settings):
+def change_order(stage):
   """
   Change the order of the parameters for a given stage.
   Save the new order to the settings file.
@@ -443,6 +443,8 @@ def change_order(stage, settings):
   settings : dict
     The settings dictionary.
   """
+  # Read the settings file
+  settings = file_reader('settings')
   stage_params = settings[stage]
   print(f'To change the order in which the parameters appear for {stage}, enter the number next to it.\nNOTE: you can also reorder quickly by entering a sequence of numbers seperated by space (i.e: \"0 3 5 ...\")\n')
   stage_df = pd.DataFrame.from_dict(stage_params, orient = 'index').sort_values('order')[['order', 'description']]
@@ -468,7 +470,7 @@ def change_order(stage, settings):
     order[where] = order[choice]
     order[choice] = temp
   else:
-    order = [order[i] for i in choice]
+    order = [order[i] for i in choice] + [v for v in order if v not in [order[i] for i in choice]]
   # Apply the order to the settings
   for i,v in enumerate(order):
     stage_params[v]['order'] = i
@@ -526,7 +528,7 @@ def change_pipeline_settings() -> None:
         valid = check_input(change, configs, allow = ['r'])
         if not valid: continue
         # If the user chose to reorder the settings, call the change_order function and return to the main menu
-        if change == 'r': change_order(chosen_stage, settings); return 
+        if change == 'r': change_order(chosen_stage); return 
         break
       change = int(change)
       # Grab the chosen setting, its current value and its switch (on/off)
@@ -621,7 +623,6 @@ def modify_pipeline() -> None:
     file_creator('run_order', order)
     print('Pipeline changed successfuly!\n')
 
-
 def key_fixer(key : str) -> str:
   """
   Fix a key that does not contain dashes or double dashes according to unix rules
@@ -641,7 +642,6 @@ def key_fixer(key : str) -> str:
     key = '-' + key
   return key
 
-
 def add_new_pipeline_setting() -> None:
   """
   add a new setting menu, currently the user has to reconfigure every menu option.
@@ -649,9 +649,12 @@ def add_new_pipeline_setting() -> None:
   settings = file_reader('settings')
   order = file_reader('run_order')
   setting_keys = list(settings.keys())
-  [print(f'{i}\t{k}\n') for i,k in enumerate(setting_keys)]
+  [print(f'{i}\t{k}') for i,k in enumerate(setting_keys)]
   print(f'{DASH}\nPlease type the pipeline step to add a setting to\n{DASH}')
-  step = int(input())
+  step = input()
+  valid = check_input(step, setting_keys)
+  if not valid: return
+  step = int(step)
   chosen_step = setting_keys[step]
   print(f"You chose {chosen_step}\nPlease enter the setting name\n")
   new_name = input()
@@ -672,9 +675,10 @@ def add_new_pipeline_setting() -> None:
   value = input()
   settings[chosen_step][new_name]['value']  = value
   settings[chosen_step][new_name]['switch'] = 1
+  # Define the order of the setting to be last in the list
+  settings[chosen_step][new_name]['order'] = len(settings[chosen_step].keys())
   file_creator('settings', settings) 
   print(f'Setting added successfuly!\nName\tKey\tValue\n{new_name}\t{key}\t{value}\n')
-
 
 def add_new_pipeline_step() -> None:
   """
@@ -916,11 +920,11 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, PAIRE
           settings[command][k]['switch'] = True if PAIRED else False
           cur_val = ''
         settings[command][k]['value'] = cur_val
+      cur_keys = sorted(list(settings[command].keys()), key = lambda i: settings[command][i]['order'],reverse=False)
       command_settings = ' '.join([\
-        f'{v["key"]} {v["value"]} ' for v in settings[command].values() if v['switch'] == True])
+        f'{settings[command][k]["key"]} {settings[command][k]["value"]} ' for k in cur_keys if settings[command][k]['switch'] == True])
     else:
       command_settings=''
-
     structure = pipeline[command]['structure']
     default_structure = f'{command_key} {command_settings} {command_input}'
     if structure == '':
