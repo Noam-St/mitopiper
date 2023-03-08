@@ -8,6 +8,7 @@ IMPORTANT : Wget will not work because an ftp link cannot be generated!
 import os, sys, argparse, re, random, shutil
 import pandas as pd
 from maker import dir_checker
+import logging
 
 PATH = os.getcwd()
 
@@ -19,12 +20,12 @@ def gen_id():
     num = random.randint(MIN, MAX)
     return 'SRR' + str(num)
 
-def make_tsv(sample_files, org, libstrat):
+def make_tsv(sample_files, org, libstrat, ignore_paired):
     """
     """
     if sample_files.endswith('/') or sample_files.endswith('\\'):
         sample_files = os.path.dirname(sample_files)
-    NAME = os.path.split(sample_files)[-1]
+    NAME = os.path.split(sample_files)[-1]    
     dir_checker('output')
     dir_checker(os.path.join('output', NAME))
     dir_checker(os.path.join('output', NAME, 'fastq'))
@@ -35,10 +36,15 @@ def make_tsv(sample_files, org, libstrat):
     tsv_dict = {k:[] for k in COLS}
     file_list = []
     for file in os.listdir(sample_files):
-        shutil.copy(src = os.path.join(sample_files, file), dst = os.path.join(PATH, 'output', NAME, 'fastq'))
-        file_list.append(file.replace('.fastq.gz',''))
+        if (file.ensdwith('.fastq.gz') or file.endswith('.fq.gz') or file.endswith('.fastq') or file.endswith('.fq')):
+            print(f'Copying {file} to {os.path.join(PATH, "output", NAME, "fastq")}')
+            shutil.copy(src = os.path.join(sample_files, file), dst = os.path.join(PATH, 'output', NAME, 'fastq'))            
+            print(f'Copied {file} to {os.path.join(PATH, "output", NAME, "fastq")} successfully!')
+            file_list.append(file.replace('.fastq.gz',''))
     files = ''.join(file_list)
-    if 'R1' in files and 'R2' in files:
+    if 'R1' in files and 'R2' in files and not ignore_paired:
+        # Report that paired library detected
+        print('Paired library detected!')
         #PAIRED
         file_list.sort()
         for i in range(0, len(file_list), 2):
@@ -62,7 +68,8 @@ def make_tsv(sample_files, org, libstrat):
                 tsv_dict['library_strategy'].append(libstrat)
     tsv_df = pd.DataFrame(tsv_dict)
     tsv_df.to_csv(os.path.join(PATH, 'output', NAME, f'{NAME}.tsv'), sep = '\t', header = True, index = False)
-
+    print(f'Program complete. TSV file created at {os.path.join(PATH, "output", NAME, f"{NAME}.tsv")}.')
+    print('To analyze the samples, please run maker.py and find the samples in the experiment selection menu')
     return NAME
 
 def fix_names(org, NAME):
@@ -104,7 +111,7 @@ def fix_names(org, NAME):
 def main(args):
     """
     """
-    NAME = make_tsv(args.sample_folder, args.org, args.lib_strat)
+    NAME = make_tsv(args.sample_folder, args.org, args.lib_strat, args.ignore_paired)
     fix_names(args.org, NAME)
     print(f'TSV file created successfuly!\n')
     print(f'File name\t{NAME}\n')
@@ -124,6 +131,8 @@ if __name__ == '__main__':
     parser.add_argument('--org', help = 'Full taxonomic species name', metavar = 'org_name', type = str)
     parser.add_argument('-s','--sample-folder', help = 'full path to the sample folder where all the fastq files are located', metavar = 'sample_folder', type = path_check)
     parser.add_argument('-l','--lib-strat', help = 'Library protocol', metavar = 'library_strategy', type = str, default = '')
+    # Ignore paired arguement
+    parser.add_argument('--ignore-paired', help = 'Ignore paired library detection', action = 'store_true', default = False)
 
 
     args = parser.parse_args()

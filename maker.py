@@ -738,7 +738,7 @@ def manually_change_ref_or_gtf() -> None:
       print("Please enter an organism from the list!\n")
       continue
     print(f'Current reference pathes for {org}:\n')
-    print(tabulate(pd.DataFrame.from_dict(ref[org], orient='index').T, headers='keys', tablefmt='psql', showindex=False))
+    [print(f'{k.replace("path"," path")}\n{v}\n') for k,v in ref[org].items()]
     print('Would you like to change gtf, fasta, chromInfo all?\n')
     work_on = ['ref', 'nuc_ref', 'gtf', 'chrominfo', 'all']
     [print(f'{i}\t{v}') for i,v in enumerate(work_on)]
@@ -867,7 +867,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta
   command_outputs = {f'output_{command}':f'{tsv_dir}{SLASH}{pipeline[command]["outdir"]}{SLASH}{sample}{pipeline[command]["output_ext"]}' for command in pipeline.keys()}
   command_dirs = {f'dir_{command}':f'{tsv_dir}{SLASH}{pipeline[command]["outdir"]}' for command in pipeline.keys()}
   to_f_string = [
-  '_fasta', '_fasta_dir', '_fasta_nuc', '_gtf', '_command_input', '_command_output', '_command_output_dir_path', '_command_input_dir_path','_fastq', '_fastq_pre', '_sample', '_fastq_sample_path_no_ext','_fastq_dir', '_fastq_pre_dir', '_bam', '_sam', '_STAR_out', '_fastq1', '_fastq2', '_org_name','_STAR_final_log', '_chrominfo'
+  '_fasta', '_fasta_dir', '_fasta_nuc', '_fasta_nuc_dir', '_gtf', '_command_input', '_command_output', '_command_output_dir_path', '_command_input_dir_path','_fastq', '_fastq_pre', '_sample', '_fastq_sample_path_no_ext','_fastq_dir', '_fastq_pre_dir', '_bam', '_sam', '_STAR_out', '_fastq1', '_fastq2', '_org_name','_STAR_final_log', '_chrominfo'
   ]
   if not PAIRED:
     row.fastq_ftp = row.fastq_ftp.split(';')[0]
@@ -899,6 +899,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta
     STAR_out = f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}'
     STAR_final_log = f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}Log.final.out'
     fasta_dir = os.path.dirname(fasta).replace(r'"', '')
+    fasta_nuc_dir = os.path.dirname(fasta_nuc).replace(r'"', '')
     command_input = f'{tsv_dir}{SLASH}{command_inputdir}{SLASH}{sample}*{input_ext}'
     command_output = f'{tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}{output_ext}'
     command_output_dir_path = f'{tsv_dir}{SLASH}{command_outdir}'
@@ -1045,7 +1046,7 @@ def sample_lvl_csh_maker(work_on, tsv_df, tsv_name):
       fasta = refs[org_name]['refpath']
       gtf = refs[org_name]['gtfpath']
       try:
-        fasta_nuc = refs[org_name]['ref_nucpath']
+        fasta_nuc = refs[org_name]['nuc_refpath']
       except KeyError:
         fasta_nuc = ''
       try:
@@ -1060,10 +1061,15 @@ def sample_lvl_csh_maker(work_on, tsv_df, tsv_name):
 def make_master_file(tsvs):
   """
   """
+  tsv_dirs = set([i.split('run')[0] for i in tsvs])
   with open(os.path.join(PATH, 'master.csh'), 'w') as master:
     master.write(f'#!/bin/bash\n')
-    master.write(f'for file in {" ".join(tsvs)}\ndo\nqsub $file\ndone')
-  
+    master.write(f'for file in {" ".join(tsvs)}\ndo\nqsub $file\ndone\n')
+    #for tsv_dir in tsv_dirs:
+    #  master.write(f'mkdir {os.path.join(PATH, tsv_dir, "multiqc")}\n')
+    #  master.write(f'multiqc {os.path.join(PATH, tsv_dir)} -o {os.path.join(PATH, tsv_dir, "multiqc")}\n')
+
+
 def rows_of_links(tsv_path):
   """
   """
@@ -1132,13 +1138,14 @@ def metadata_handler(tsv):
   """
   Allow the user to choose which metadata file they wish to work on, return the path to the moved the metadata file and the name of the metadata file, return either a name of a specific metadata file or a list of indices to work on
   """
+  new_tsv = tsv.replace(' ', '_')
   tsv_path = os.path.join(PATH, tsv + '.tsv')
   if not os.path.exists(tsv_path):
     tsv_path = tsv_path.replace('.tsv', '.txt')
-  dir_checker('output/' + tsv)
-  dir_checker('output/' + tsv + '/' + 'stderr')
-  dir_checker('output/' + tsv + '/' + 'stdout')
-  new_tsv_path = f'{PATH}{SLASH}output{SLASH}{tsv}{SLASH}{tsv}.tsv'
+  dir_checker('output/' + new_tsv)
+  dir_checker('output/' + new_tsv + '/' + 'stderr')
+  dir_checker('output/' + new_tsv + '/' + 'stdout')
+  new_tsv_path = f'{PATH}{SLASH}output{SLASH}{new_tsv}{SLASH}{new_tsv}.tsv'
   try:
     shutil.move(src = tsv_path, dst = new_tsv_path)
   except (FileNotFoundError, NameError):
