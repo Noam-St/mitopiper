@@ -42,6 +42,22 @@ def check_input(n, options, special = None, allow = None):
   """
   Recieve a user input that is supposed to be a number within a certain range.
   Make sure the input is convertable to int and within the range.
+
+  Parameters
+  ----------
+  n : str
+    The user input
+  options : list
+    The list of options to choose from
+  special : list
+    A list of special options that are not in the options list
+  allow : list
+    A list of allowed inputs that are not in the options list
+  
+  Returns
+  -------
+  bool
+    True if the input is valid, False otherwise
   """
   # If the user enters an allowed input, the program will return True
   if allow != None:
@@ -267,7 +283,7 @@ def tabulate_dict(dicty: dict) -> tabulate:
   """
   Recieve a dictionary and return a pretty-printed table where each column is a key and the values are spread into rows.
   """
-  temp_df = pd.DataFrame(dicty)
+  temp_df = pd.DataFrame.from_dict(dicty, orient = 'index', columns = ['Value'])
   return tabulate(temp_df, headers = 'keys', tablefmt = 'psql')
 
 def gff3_maker(org_name : str) -> str:
@@ -703,6 +719,8 @@ def add_new_pipeline_step() -> None:
   settings = file_reader('settings')
   print('To begin defining a new pipeline step, first enter its name\nIMPORTANT: the name must be different from the current pipeline steps\n')
   name = input()
+  # Remove spaces from input
+  name = name.replace(' ','_')
   pipeline[name] = {k:'' for k,v in pipeline['trim'].items() if k != 'switch'}
   for k in pipeline[name].keys():
     print(f'Please enter a {k}\n')
@@ -718,6 +736,55 @@ def add_new_pipeline_step() -> None:
   file_creator('settings', settings)
   print('\nPipeline step added successfuly!\n')
 
+def modify_chosen_step(step_name):
+  """
+  Change the chosen parameter in the chosen step to the chosen value
+
+  Parameters
+  ----------
+  step_name : str
+    The name of the step to modify
+  """
+  pipeline = file_reader('pipeline')
+  step = pipeline[step_name]
+  step_key_list = [i for i in list(step.keys()) if i not in ('switch', 'path')]
+  while True:
+    print(f'Which parameter would you like to change in {step_name}?\nType \"exit\" to return to main menu\n')
+    temp_df = pd.DataFrame([step_key_list, [step[k] for k in step_key_list]]).T
+    print(tabulate(temp_df, tablefmt= 'psql'))
+    chosen_param = input()
+    if check_input(chosen_param, options = list(step.keys()), allow='exit'):
+      if chosen_param == 'exit': break
+      chosen_param_name = step_key_list[int(chosen_param)]
+      print(f'Please enter the new value for {chosen_param_name}')
+      new_value = input()
+      pipeline[step_name][chosen_param_name] = new_value
+      file_creator('pipeline', pipeline)
+      print(f'{chosen_param_name} in {step_name} changed to {new_value} successfuly!\n')
+      break
+    else:
+      print('Please enter a valid input!\n')
+      continue
+
+def modify_pipeline_step():
+  """
+  Modify pipeline step menu
+  The user chooses a pipeline step to modify, the chosen pipeline step is passed to modify_chosen_step function.
+  """
+  pipeline = file_reader('pipeline')
+  pipe_keys = list(pipeline.keys())
+  while True:
+    print("Pleast choose a pipeline step to modify")
+    [print(f'{i}\t{k}\n') for i, k in enumerate(pipe_keys)]
+    print(f'Type \"exit\" to return to main menu')
+    step_ind = input()
+    if check_input(step_ind, options = pipe_keys, allow='exit'):
+      if step_ind == 'exit': break
+      modify_chosen_step(pipe_keys[int(step_ind)])
+      break
+    else:
+      print('Please enter a valid input!\n')
+      continue
 
 def manually_change_ref_or_gtf() -> None:
   """
@@ -809,7 +876,7 @@ def change_menu():
   choice = True
   pprint('Welcome to the configuration menu!')
   # Menu options as a list of functions, the user chooses a number to choose a function
-  menu = [lambda : 0, change_general_settings, change_pipeline_settings, modify_pipeline, add_new_pipeline_setting, add_new_pipeline_step, manually_change_ref_or_gtf, save_current_settings, copy_settings_and_pipeline_from_one_config_to_another]
+  menu = [lambda : 0, change_general_settings, change_pipeline_settings, modify_pipeline, add_new_pipeline_setting, add_new_pipeline_step, modify_pipeline_step, manually_change_ref_or_gtf, save_current_settings, copy_settings_and_pipeline_from_one_config_to_another]
   while choice:
     [print(f"Enter {i+1}\tto {x.__name__}\n") for i,x in enumerate(menu[1:])]
     print("Enter 0\tto exit\n")
