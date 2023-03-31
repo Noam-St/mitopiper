@@ -20,7 +20,7 @@ def gen_id():
     num = random.randint(MIN, MAX)
     return 'SRR' + str(num)
 
-def make_tsv(sample_files, org, libstrat, ignore_paired):
+def make_tsv(sample_files, org, libstrat, ignore_paired, force_paired):
     """
     """
     if sample_files.endswith('/') or sample_files.endswith('\\'):
@@ -36,13 +36,14 @@ def make_tsv(sample_files, org, libstrat, ignore_paired):
     tsv_dict = {k:[] for k in COLS}
     file_list = []
     for file in os.listdir(sample_files):
-        if (file.ensdwith('.fastq.gz') or file.endswith('.fq.gz') or file.endswith('.fastq') or file.endswith('.fq')):
-            print(f'Copying {file} to {os.path.join(PATH, "output", NAME, "fastq")}')
+        if (file.endswith('.fastq.gz') or file.endswith('.fq.gz') or file.endswith('.fastq') or file.endswith('.fq')):
+            file_name = os.path.split(file)[-1]
+            print(f'Copying {file_name} to {os.path.join(PATH, "output", NAME, "fastq")}')
             shutil.copy(src = os.path.join(sample_files, file), dst = os.path.join(PATH, 'output', NAME, 'fastq'))            
             print(f'Copied {file} to {os.path.join(PATH, "output", NAME, "fastq")} successfully!')
             file_list.append(file.replace('.fastq.gz',''))
     files = ''.join(file_list)
-    if 'R1' in files and 'R2' in files and not ignore_paired:
+    if ('R1' in files and 'R2' in files and not ignore_paired) or force_paired:
         # Report that paired library detected
         print('Paired library detected!')
         #PAIRED
@@ -51,9 +52,10 @@ def make_tsv(sample_files, org, libstrat, ignore_paired):
             #file = re.sub(pattern = r'_R\d', repl = '')
             file1 = file_list[i]
             file2 = file_list[i + 1]
+            print(f'Paired files detected: {file1} and {file2}')
             tsv_dict['scientific_name'].append(org)
             tsv_dict['fastq_ftp'].append(f'{file1};{file2}')
-            file1 = re.sub(pattern = r'_R\d', repl = '', string = file1)
+            file1 = re.sub(pattern = r'(_R\d|_\d{1}_)', repl = '', string = file1)
             tsv_dict['run_accession'].append(file1)
             tsv_dict['sample_title'].append('_'.join(file1.split('_')[0:2]))
             if lib:
@@ -95,7 +97,7 @@ def fix_names(org, NAME):
             for f in row.fastq_ftp.split(';'):
                 
                 old = os.path.join(PATH, 'output', NAME, 'fastq', f'{f}.fastq.gz')
-                f = re.sub(pattern = r'_R\d', repl = '', string = f)
+                f = re.sub(pattern = r'(_R\d|_\d{1}_)', repl = '', string = f)
                 new = os.path.join(PATH, 'output', NAME, 'fastq', f'{f}_{c}_{initials}_{i}.fastq.gz')
                 os.rename(src = old, dst = new)
                 i+=1
@@ -111,7 +113,7 @@ def fix_names(org, NAME):
 def main(args):
     """
     """
-    NAME = make_tsv(args.sample_folder, args.org, args.lib_strat, args.ignore_paired)
+    NAME = make_tsv(args.sample_folder, args.org, args.lib_strat, args.ignore_paired, args.force_paired)
     fix_names(args.org, NAME)
     print(f'TSV file created successfuly!\n')
     print(f'File name\t{NAME}\n')
@@ -133,6 +135,8 @@ if __name__ == '__main__':
     parser.add_argument('-l','--lib-strat', help = 'Library protocol', metavar = 'library_strategy', type = str, default = '')
     # Ignore paired arguement
     parser.add_argument('--ignore-paired', help = 'Ignore paired library detection', action = 'store_true', default = False)
+    # Force paired arguement
+    parser.add_argument('--force-paired', help = 'Force paired library detection', action = 'store_true', default = False)
 
 
     args = parser.parse_args()
