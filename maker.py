@@ -279,11 +279,12 @@ def ref_maker(org_name : str) -> str:
     ref.write(fasta_wrap(seq))
   return fasta, ID
 
-def tabulate_dict(dicty: dict) -> tabulate:
+def tabulate_dict(dicty: dict, settings_mode = False) -> tabulate:
   """
   Recieve a dictionary and return a pretty-printed table where each column is a key and the values are spread into rows.
   """
-  temp_df = pd.DataFrame.from_dict(dicty, orient = 'index', columns = ['Value'])
+  if not settings_mode: temp_df = pd.DataFrame.from_dict(dicty, orient = 'index', columns = ['Value'])
+  else: temp_df = pd.DataFrame.from_dict(dicty)
   return tabulate(temp_df, headers = 'keys', tablefmt = 'psql')
 
 def gff3_maker(org_name : str) -> str:
@@ -424,7 +425,7 @@ def change_general_settings() -> None:
   options = list(general_settings.keys())
   while True:
     temp_setting = {'Name' : options, 'Value' : [general_settings[v][0] for v in options]}
-    print(tabulate_dict(temp_setting))
+    print(tabulate_dict(temp_setting, settings_mode = True))
     print('Which setting would you like to change?\n')
     print('Type exit to exit\n')
     choice = input()
@@ -536,7 +537,7 @@ def change_pipeline_settings() -> None:
       'Description':[i['description'] for i in settings[chosen_stage].values()],
       'Value':[i['value'] if i['value'] != '' else i['switch'] for i in settings[chosen_stage].values()]
       }
-    print(tabulate_dict(temp_config_df))
+    print(tabulate_dict(temp_config_df, settings_mode=True))
     # If there are no settings for this stage, print a message and return to the main menu
     if settings[chosen_stage] == {}:
       print(f'It seems no settings were added to {chosen_stage} yet\nto add some return first to the main menu by typing exit\n')
@@ -561,7 +562,7 @@ def change_pipeline_settings() -> None:
         print(f'\nBoolean setting switched to {not bool(setting_switch)}\n')
       else:
         print(f'You chose: {chosen_setting}')
-        print('Please choose a new value, current value: {setting_value}\n')
+        print(f'Please choose a new value, current value: {setting_value}\n')
         print('The value may include several Keywords:\n_gtf, _chrominfo, _fasta, _fastq, _fastq_pre, _fastq_sample_path_no_ext, _fastq_dir, _fastq_pre_dir, _bam, _sam, _org_name\nThese keywords will be replaced with appropriate paths\n')
         print(f'Additionally, you may add the combination of output_command_name or dir_command_name to include the output of another command in the setting value\nNOTE: you are adding a setting to {chosen_stage}. You can grab the output of the following commands with the current run order')
         try: print('\t'.join(order[:order.index(chosen_stage)]))
@@ -597,9 +598,9 @@ def modify_pipeline() -> None:
       pipeline_changes = {i:k for i,k in enumerate(pipeline.keys())}
       print('To remove or add a feature, simply enter its number\nIMPORTANT: if you remove a command and add it later, it will appended in the last position!\n')
       print('ACTIVE COMMANDS:\n')
-      [print(f'{i} {k}\n') for i,k in zip(pipeline_changes.keys(), pipeline_changes.values()) if pipeline[k]['switch']]
+      [print(f'{i} {k}') for i,k in zip(pipeline_changes.keys(), pipeline_changes.values()) if pipeline[k]['switch']]
       print('INACTIVE COMMANDS:\n')
-      [print(f'{i} {k}\n') for i,k in zip(pipeline_changes.keys(), pipeline_changes.values()) if not pipeline[k]['switch']]
+      [print(f'{i} {k}') for i,k in zip(pipeline_changes.keys(), pipeline_changes.values()) if not pipeline[k]['switch']]
       while True:
         to_change = input()
         to_change = input_to_list(to_change, len(pipeline_changes))
@@ -775,7 +776,7 @@ def modify_pipeline_step():
   pipe_keys = list(pipeline.keys())
   while True:
     print("Pleast choose a pipeline step to modify")
-    [print(f'{i}\t{k}\n') for i, k in enumerate(pipe_keys)]
+    [print(f'{i}\t{k}') for i, k in enumerate(pipe_keys)]
     print(f'Type \"exit\" to return to main menu')
     step_ind = input()
     if check_input(step_ind, options = pipe_keys, allow='exit'):
