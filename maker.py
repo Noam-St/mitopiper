@@ -928,7 +928,6 @@ def change_menu():
     else: choice = int(choice)
     menu[choice]()
 
-@snoop
 def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta_nuc, PAIRED, org, tsv_dir, SAMPLE_LEVEL):
   """
   Create a csh fomratted string designed to be run by qsub, works differnetly for PAIRED and unPAIRED samples.
@@ -1320,7 +1319,6 @@ def metadata_handler(tsv):
     pass
   assert os.path.exists(new_tsv_path), "TSV file does not exist!"
   return new_tsv_path, tsv
-
 
 def main():
   """
