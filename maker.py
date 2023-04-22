@@ -1069,11 +1069,15 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta
           ftps = row.fastq_ftp.split(';')
           for i in range(2):
             csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}.fastq.gz {ftps[i]}\n'
+            # Wait 30s between each wget command to avoid overloading the server
+            csh_str+=f'sleep 30\n'
         else: # If SAMPLE_LEVEL
           for i in range(2):
             for run_ind, ftp in enumerate(row.fastq_ftp):
               ftps = ftp.split(';')
               csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}_{run_ind}.fastq.gz {ftps[i]}\n'
+              # Wait 30s between each wget command to avoid overloading the server
+              csh_str+=f'sleep 30\n'
             # Concat all fastq files for each sample for forward and reverse reads and remove the individual files afterwards
             csh_str+=f'cat {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}_*.fastq.gz > {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}.fastq.gz\n'
             csh_str+=f'rm {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}_*.fastq.gz\n'
@@ -1094,9 +1098,13 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta
       if command == 'wget':
         if not SAMPLE_LEVEL:
           csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}.fastq.gz ftp://{row.fastq_ftp}\n'
+          # Wait 30s between each wget command to avoid overloading the server
+          csh_str+=f'sleep 30\n'
         else: # If SAMPLE_LEVEL
           for run_ind, ftp in enumerate(row.fastq_ftp):
             csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{run_ind}.fastq.gz ftp://{ftp}\n'
+            # Wait 30s between each wget command to avoid overloading the server
+            csh_str+=f'sleep 30\n'
           # Concat all fastq files for each sample and remove the individual files afterwards
           csh_str+=f'cat {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_*.fastq.gz > {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}.fastq.gz\n'
           csh_str+=f'rm {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_*.fastq.gz\n'
