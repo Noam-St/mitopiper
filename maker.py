@@ -928,7 +928,7 @@ def change_menu():
     else: choice = int(choice)
     menu[choice]()
 
-
+@snoop
 def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta_nuc, PAIRED, org, tsv_dir, SAMPLE_LEVEL):
   """
   Create a csh fomratted string designed to be run by qsub, works differnetly for PAIRED and unPAIRED samples.
@@ -984,7 +984,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta
   if not PAIRED and SAMPLE_LEVEL:
     row.fastq_ftp = [i.split(';')[0] for i in row.fastq_ftp]
   elif not PAIRED and not SAMPLE_LEVEL:
-    row.fastq_ftp = i.split(';')[0]
+    row.fastq_ftp = row.fastq_ftp.split(';')[0]
   for command in order:
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else (pipeline[command]['path'] +' ' + ' '.join(pipeline[command]['key'].split(' ')[1:]))
     command_outdir = pipeline[command]['outdir']
@@ -1149,19 +1149,17 @@ def sample_lvl_csh_maker(work_on, tsv_df, tsv_name):
     if csh_add_ref == False:
       bad_orgs.append(org_name)
       continue
-    try:
-      if SAMPLE_LEVEL:
-        fastq_ftp = row.fastq_ftp[0]
-        accs = row.sample_accession
-      else:
-        fastq_ftp = row.fastq_ftp
-        accs = row.sample_accession
-      if len(fastq_ftp.split(';')) > 1:
-        PAIRED = True
-      else:
-        PAIRED = False
-    except AttributeError:
-      print(f'Error:\tNo fastq_ftp found for sample {i} of organism {org_name} ! Skipping...\n\n')
+    
+    if SAMPLE_LEVEL:
+      fastq_ftp = row.fastq_ftp[0]
+      accs = row.sample_accession
+    else:
+      fastq_ftp = row.fastq_ftp
+      accs = row.run_accession
+    if len(fastq_ftp.split(';')) > 1:
+      PAIRED = True
+    else:
+      PAIRED = False
     try:
       if general_settings['ignore_paired_end'][0]:
         # If ignore_paired_end is True, then ignore the paired end status of the sample
@@ -1370,11 +1368,7 @@ def main():
   for tsv in tsvs:
     tsv_path, tsv_name = metadata_handler(tsv)
     tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
-    for i in ['run_accession', 'fastq_ftp']:
-      try:
-        tsv_df[i] = tsv_df[i].apply(literal_eval)
-      except ValueError:
-        pass
+
     try: tsv_df.scientific_name = tsv_df.scientific_name.str.replace(' ','_')
     except AttributeError:
       formats = [rows_of_links]
@@ -1382,6 +1376,17 @@ def main():
       [print(f'Enter {i}\tto {v.__name__}' for i,v in enumerate(formats))]
       choice = input()
       tsv_df = formats[choice](tsv_path)
+    # Make sure the fastq_ftp col exists
+    if 'fastq_ftp' not in tsv_df.columns:
+      print('The fastq_ftp column does not exist in the tsv file. Please add it and try again.')
+      print('Skipping to next tsv file...')
+      continue
+    for i in ['run_accession', 'fastq_ftp']:
+      if i in tsv_df.columns:
+        try:
+          tsv_df[i] = tsv_df[i].apply(literal_eval)
+        except (ValueError, SyntaxError):
+          pass
     # Check for any inconsistencies in the chosen workflow
     tsv_dir = os.path.dirname(tsv_path)
     validate_workflow(tsv_dir)
