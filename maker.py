@@ -19,6 +19,7 @@ from Bio import Entrez, SeqIO
 from tabulate import tabulate
 from importlib import reload
 import random
+from ast import literal_eval
 
 reload(consts)
 
@@ -213,6 +214,46 @@ def validate_configs():
           print('Resaved successfully')
           file_creator(file, file_dict, dir)
           resave = False
+
+def validate_workflow(tsv_dir):
+  """
+  Validate the workflow by checking that all the stages in the workflow are valid and make sense
+  This will be invoked before the user is asked whether to change the workflow  
+  """
+  settings = file_reader('settings')
+  pipeline = file_reader('pipeline')
+  run_order = file_reader('run_order')
+  # Check whether there are files in the tsv_dir/fastq directory
+  if (not os.path.exists(os.path.join(tsv_dir, 'fastq'))) or (len(os.listdir(os.path.join(tsv_dir, 'fastq'))) == 0):
+    fastq_empty = True
+  else:
+    fastq_empty = False
+  # Check whether the run_order contains wget
+  if run_order[0] != 'wget' and fastq_empty:
+    print('Warning: No fastq files found in the fastq directory and wget is not in the run order. This will result in the workflow not working properly. Please add wget to the run order or add fastq files to the fastq directory')
+    print('Wget must be the first stage in the run order!')
+
+def guess_threads(settings, pipeline):
+  """
+  Attempt to guess the number of threads to use for the current run based on the maximum number of threads specified for any of the active steps in the settings file, default to 4
+  """
+  threads = 4
+  thread_terms = ['threads', 'cores', 'cpus', 'cpu', 'thread', 'core']
+  thread_values = []
+  active_stages = [i for i in pipeline.keys() if pipeline[i]['switch']]
+
+  for stage in active_stages:
+    for param in settings[stage].keys():
+      if settings[stage][param]['switch'] and any(term in param.lower() for term in thread_terms):
+        value = settings[stage][param]['value']
+        if isinstance(value, int):
+          thread_values.append(value)
+        elif isinstance(value, str):
+          if value.isdigit():
+            thread_values.append(int(value))
+          elif value.lower() == 'max':
+            thread_values.append(8)
+  return threads
 
 def dir_checker(dirname : str) -> None:
   """
@@ -888,7 +929,7 @@ def change_menu():
     menu[choice]()
 
 
-def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta_nuc, PAIRED, org, tsv_dir):
+def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta_nuc, PAIRED, org, tsv_dir, SAMPLE_LEVEL):
   """
   Create a csh fomratted string designed to be run by qsub, works differnetly for PAIRED and unPAIRED samples.
 
@@ -931,14 +972,19 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta
     except IndexError:
       org = org[0][0]
   org = org.upper()
-  sample = f'{row.run_accession}_{i}_{org}'
+  if SAMPLE_LEVEL: s_id = row.sample_accession
+  else: s_id = row.run_accession
+
+  sample = f'{s_id}_{i}_{org}'
   command_outputs = {f'output_{command}':f'{tsv_dir}{SLASH}{pipeline[command]["outdir"]}{SLASH}{sample}{pipeline[command]["output_ext"]}' for command in pipeline.keys()}
   command_dirs = {f'dir_{command}':f'{tsv_dir}{SLASH}{pipeline[command]["outdir"]}' for command in pipeline.keys()}
   to_f_string = [
   '_fasta', '_fasta_dir', '_fasta_nuc', '_fasta_nuc_dir', '_gtf', '_command_input', '_command_output', '_command_output_dir_path', '_command_input_dir_path','_fastq', '_fastq_pre', '_sample', '_fastq_sample_path_no_ext','_fastq_dir', '_fastq_pre_dir', '_bam', '_sam', '_STAR_out', '_fastq1', '_fastq2', '_org_name','_STAR_final_log', '_chrominfo'
   ]
-  if not PAIRED:
-    row.fastq_ftp = row.fastq_ftp.split(';')[0]
+  if not PAIRED and SAMPLE_LEVEL:
+    row.fastq_ftp = [i.split(';')[0] for i in row.fastq_ftp]
+  elif not PAIRED and not SAMPLE_LEVEL:
+    row.fastq_ftp = i.split(';')[0]
   for command in order:
     command_key = pipeline[command]['key'] if pipeline[command]['path'] == '' else (pipeline[command]['path'] +' ' + ' '.join(pipeline[command]['key'].split(' ')[1:]))
     command_outdir = pipeline[command]['outdir']
@@ -1019,11 +1065,19 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta
       structure = ' '.join(struc_list)
     csh_str+= f'echo \"Running {command}: {pipeline[command]["description"]} on {sample}\"\n'
     if PAIRED:
-      ftps = row.fastq_ftp.split(';')
       if command == 'wget':
-        for i in range(2):
-          csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}.fastq.gz {ftps[i]}\n'
-          csh_str+='sleep 30s\n'
+        if not SAMPLE_LEVEL:
+          ftps = row.fastq_ftp.split(';')
+          for i in range(2):
+            csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}.fastq.gz {ftps[i]}\n'
+        else: # If SAMPLE_LEVEL
+          for i in range(2):
+            for run_ind, ftp in enumerate(row.fastq_ftp):
+              ftps = ftp.split(';')
+              csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}_{run_ind}.fastq.gz {ftps[i]}\n'
+            # Concat all fastq files for each sample for forward and reverse reads and remove the individual files afterwards
+            csh_str+=f'cat {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}_*.fastq.gz > {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}.fastq.gz\n'
+            csh_str+=f'rm {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}_*.fastq.gz\n'
       elif command == 'trim':
         csh_str+=f'{command_key} {command_settings} --paired {fastq_pre}\n'
       elif command == 'fastqc':
@@ -1039,7 +1093,14 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta
         csh_str+='\n'
     else:
       if command == 'wget':
-        csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}.fastq.gz ftp://{row.fastq_ftp}\n'
+        if not SAMPLE_LEVEL:
+          csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}.fastq.gz ftp://{row.fastq_ftp}\n'
+        else: # If SAMPLE_LEVEL
+          for run_ind, ftp in enumerate(row.fastq_ftp):
+            csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{run_ind}.fastq.gz ftp://{ftp}\n'
+          # Concat all fastq files for each sample and remove the individual files afterwards
+          csh_str+=f'cat {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_*.fastq.gz > {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}.fastq.gz\n'
+          csh_str+=f'rm {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_*.fastq.gz\n'
       elif command == 'trim':
         csh_str+=f'{command_key} {command_settings} {fastq_pre}\n'
       elif command == 'fastqc':
@@ -1052,7 +1113,7 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta
         csh_str+=structure
         csh_str += '\n'
   return csh_str  
-  
+
 def sample_lvl_csh_maker(work_on, tsv_df, tsv_name):
   """
   Makes a single .csh file for each line of .tsv, and a master.csh to be run by qsub
@@ -1068,16 +1129,18 @@ def sample_lvl_csh_maker(work_on, tsv_df, tsv_name):
   """
   tsv_dir = f"{PATH}{SLASH}output{SLASH}{tsv_name}"
   general_settings = file_reader('general_settings')
+  settings = file_reader('settings')
   pipeline = file_reader('pipeline')
+  order = file_reader('run_order')
   [dir_checker('output' + '/' + tsv_name + '/' + i['outdir']) for i in pipeline.values() if i['outdir'] != '']
   tsvs = []
   bad_orgs = []
   samples_df = tsv_df.iloc[work_on, :]
-
+  threads = guess_threads(settings, pipeline)
   for i,row in samples_df.iterrows():
-    settings = file_reader('settings')
-    pipeline = file_reader('pipeline')
-    order = file_reader('run_order')
+    # Check if sample level metadata file
+    if type(row.run_accession) == list: SAMPLE_LEVEL = True
+    else: SAMPLE_LEVEL = False
     org_name = row.scientific_name
     if org_name in bad_orgs:
       print(f'Warning:\tSkipped organism {org_name} because it does not exist in final.csv!\n\n')
@@ -1087,7 +1150,13 @@ def sample_lvl_csh_maker(work_on, tsv_df, tsv_name):
       bad_orgs.append(org_name)
       continue
     try:
-      if len(row.fastq_ftp.split(';')) > 1:
+      if SAMPLE_LEVEL:
+        fastq_ftp = row.fastq_ftp[0]
+        accs = row.sample_accession
+      else:
+        fastq_ftp = row.fastq_ftp
+        accs = row.sample_accession
+      if len(fastq_ftp.split(';')) > 1:
         PAIRED = True
       else:
         PAIRED = False
@@ -1095,6 +1164,7 @@ def sample_lvl_csh_maker(work_on, tsv_df, tsv_name):
       print(f'Error:\tNo fastq_ftp found for sample {i} of organism {org_name} ! Skipping...\n\n')
     try:
       if general_settings['ignore_paired_end'][0]:
+        # If ignore_paired_end is True, then ignore the paired end status of the sample
         PAIRED = False
     except KeyError:
       pass
@@ -1103,10 +1173,11 @@ def sample_lvl_csh_maker(work_on, tsv_df, tsv_name):
       file.write(f'#$ -o {tsv_dir}{SLASH}stdout\n')
       file.write(f'#$ -e {tsv_dir}{SLASH}stderr\n')
       file.write(f'#$ -cwd\n')
-      file.write(f'#$ -N s_{row.run_accession}_{i}\n')
+      file.write(f'#$ -N s_{accs}_{i}\n')
       file.write(f'#$ -q {general_settings["qsub_queue"][0]}\n')
       file.write(f'#$ -S /bin/bash\n')
       file.write(f'#$ -V\n')
+      file.write(f'#$ -pe shared {threads}\n')
       file.write(general_settings["free_form"][0])
       file.write(f'echo \"Current organism: {row.scientific_name}\"\n\n')
       if csh_add_ref != '': file.write(csh_add_ref)
@@ -1121,7 +1192,7 @@ def sample_lvl_csh_maker(work_on, tsv_df, tsv_name):
         chrominfo = refs[org_name]['chrominfopath']
       except KeyError:
         chrominfo = ''
-      to_csh = csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta_nuc, PAIRED, org_name, tsv_dir)
+      to_csh = csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta_nuc, PAIRED, org_name, tsv_dir, SAMPLE_LEVEL)
       file.write(to_csh)
       tsvs.append(f'{tsv_dir}{SLASH}run{i}.csh')
   return tsvs
@@ -1173,17 +1244,16 @@ def metadata_input() -> list:
   """
   Recieve the requested tsvs from the user and return them as a list of tsv names
   """
-
   while True:
-    print('\nPlease enter metadata file name (without extension) or the number next to a pre-existing metadata file.\nIf you want to work on several metadata files at once you can do this by entering either a range of numbers separated by a dash (x-y),\nseveral numbers separated by space (x y z), or the word \"all\".\n')
-    print(f'IMPORTANT: The metadata file must be in a the same folder as this script!\nIMPORTANT: all the metadata files must be in the following format:\n\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\n\nThe format is available for download from the EBI website\n')
+    print('\nPlease enter the ENA metadata file name (without extension) or the number next to a pre-existing metadata file.\nIf you want to work on several metadata files at once you can do this by entering either a range of numbers separated by a dash (x-y),\nseveral numbers separated by space (x y z), or the word \"all\".\n')
+    print(f'IMPORTANT: The metadata file must be in a the same folder as this script!\nIMPORTANT: all the metadata files must be in the following format:\n\nstudy_accession\tsample_accession\trun_accession\ttax_id\tscientific_name\tfastq_ftp\tsubmitted_ftp\tsra_ftp\n\nThe format is available for download from the ENA website\n')
     # List all previously used experiments
     tsvs = sorted(os.listdir(f'{PATH}{SLASH}output'))
     [print(f'{i}\t{v}') for i,v in enumerate(tsvs) if os.path.isdir(f'{PATH}{SLASH}output{SLASH}{v}')]
     tsv = input()
     #If the input is the name of a new TSV file read it
     if re.match(r'\D+', tsv) and tsv != 'all':
-      # If file does not include extension, remove it
+      # If file does not include extension, add it
       tsv = tsv.split('.')[0]
       tsv_path = f"{PATH}{SLASH}{tsv}.tsv"
       try:
@@ -1201,10 +1271,40 @@ def metadata_input() -> list:
   tsv_inds = input_to_list(tsv, len(tsvs))
   tsvs = [v for i, v in enumerate(tsvs) if i in tsv_inds]
   return tsvs
-       
+
+def metadata_to_sample_level(tsv_path):
+  """
+  Receive path to ENA metadata tsv file and convert it from run level to sample level
+  Save the new tsv file in the same folder as the original tsv file
+  """
+  tsv_df = pd.read_csv(tsv_path, sep = '\t', header = 0)
+  tsv_df_sample_level = []
+  sample_to_runs = {}
+  sample_to_links = {}
+  for sample in tsv_df.sample_accession.unique():
+    tsv_df_sample = {}
+    cur_runs = tsv_df[tsv_df.sample_accession == sample].run_accession.values.tolist()
+    cur_links = tsv_df[tsv_df.sample_accession == sample].fastq_ftp.values.tolist()
+    sample_to_runs[sample] = cur_runs
+    sample_to_links[sample] = cur_links
+    tsv_df_sample['sample_accession'] = sample
+    tsv_df_sample['run_accession'] = cur_runs
+    tsv_df_sample['fastq_ftp'] = cur_links
+    for col in tsv_df.columns:
+      if col not in ['sample_accession', 'run_accession', 'fastq_ftp']:
+        tsv_df_sample[col] = tsv_df[tsv_df.sample_accession == sample][col].values[0]
+    tsv_df_sample_level.append(tsv_df_sample)
+  tsv_df_sample_level = pd.DataFrame.from_dict(tsv_df_sample_level)
+  # Replace the tsv file with the sample level tsv file
+  tsv_df_sample_level.to_csv(tsv_path, sep = '\t', index = False)
+  return tsv_df_sample_level
+
+
 def metadata_handler(tsv):
   """
-  Allow the user to choose which metadata file they wish to work on, return the path to the moved the metadata file and the name of the metadata file, return either a name of a specific metadata file or a list of indices to work on
+  Invoked in cases where the user wants to work on a new metadata file.
+  Move the tsv file to the appropriate input folder and rename it to the name of the tsv file.
+
   """
   new_tsv = tsv.replace(' ', '_')
   tsv_path = os.path.join(PATH, tsv + '.tsv')
@@ -1216,7 +1316,9 @@ def metadata_handler(tsv):
   new_tsv_path = f'{PATH}{SLASH}output{SLASH}{new_tsv}{SLASH}{new_tsv}.tsv'
   try:
     shutil.move(src = tsv_path, dst = new_tsv_path)
+    metadata_to_sample_level(new_tsv_path)
   except (FileNotFoundError, NameError):
+    # This is a workaround for the case where the user enters a tsv name that does not exist or a tsv that is already in the output folder
     pass
   assert os.path.exists(new_tsv_path), "TSV file does not exist!"
   return new_tsv_path, tsv
@@ -1264,8 +1366,27 @@ def main():
     # Save the chosen workflow in the "current" directory
     save_settings(source = workflow, output = 'current')
     break
+  run_list = []
+  for tsv in tsvs:
+    tsv_path, tsv_name = metadata_handler(tsv)
+    tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
+    for i in ['run_accession', 'fastq_ftp']:
+      try:
+        tsv_df[i] = tsv_df[i].apply(literal_eval)
+      except ValueError:
+        pass
+    try: tsv_df.scientific_name = tsv_df.scientific_name.str.replace(' ','_')
+    except AttributeError:
+      formats = [rows_of_links]
+      print("It appears your file is not in EBI format.\n")
+      [print(f'Enter {i}\tto {v.__name__}' for i,v in enumerate(formats))]
+      choice = input()
+      tsv_df = formats[choice](tsv_path)
+    # Check for any inconsistencies in the chosen workflow
+    tsv_dir = os.path.dirname(tsv_path)
+    validate_workflow(tsv_dir)
   while True:
-    print('Main menu')    
+    print('\nMain menu\n')    
     pprint('Enter 1 to change the configuration\nEnter 0 to continue to sample selection\n')
     change = input()
     valid = check_input(change, [0,1])
@@ -1276,31 +1397,22 @@ def main():
   # If the user wants to change the configuration, run the change_menu function
   if change:
     change_menu()
-  run_list = []
-  for tsv in tsvs:
-    tsv_path, tsv_name = metadata_handler(tsv)
-    tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
-    try: tsv_df.scientific_name = tsv_df.scientific_name.str.replace(' ','_')
-    except AttributeError:
-      formats = [rows_of_links]
-      print("It appears your file is not in EBI format.\n")
-      [print(f'Enter {i}\tto {v.__name__}' for i,v in enumerate(formats))]
-      choice = input()
-      tsv_df = formats[choice](tsv_path)
-
-    pprint(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\nTo work on specific rows, enter a list of rows seperated by a SINGLE space (1 2 3 4)')
-    wanted_cols = ['index', 'scientific_name', 'run_accession', 'sample_accession', 'sample_title', 'library_strategy', 'library_selection', 'read_count']
-    colnames = ['Index', 'ID', 'Run accession', 'Sample accession', 'Sample', 'Library Strategy', 'Library Selection', 'Read Count']
-    actual_cols = [i for i in wanted_cols if i in tsv_df.columns]
-    sliced_df = tsv_df.loc[:, actual_cols]
-    print(tabulate(sliced_df, headers = 'keys', tablefmt = 'psql'))
-    while True:
-      work_on = input()
-      work_on = input_to_list(work_on, len(tsv_df))
-      if work_on == []:
-        continue
-      break
-    run_list += sample_lvl_csh_maker(work_on, tsv_df, tsv_name)
+  pprint(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\nTo work on specific rows, enter a list of rows seperated by a SINGLE space (1 2 3 4)')
+  wanted_cols = ['index', 'scientific_name', 'run_accession', 'sample_accession', 'sample_title', 'library_strategy', 'library_selection', 'read_count']
+  colnames = ['Index', 'ID', 'Run accession', 'Sample accession', 'Sample', 'Library Strategy', 'Library Selection', 'Read Count']
+  actual_cols = [i for i in wanted_cols if i in tsv_df.columns]
+  sliced_df = tsv_df.loc[:, actual_cols]
+  # if the type of run_accession col values is a list, convert to string for printing
+  if isinstance(sliced_df.run_accession[0], list):
+    sliced_df.run_accession = sliced_df.run_accession.apply(lambda x: ' '.join(x))
+  print(tabulate(sliced_df, headers = 'keys', tablefmt = 'psql'))
+  while True:
+    work_on = input()
+    work_on = input_to_list(work_on, len(tsv_df))
+    if work_on == []:
+      continue
+    break
+  run_list += sample_lvl_csh_maker(work_on, tsv_df, tsv_name)
 
   make_master_file(run_list)
   save_settings(source = 'current', output = 'last_used')
