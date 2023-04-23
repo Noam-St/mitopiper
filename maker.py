@@ -928,7 +928,7 @@ def change_menu():
     else: choice = int(choice)
     menu[choice]()
 
-def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta_nuc, PAIRED, org, tsv_dir, SAMPLE_LEVEL):
+def csh_commands(i, row, s_id, settings, pipeline, order, fasta, gtf, chrominfo, fasta_nuc, PAIRED, org, tsv_dir, SAMPLE_LEVEL):
   """
   Create a csh fomratted string designed to be run by qsub, works differnetly for PAIRED and unPAIRED samples.
 
@@ -971,8 +971,8 @@ def csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta
     except IndexError:
       org = org[0][0]
   org = org.upper()
-  if SAMPLE_LEVEL: s_id = row.sample_accession
-  else: s_id = row.run_accession
+  #if SAMPLE_LEVEL: s_id = row.sample_accession
+  #else: s_id = row.run_accession
 
   sample = f'{s_id}_{i}_{org}'
   command_outputs = {f'output_{command}':f'{tsv_dir}{SLASH}{pipeline[command]["outdir"]}{SLASH}{sample}{pipeline[command]["output_ext"]}' for command in pipeline.keys()}
@@ -1145,6 +1145,8 @@ def sample_lvl_csh_maker(work_on, tsv_df, tsv_name):
   samples_df = tsv_df.iloc[work_on, :]
   threads = guess_threads(settings, pipeline)
   for i,row in samples_df.iterrows():
+    settings = file_reader('settings')
+    pipeline = file_reader('pipeline')
     # Check if sample level metadata file
     if type(row.run_accession) == list: SAMPLE_LEVEL = True
     else: SAMPLE_LEVEL = False
@@ -1197,7 +1199,7 @@ def sample_lvl_csh_maker(work_on, tsv_df, tsv_name):
         chrominfo = refs[org_name]['chrominfopath']
       except KeyError:
         chrominfo = ''
-      to_csh = csh_commands(i, row, settings, pipeline, order, fasta, gtf, chrominfo, fasta_nuc, PAIRED, org_name, tsv_dir, SAMPLE_LEVEL)
+      to_csh = csh_commands(i, row, accs, settings, pipeline, order, fasta, gtf, chrominfo, fasta_nuc, PAIRED, org_name, tsv_dir, SAMPLE_LEVEL)
       file.write(to_csh)
       tsvs.append(f'{tsv_dir}{SLASH}run{i}.csh')
   return tsvs
