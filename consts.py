@@ -282,5 +282,7 @@ DEFAULT_MAIN = \
   'ignore_paired_end': [False, 'Ignore paired-end reads'],
   'qsub_queue' : ['bioinfo.q', 'choose which cluster queue to send the jobs into'],
   'environment':['bash', 'choose the linux environment to use'],
+  'qsub_threads' : [1, 'choose the number of threads to use for each job'],
+  'qsub_memory' : ['30G', 'choose the amount of memory to use for each job'],
   'free_form':['', 'any command you type here will be added to every single .csh file created, enter nothing to wipe setting']
   }
