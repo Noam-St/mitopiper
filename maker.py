@@ -1097,12 +1097,12 @@ def csh_commands(i, row, s_id, settings, pipeline, order, fasta, gtf, chrominfo,
     else:
       if command == 'wget':
         if not SAMPLE_LEVEL:
-          csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}.fastq.gz ftp://{row.fastq_ftp}\n'
+          csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}.fastq.gz {row.fastq_ftp}\n'
           # Wait 30s between each wget command to avoid overloading the server
           csh_str+=f'sleep 30\n'
         else: # If SAMPLE_LEVEL
           for run_ind, ftp in enumerate(row.fastq_ftp):
-            csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{run_ind}.fastq.gz ftp://{ftp}\n'
+            csh_str+=f'{command_key} {command_settings} -O {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{run_ind}.fastq.gz {ftp}\n'
             # Wait 30s between each wget command to avoid overloading the server
             csh_str+=f'sleep 30\n'
           # Concat all fastq files for each sample and remove the individual files afterwards
@@ -1184,7 +1184,8 @@ def sample_lvl_csh_maker(work_on, tsv_df, tsv_name):
       file.write(f'#$ -q {general_settings["qsub_queue"][0]}\n')
       file.write(f'#$ -S /bin/bash\n')
       file.write(f'#$ -V\n')
-      file.write(f'#$ -pe shared {threads}\n')
+      file.write(f'#$ -pe shared {general_settings["qsub_threads"][0]}\n')
+      file.write(f'#$ -l mem_free={general_settings["qsub_memory"][0]}\n')
       file.write(general_settings["free_form"][0])
       file.write(f'echo \"Current organism: {row.scientific_name}\"\n\n')
       if csh_add_ref != '': file.write(csh_add_ref)
