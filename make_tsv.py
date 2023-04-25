@@ -36,12 +36,15 @@ def make_tsv(sample_files, org, libstrat, ignore_paired, force_paired):
     tsv_dict = {k:[] for k in COLS}
     file_list = []
     for file in os.listdir(sample_files):
+        # Grab all the file format suffixes
         if (file.endswith('.fastq.gz') or file.endswith('.fq.gz') or file.endswith('.fastq') or file.endswith('.fq')):
             file_name = os.path.split(file)[-1]
             print(f'Copying {file_name} to {os.path.join(PATH, "output", NAME, "fastq")}')
             shutil.copy(src = os.path.join(sample_files, file), dst = os.path.join(PATH, 'output', NAME, 'fastq'))            
             print(f'Copied {file} to {os.path.join(PATH, "output", NAME, "fastq")} successfully!')
-            file_list.append(file.replace('.fastq.gz',''))
+            for suffix in ['.fastq.gz', '.fq.gz', '.fastq', '.fq', '.gz']:
+                file = file.replace(suffix, '')
+            file_list.append(file)
     files = ''.join(file_list)
     if ('R1' in files and 'R2' in files and not ignore_paired) or force_paired:
         # Report that paired library detected
@@ -87,7 +90,7 @@ def fix_names(org, NAME):
     initials = initials.upper()
 
     tsv_df = pd.read_csv(os.path.join(PATH, 'output', NAME, f'{NAME}.tsv'), sep = '\t')
-
+    suffixes = ['.fastq.gz', '.fq.gz', '.fastq', '.fq', '.gz']
     c = 0
     for i, row in tsv_df.iterrows():
         if len(row.fastq_ftp.split(';')) > 1: PAIRED = True
@@ -95,20 +98,29 @@ def fix_names(org, NAME):
         if PAIRED:
             i = 1
             for f in row.fastq_ftp.split(';'):
-                
-                old = os.path.join(PATH, 'output', NAME, 'fastq', f'{f}.fastq.gz')
+                # Try the old file with several suffixes
+                for suffix in suffixes:
+                    old = os.path.join(PATH, 'output', NAME, 'fastq', f'{f}{suffix}')
+                    if os.path.exists(old): break
                 f = re.sub(pattern = r'(_R\d|_\d{1}_)', repl = '', string = f)
-                new = os.path.join(PATH, 'output', NAME, 'fastq', f'{f}_{c}_{initials}_{i}.fastq.gz')
+                if '.gz' in suffix:
+                    new = os.path.join(PATH, 'output', NAME, 'fastq', f'{f}_{c}_{initials}_{i}.fastq.gz')
+                else:
+                    new = os.path.join(PATH, 'output', NAME, 'fastq', f'{f}_{c}_{initials}_{i}.fastq')
                 os.rename(src = old, dst = new)
                 i+=1
         else:
             f = row.fastq_ftp
-            old = os.path.join(PATH, 'output', NAME, 'fastq', f'{f}.fastq.gz')
+            for suffix in suffixes:
+                old = os.path.join(PATH, 'output', NAME, 'fastq', f'{f}{suffix}')
+                if os.path.exists(old): break
             f = re.sub(pattern = r'_R\d', repl = '', string = f)
-            new = os.path.join(PATH, 'output', NAME, 'fastq', f'{f}_{c}_{initials}.fastq.gz')
+            if '.gz' in suffix:
+                new = os.path.join(PATH, 'output', NAME, 'fastq', f'{f}_{c}_{initials}.fastq.gz')
+            else:
+                new = os.path.join(PATH, 'output', NAME, 'fastq', f'{f}_{c}_{initials}_{i}.fastq')
             os.rename(old, new)
         c+=1
-
 
 def main(args):
     """
