@@ -1374,6 +1374,18 @@ def main():
     save_settings(source = workflow, output = 'current')
     break
   run_list = []
+  while True:
+    print('\nMain menu\n')    
+    pprint('Enter 1 to change the configuration\nEnter 0 to continue to sample selection\n')
+    change = input()
+    valid = check_input(change, [0,1])
+    if not valid:
+      continue
+    change = int(change)
+    break
+  # If the user wants to change the configuration, run the change_menu function
+  if change:
+    change_menu()
   for tsv in tsvs:
     tsv_path, tsv_name = metadata_handler(tsv)
     tsv_df = pd.read_csv(tsv_path, delimiter = '\t')
@@ -1396,38 +1408,23 @@ def main():
           tsv_df[i] = tsv_df[i].apply(literal_eval)
         except (ValueError, SyntaxError):
           pass
-    # Check for any inconsistencies in the chosen workflow
     tsv_dir = os.path.dirname(tsv_path)
-    validate_workflow(tsv_dir)
-  while True:
-    print('\nMain menu\n')    
-    pprint('Enter 1 to change the configuration\nEnter 0 to continue to sample selection\n')
-    change = input()
-    valid = check_input(change, [0,1])
-    if not valid:
-      continue
-    change = int(change)
-    break
-  # If the user wants to change the configuration, run the change_menu function
-  if change:
-    change_menu()
-  pprint(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\nTo work on specific rows, enter a list of rows seperated by a SINGLE space (1 2 3 4)')
-  wanted_cols = ['index', 'scientific_name', 'run_accession', 'sample_accession', 'sample_title', 'library_strategy', 'library_selection', 'read_count']
-  colnames = ['Index', 'ID', 'Run accession', 'Sample accession', 'Sample', 'Library Strategy', 'Library Selection', 'Read Count']
-  actual_cols = [i for i in wanted_cols if i in tsv_df.columns]
-  sliced_df = tsv_df.loc[:, actual_cols]
-  # if the type of run_accession col values is a list, convert to string for printing
-  if isinstance(sliced_df.run_accession[0], list):
-    sliced_df.run_accession = sliced_df.run_accession.apply(lambda x: ' '.join(x))
-  print(tabulate(sliced_df, headers = 'keys', tablefmt = 'psql'))
-  while True:
-    work_on = input()
-    work_on = input_to_list(work_on, len(tsv_df))
-    if work_on == []:
-      continue
-    break
-  run_list += sample_lvl_csh_maker(work_on, tsv_df, tsv_name)
-
+    pprint(f'Choose which lines of the tsv to process with the current pipeline.\nEnter a single row number (i.e 2) or a range (i.e 2-3)\nEnter all to work on all rows\nTo work on specific rows, enter a list of rows seperated by a SINGLE space (1 2 3 4)')
+    wanted_cols = ['index', 'scientific_name', 'run_accession', 'sample_accession', 'sample_title', 'library_strategy', 'library_selection', 'read_count']
+    colnames = ['Index', 'ID', 'Run accession', 'Sample accession', 'Sample', 'Library Strategy', 'Library Selection', 'Read Count']
+    actual_cols = [i for i in wanted_cols if i in tsv_df.columns]
+    sliced_df = tsv_df.loc[:, actual_cols]
+    # if the type of run_accession col values is a list, convert to string for printing
+    if isinstance(sliced_df.run_accession[0], list):
+      sliced_df.run_accession = sliced_df.run_accession.apply(lambda x: ' '.join(x))
+    print(tabulate(sliced_df, headers = 'keys', tablefmt = 'psql'))
+    while True:
+      work_on = input()
+      work_on = input_to_list(work_on, len(tsv_df))
+      if work_on == []:
+        continue
+      break
+    run_list += sample_lvl_csh_maker(work_on, tsv_df, tsv_name)
   make_master_file(run_list)
   save_settings(source = 'current', output = 'last_used')
   print('Enter \"bash master.csh\" into the console to run the commands\nIMPORTANT: Each sample will be executed simultaneously in qsub you run this command, make sure you dont run too many at once!\n')
