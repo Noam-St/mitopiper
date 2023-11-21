@@ -14,6 +14,7 @@ else:
 
 def yn(c, forced):
   """
+  Asks the user if they want to clear the folder
   """
   if forced:
     return True
@@ -24,9 +25,9 @@ def yn(c, forced):
   elif 'y' in choice or 'Y' in choice:
     return True
 
-def remove_files(clears, forced):
+def remove_files(clears, forced, keep_csh):
   for file in os.listdir(PATH):
-    if 'run' in file or 'master' in file:
+    if ('run' in file or 'master' in file) and not keep_csh:
       os.remove(f'{PATH}{SLASH}{file}')
   for c in clears:
     yn_result = yn(c, forced)
@@ -42,17 +43,18 @@ def remove_files(clears, forced):
         except IsADirectoryError:
           print(f'Folder {c} contains a directory that cannot be deleted in {os.path.basename(f)}!\n!')
           continue
-        [os.remove(os.path.join(direc, temp)) for temp in os.listdir(direc) if 'run' in temp]
+        if not keep_csh:
+          [os.remove(os.path.join(direc, temp)) for temp in os.listdir(direc) if 'run' in temp]
 
 def main(args):
-  remove_files(args.clears, args.forced)
+  remove_files(args.clears, args.forced, args.keep_csh)
   print('\nAll done!\n')
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(description = __doc__, prog = 'Maker.py cleanup')
   parser.add_argument('--version', action='version', version = '%(prog)s version 1.0.0')
   parser.add_argument('clears', nargs = '+', default = ['stdout', 'stderr'], help = 'Choose which folders inside the sample directories to remove')
   parser.add_argument('--forced', action = 'store_true', default = False, help = 'Add this flag if you wish the program to run with no confirmations')
-
+  parser.add_argument('--keep-csh', action = 'store_true', default = False, help = 'Add this flag if you wish to keep the run*.csh and master*.csh files')
   args = parser.parse_args()
   main(args)
 
