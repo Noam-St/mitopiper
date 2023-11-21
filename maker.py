@@ -12,7 +12,6 @@ __author__ = 'Noam Shtolz'
 
 import sys, shutil, os, math, json, re
 from textwrap import wrap
-import snoop
 import consts
 import pandas as pd
 from Bio import Entrez, SeqIO
@@ -607,7 +606,9 @@ def change_pipeline_settings() -> None:
         print('The value may include several Keywords:\n_gtf, _chrominfo, _fasta, _fastq, _fastq_pre, _fastq_sample_path_no_ext, _fastq_dir, _fastq_pre_dir, _bam, _sam, _org_name\nThese keywords will be replaced with appropriate paths\n')
         print(f'Additionally, you may add the combination of output_command_name or dir_command_name to include the output of another command in the setting value\nNOTE: you are adding a setting to {chosen_stage}. You can grab the output of the following commands with the current run order')
         try: print('\t'.join(order[:order.index(chosen_stage)]))
-        except ValueError: print('This step is not active!')
+        except ValueError:
+          print('This step is not active!')
+          continue
         print(f'EXAMPLE: dir_{order[order.index(chosen_stage)-1]}\n')
         new_val = input()
         settings[chosen_stage][chosen_setting]['value'] = new_val
@@ -1121,7 +1122,7 @@ def csh_commands(i, row, s_id, settings, pipeline, order, fasta, gtf, chrominfo,
         csh_str += '\n'
   return csh_str  
 
-def sample_lvl_csh_maker(work_on, tsv_df, tsv_name):
+def sample_lvl_csh_maker(work_on, tsv_df, tsv_name, queue_mode):
   """
   Makes a single .csh file for each line of .tsv, and a master.csh to be run by qsub
 
@@ -1176,16 +1177,29 @@ def sample_lvl_csh_maker(work_on, tsv_df, tsv_name):
     except KeyError:
       pass
     with open(f'{tsv_dir}{SLASH}run{i}.csh', 'w') as file:
-      file.write(f'#!/bin/{general_settings["environment"][0]}\n')
-      file.write(f'#$ -o {tsv_dir}{SLASH}stdout\n')
-      file.write(f'#$ -e {tsv_dir}{SLASH}stderr\n')
-      file.write(f'#$ -cwd\n')
-      file.write(f'#$ -N s_{accs}_{i}\n')
-      file.write(f'#$ -q {general_settings["qsub_queue"][0]}\n')
-      file.write(f'#$ -S /bin/bash\n')
-      file.write(f'#$ -V\n')
-      file.write(f'#$ -pe shared {general_settings["qsub_threads"][0]}\n')
-      file.write(f'#$ -l mem_free={general_settings["qsub_memory"][0]}\n')
+      if queue_mode == 'sge':
+        file.write(f'#!/bin/{general_settings["environment"][0]}\n')
+        file.write(f'#$ -o {tsv_dir}{SLASH}stdout\n')
+        file.write(f'#$ -e {tsv_dir}{SLASH}stderr\n')
+        file.write(f'#$ -cwd\n')
+        file.write(f'#$ -N s_{accs}_{i}\n')
+        file.write(f'#$ -q {general_settings["qsub_queue"][0]}\n')
+        file.write(f'#$ -S /bin/bash\n')
+        file.write(f'#$ -V\n')
+        file.write(f'#$ -pe shared {general_settings["qsub_threads"][0]}\n')
+        file.write(f'#$ -l mem_free={general_settings["qsub_memory"][0]}\n')
+      elif queue_mode == 'sbatch':
+        file.write(f'#!/bin/{general_settings["environment"][0]}\n')
+        file.write(f'#SBATCH --nodes=1\n')
+        file.write(f'#SBATCH --ntasks=1\n')
+        file.write(f'#SBATCH --job-name=s_{accs}_{i}\n')
+        file.write(f'#SBATCH --output={tsv_dir}{SLASH}stdout\n')
+        file.write(f'#SBATCH --error={tsv_dir}{SLASH}stderr\n')
+        file.write(f'#SBATCH --partition={general_settings["qsub_queue"][0]}\n')
+        file.write(f'#SBATCH --cpus-per-task={general_settings["qsub_threads"][0]}\n')
+        file.write(f'#SBATCH --mem={general_settings["qsub_memory"][0]}\n')
+        file.write(f'#SBATCH --time=1-20:00:00\n')
+        file.write(f'#SBATCH --account=shtolz\n')
       file.write(general_settings["free_form"][0])
       file.write(f'echo \"Current organism: {row.scientific_name}\"\n\n')
       if csh_add_ref != '': file.write(csh_add_ref)
@@ -1205,13 +1219,16 @@ def sample_lvl_csh_maker(work_on, tsv_df, tsv_name):
       tsvs.append(f'{tsv_dir}{SLASH}run{i}.csh')
   return tsvs
 
-def make_master_file(tsvs):
+def make_master_file(tsvs, queue_mode, qsub_queue):
   """
   """
   tsv_dirs = set([i.split('run')[0] for i in tsvs])
   with open(os.path.join(PATH, 'master.csh'), 'w') as master:
     master.write(f'#!/bin/bash\n')
-    master.write(f'for file in {" ".join(tsvs)}\ndo\nqsub $file\ndone\n')
+    if queue_mode == 'sge':
+      master.write(f'for file in {" ".join(tsvs)}\ndo\nqsub $file\nsleep 0.5\ndone\n')
+    elif queue_mode == 'sbatch':
+      master.write(f'for file in {" ".join(tsvs)}\ndo\nsbatch $file\nsleep 0.5\ndone\n')
     #for tsv_dir in tsv_dirs:
     #  master.write(f'mkdir {os.path.join(PATH, tsv_dir, "multiqc")}\n')
     #  master.write(f'multiqc {os.path.join(PATH, tsv_dir)} -o {os.path.join(PATH, tsv_dir, "multiqc")}\n')
@@ -1357,6 +1374,20 @@ def main():
     defaults()
   validate_configs()
   pprint(f'Welcome to the semi-automatic .csh maker for pipelines!')
+  # Choose a queue mode (sge or sbatch)
+  while True:
+    print('Please choose a queue mode:\n')
+    print('Enter 0 for sge\nEnter 1 for sbatch\n')
+    queue_mode = input()
+    valid = check_input(queue_mode, [0,1])
+    if not valid:
+      continue
+    queue_mode = int(queue_mode)
+    if queue_mode == 0:
+      queue_mode = 'sge'
+    elif queue_mode == 1:
+      queue_mode = 'sbatch'
+    break
   tsvs = metadata_input()
   # Check if the user has a pre-configured workflow and if so, ask if they want to use it
   workflows = sorted(os.listdir(f'{PATH}{SLASH}config'))
@@ -1424,8 +1455,8 @@ def main():
       if work_on == []:
         continue
       break
-    run_list += sample_lvl_csh_maker(work_on, tsv_df, tsv_name)
-  make_master_file(run_list)
+    run_list += sample_lvl_csh_maker(work_on, tsv_df, tsv_name, queue_mode)
+  make_master_file(run_list, qsub_queue = queue_mode)
   save_settings(source = 'current', output = 'last_used')
   print('Enter \"bash master.csh\" into the console to run the commands\nIMPORTANT: Each sample will be executed simultaneously in qsub you run this command, make sure you dont run too many at once!\n')
 
