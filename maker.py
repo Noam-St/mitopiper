@@ -1008,13 +1008,13 @@ def csh_commands(i, row, s_id, settings, pipeline, order, fasta, gtf, chrominfo,
     if_SE = False if PAIRED else True
     if_PE = True if PAIRED else False
 
-    bam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}*.bam'
-    sam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}*.sam'
+    bam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}.bam'
+    sam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}.sam'
     STAR_out = f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}'
     STAR_final_log = f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}Log.final.out'
     fasta_dir = os.path.dirname(fasta).replace(r'"', '')
     fasta_nuc_dir = os.path.dirname(fasta_nuc).replace(r'"', '')
-    command_input = f'{tsv_dir}{SLASH}{command_inputdir}{SLASH}{sample}*{input_ext}'
+    command_input = f'{tsv_dir}{SLASH}{command_inputdir}{SLASH}{sample}{input_ext}'
     command_output = f'{tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}{output_ext}'
     command_output_dir_path = f'{tsv_dir}{SLASH}{command_outdir}'
     command_input_dir_path = f'{tsv_dir}{SLASH}{command_outdir}'
@@ -1029,7 +1029,10 @@ def csh_commands(i, row, s_id, settings, pipeline, order, fasta, gtf, chrominfo,
       for k in settings[command].keys():
         cur_val = settings[command][k]['value']
         if cur_val in to_f_string:
-          cur_val = eval(cur_val.replace('_','',1))
+          try:
+            cur_val = eval(cur_val.replace('_','',1))
+          except SyntaxError:
+            pass
         elif cur_val in command_outputs.keys():
           cur_val = command_outputs[cur_val]
         elif cur_val in command_dirs.keys():
@@ -1059,7 +1062,10 @@ def csh_commands(i, row, s_id, settings, pipeline, order, fasta, gtf, chrominfo,
         elif v in command_dirs.keys():
           struc_list[k] = command_dirs[v]
         elif v in to_f_string:
-          struc_list[k] = eval(v.replace('_','',1))
+          try:
+            struc_list[k] = eval(v.replace('_','',1))
+          except SyntaxError:
+            pass
         try: struc_list[k] = eval(v)
         except NameError: pass
       structure = ' '.join(struc_list)
@@ -1080,8 +1086,8 @@ def csh_commands(i, row, s_id, settings, pipeline, order, fasta, gtf, chrominfo,
               # Wait 30s between each wget command to avoid overloading the server
               csh_str+=f'sleep 30\n'
             # Concat all fastq files for each sample for forward and reverse reads and remove the individual files afterwards
-            csh_str+=f'cat {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}_*.fastq.gz > {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}.fastq.gz\n'
-            csh_str+=f'rm {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}_*.fastq.gz\n'
+            csh_str+=f'cat {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}_.fastq.gz > {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}.fastq.gz\n'
+            csh_str+=f'rm {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}_.fastq.gz\n'
       elif command == 'trim':
         csh_str+=f'{command_key} {command_settings} --paired {fastq_pre}\n'
       elif command == 'fastqc':
@@ -1107,8 +1113,8 @@ def csh_commands(i, row, s_id, settings, pipeline, order, fasta, gtf, chrominfo,
             # Wait 30s between each wget command to avoid overloading the server
             csh_str+=f'sleep 30\n'
           # Concat all fastq files for each sample and remove the individual files afterwards
-          csh_str+=f'cat {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_*.fastq.gz > {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}.fastq.gz\n'
-          csh_str+=f'rm {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_*.fastq.gz\n'
+          csh_str+=f'cat {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_.fastq.gz > {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}.fastq.gz\n'
+          csh_str+=f'rm {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_.fastq.gz\n'
       elif command == 'trim':
         csh_str+=f'{command_key} {command_settings} {fastq_pre}\n'
       elif command == 'fastqc':
@@ -1219,7 +1225,7 @@ def sample_lvl_csh_maker(work_on, tsv_df, tsv_name, queue_mode):
       tsvs.append(f'{tsv_dir}{SLASH}run{i}.csh')
   return tsvs
 
-def make_master_file(tsvs, queue_mode, qsub_queue):
+def make_master_file(tsvs, queue_mode):
   """
   """
   tsv_dirs = set([i.split('run')[0] for i in tsvs])
@@ -1456,7 +1462,7 @@ def main():
         continue
       break
     run_list += sample_lvl_csh_maker(work_on, tsv_df, tsv_name, queue_mode)
-  make_master_file(run_list, qsub_queue = queue_mode)
+  make_master_file(run_list, queue_mode)
   save_settings(source = 'current', output = 'last_used')
   print('Enter \"bash master.csh\" into the console to run the commands\nIMPORTANT: Each sample will be executed simultaneously in qsub you run this command, make sure you dont run too many at once!\n')
 
