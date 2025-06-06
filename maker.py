@@ -1008,7 +1008,7 @@ def csh_commands(i, row, s_id, settings, pipeline, order, fasta, gtf, chrominfo,
     if_SE = False if PAIRED else True
     if_PE = True if PAIRED else False
 
-    bam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}.bam'
+    bam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}*.bam'
     sam =  f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}.sam'
     STAR_out = f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}'
     STAR_final_log = f'{tsv_dir}{SLASH}{pipeline["bwa-align"]["outdir"]}{SLASH}{sample}Log.final.out'
@@ -1055,6 +1055,8 @@ def csh_commands(i, row, s_id, settings, pipeline, order, fasta, gtf, chrominfo,
       structure = default_structure
     else:
       struc_list = structure.split(' ')
+      # Remove unused marks from struc_list (i.e: {}[].,)
+      struc_list = [i.replace('{','').replace('}','').replace('[','').replace(']','').replace(',','') for i in struc_list]
       struc_list = ['command_' + i if i in ['input','key','settings', 'outdir', 'output'] else i for i in struc_list]
       for k,v in enumerate(struc_list):
         if v in command_outputs.keys():
@@ -1067,7 +1069,7 @@ def csh_commands(i, row, s_id, settings, pipeline, order, fasta, gtf, chrominfo,
           except SyntaxError:
             pass
         try: struc_list[k] = eval(v)
-        except NameError: pass
+        except (NameError, SyntaxError): pass
       structure = ' '.join(struc_list)
     csh_str+= f'echo \"Running {command}: {pipeline[command]["description"]} on {sample}\"\n'
     if PAIRED:
@@ -1086,8 +1088,8 @@ def csh_commands(i, row, s_id, settings, pipeline, order, fasta, gtf, chrominfo,
               # Wait 30s between each wget command to avoid overloading the server
               csh_str+=f'sleep 30\n'
             # Concat all fastq files for each sample for forward and reverse reads and remove the individual files afterwards
-            csh_str+=f'cat {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}_.fastq.gz > {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}.fastq.gz\n'
-            csh_str+=f'rm {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}_.fastq.gz\n'
+            csh_str+=f'cat {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}_*.fastq.gz > {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}.fastq.gz\n'
+            csh_str+=f'rm {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_{i+1}_*.fastq.gz\n'
       elif command == 'trim':
         csh_str+=f'{command_key} {command_settings} --paired {fastq_pre}\n'
       elif command == 'fastqc':
@@ -1113,8 +1115,8 @@ def csh_commands(i, row, s_id, settings, pipeline, order, fasta, gtf, chrominfo,
             # Wait 30s between each wget command to avoid overloading the server
             csh_str+=f'sleep 30\n'
           # Concat all fastq files for each sample and remove the individual files afterwards
-          csh_str+=f'cat {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_.fastq.gz > {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}.fastq.gz\n'
-          csh_str+=f'rm {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_.fastq.gz\n'
+          csh_str+=f'cat {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_*.fastq.gz > {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}.fastq.gz\n'
+          csh_str+=f'rm {tsv_dir}{SLASH}{command_outdir}{SLASH}{sample}_*.fastq.gz\n'
       elif command == 'trim':
         csh_str+=f'{command_key} {command_settings} {fastq_pre}\n'
       elif command == 'fastqc':
@@ -1206,6 +1208,16 @@ def sample_lvl_csh_maker(work_on, tsv_df, tsv_name, queue_mode):
         file.write(f'#SBATCH --mem={general_settings["qsub_memory"][0]}\n')
         file.write(f'#SBATCH --time=1-20:00:00\n')
         file.write(f'#SBATCH --account=shtolz\n')
+      elif queue_mode == 'bsub':
+        file.write(f'#!/bin/{general_settings["environment"][0]}\n')
+        file.write(f'#BSUB -W 320:00\n')
+        file.write(f'#BSUB -o {tsv_dir}{SLASH}stdout\n')
+        file.write(f'#BSUB -e {tsv_dir}{SLASH}stderr\n')
+        file.write(f'#BSUB -J s_{accs}_{i}\n')
+        file.write(f'#BSUB -q {general_settings["qsub_queue"][0]}\n')
+        file.write(f'#BSUB -n {general_settings["qsub_threads"][0]}\n')
+        file.write(f'#BSUB -R "rusage[mem={general_settings["qsub_memory"][0]}]" \n')
+      
       file.write(general_settings["free_form"][0])
       file.write(f'echo \"Current organism: {row.scientific_name}\"\n\n')
       if csh_add_ref != '': file.write(csh_add_ref)
@@ -1383,9 +1395,9 @@ def main():
   # Choose a queue mode (sge or sbatch)
   while True:
     print('Please choose a queue mode:\n')
-    print('Enter 0 for sge\nEnter 1 for sbatch\n')
+    print('Enter 0 for sge\nEnter 1 for sbatch\nEnter 2 for bsub')
     queue_mode = input()
-    valid = check_input(queue_mode, [0,1])
+    valid = check_input(queue_mode, [0,1,2])
     if not valid:
       continue
     queue_mode = int(queue_mode)
@@ -1393,6 +1405,9 @@ def main():
       queue_mode = 'sge'
     elif queue_mode == 1:
       queue_mode = 'sbatch'
+    elif queue_mode == 2:
+      queue_mode = 'bsub'
+    print(f'You chose {queue_mode} mode.\n')
     break
   tsvs = metadata_input()
   # Check if the user has a pre-configured workflow and if so, ask if they want to use it
