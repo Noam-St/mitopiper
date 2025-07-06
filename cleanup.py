@@ -1,30 +1,61 @@
-import os, sys
+"""
+This program cleans up temporary files left behind by maker.py\n
+usage: python cleanup.py [--forced] folder1 folder2 folder3...\n
+The program will clean up all folders listed and automatically remove any run*.csh or master*.csh files.
+"""
 
-PATH = os.getcwd()
+import os, sys, argparse
+PATH = os.path.dirname(os.path.realpath(__file__))
 
 if sys.platform != 'win32':
-    slash = '/'
+    SLASH = '/'
 else:
-    slash = '\\'
+    SLASH = '\\'
 
-def yn(choice):
+def yn(c, forced):
   """
+  Asks the user if they want to clear the folder
   """
+  if forced:
+    return True
+  print(f'Clear {c} in ALL sample folders? (y/n)\n')
+  choice = input()
   if type(choice) != str:
     return False
-  if 'y' in choice or 'Y' in choice:
+  elif 'y' in choice or 'Y' in choice:
     return True
 
-def remove_files():
+def remove_files(clears, forced, keep_csh):
   for file in os.listdir(PATH):
-    if 'run' in file or 'master' in file:
-      os.remove(f'{PATH}{slash}{file}')
-  clears = ['std_output', 'error_output']
+    if ('run' in file or 'master' in file) and not keep_csh:
+      os.remove(f'{PATH}{SLASH}{file}')
   for c in clears:
-    print(f'Clear {c}? (y/n)')
-    choice = input()
-    [os.remove(f'{PATH}{slash}{c}{slash}{file}') for file in os.listdir(f'{PATH}{slash}{c}') if yn(choice)]
-    
+    yn_result = yn(c, forced)
+    for f in os.listdir(os.path.join(PATH, 'output')):
+      f = os.path.join(PATH, 'output', f)
+      if os.path.isdir(f):
+        direc = os.path.join(PATH, 'output', f)
+        try:
+          [os.remove(os.path.join(direc, c, file)) for file in os.listdir(os.path.join(direc, c)) if yn_result]
+        except FileNotFoundError:
+          print(f'Folder {c} does not exist in {os.path.basename(f)}!\n')
+          continue
+        except IsADirectoryError:
+          print(f'Folder {c} contains a directory that cannot be deleted in {os.path.basename(f)}!\n!')
+          continue
+        if not keep_csh:
+          [os.remove(os.path.join(direc, temp)) for temp in os.listdir(direc) if 'run' in temp]
+
+def main(args):
+  remove_files(args.clears, args.forced, args.keep_csh)
+  print('\nAll done!\n')
 if __name__ == '__main__':
-  remove_files()
+  parser = argparse.ArgumentParser(description = __doc__, prog = 'Maker.py cleanup')
+  parser.add_argument('--version', action='version', version = '%(prog)s version 1.0.0')
+  parser.add_argument('clears', nargs = '+', default = ['stdout', 'stderr'], help = 'Choose which folders inside the sample directories to remove')
+  parser.add_argument('--forced', action = 'store_true', default = False, help = 'Add this flag if you wish the program to run with no confirmations')
+  parser.add_argument('--keep-csh', action = 'store_true', default = False, help = 'Add this flag if you wish to keep the run*.csh and master*.csh files')
+  args = parser.parse_args()
+  main(args)
+
 
