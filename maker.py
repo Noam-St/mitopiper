@@ -1210,10 +1210,10 @@ def sample_lvl_csh_maker(work_on, tsv_df, tsv_name, queue_mode):
         file.write(f'#SBATCH --account=shtolz\n')
       elif queue_mode == 'bsub':
         file.write(f'#!/bin/{general_settings["environment"][0]}\n')
-        file.write(f'#BSUB -W 320:00\n')
         file.write(f'#BSUB -o {tsv_dir}{SLASH}stdout\n')
         file.write(f'#BSUB -e {tsv_dir}{SLASH}stderr\n')
         file.write(f'#BSUB -J s_{accs}_{i}\n')
+        file.write(f'#BSUB -P dreem\n')
         file.write(f'#BSUB -q {general_settings["qsub_queue"][0]}\n')
         file.write(f'#BSUB -n {general_settings["qsub_threads"][0]}\n')
         file.write(f'#BSUB -R "rusage[mem={general_settings["qsub_memory"][0]}]" \n')
@@ -1247,6 +1247,8 @@ def make_master_file(tsvs, queue_mode):
       master.write(f'for file in {" ".join(tsvs)}\ndo\nqsub $file\nsleep 0.5\ndone\n')
     elif queue_mode == 'sbatch':
       master.write(f'for file in {" ".join(tsvs)}\ndo\nsbatch $file\nsleep 0.5\ndone\n')
+    elif queue_mode == 'bsub':
+      master.write(f'for file in {" ".join(tsvs)}\ndo\nbsub < $file\nsleep 0.5\ndone\n')
     #for tsv_dir in tsv_dirs:
     #  master.write(f'mkdir {os.path.join(PATH, tsv_dir, "multiqc")}\n')
     #  master.write(f'multiqc {os.path.join(PATH, tsv_dir)} -o {os.path.join(PATH, tsv_dir, "multiqc")}\n')
