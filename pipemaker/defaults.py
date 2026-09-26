@@ -12,7 +12,8 @@ switch       whether the step is active
 path         optional absolute path to the executable (replaces the first
              word of ``key``)
 outdir       output directory, relative to the experiment directory
-output_ext   extension of the file the step produces
+output_ext   extension of the file the step produces, or several named
+             outputs (``{"bam": ".bam", "log": ".log"}`` or ``"bam=.bam;log=.log"``)
 inputdir     directory the step reads from, relative to the experiment dir
 input_ext    extension of the file the step reads
 structure    command template; empty means ``key settings input``
@@ -150,8 +151,8 @@ DEFAULT_PIPE = {
         "description": "Align reads to ref",
         "switch": False,
         "path": "",
-        "outdir": "",
-        "output_ext": "",
+        "outdir": "alignment",
+        "output_ext": {"bam": "Aligned.sortedByCoord.out.bam", "log": "Log.final.out", "junctions": "SJ.out.tab"},
         "inputdir": "post_trim",
         "input_ext": ".fq.gz",
         "structure": "key settings",

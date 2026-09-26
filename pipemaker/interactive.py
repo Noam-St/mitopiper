@@ -15,7 +15,7 @@ from .build import (
     resolve_metadata_source,
     write_master,
 )
-from .builder import PLACEHOLDERS, selected_steps
+from .builder import PLACEHOLDERS, output_exts, selected_steps
 from .config import INTERNAL_PRESETS, ConfigError, Workflow, Workspace
 from .ena import is_accession
 from .metadata import MetadataError, load_samples, parse_selection
@@ -28,7 +28,8 @@ log = logging.getLogger(__name__)
 PLACEHOLDER_HELP = (
     "Values may contain placeholders that are replaced per sample:\n  "
     + ", ".join("_" + p for p in PLACEHOLDERS)
-    + "\nas well as output_<step> / dir_<step> (output file / directory of another step),\n"
+    + "\nas well as output_<step> / dir_<step> (output file / directory of another step;\n"
+    "output_<step>:<name> or output_<step>:all for steps with several outputs),\n"
     "{name} anywhere inside a value, and _if_SE / _if_PE for flags that only apply to\n"
     "single- or paired-end samples.\n"
 )
@@ -200,7 +201,8 @@ class Menus:
             "description": "What the step does",
             "path": "Absolute path of the executable (leave empty to use $PATH)",
             "outdir": "Output directory (relative to the experiment directory)",
-            "output_ext": "Extension of the produced file (e.g. .bam)",
+            "output_ext": "Extension of the produced file (e.g. .bam). Several outputs: name=ext pairs separated by ';' "
+            "(e.g. bam=.bam;log=.log), referenced as output_<step>:<name>",
             "inputdir": "Directory of the input file (e.g. alignment)",
             "input_ext": "Extension of the input file (e.g. .sam)",
             "structure": "Command template; empty for 'key settings input'. Tokens: key, settings, input, output, "
@@ -235,7 +237,11 @@ class Menus:
         fidx = choose("Which field?", fields, input_fn=self.input)
         if fidx is None:
             return
-        step[fields[fidx]] = ask(f"New value for {fields[fidx]}", str(step[fields[fidx]]), self.input)
+        field = fields[fidx]
+        current = step[field]
+        if field == "output_ext" and isinstance(current, (dict, list)):
+            current = ";".join(f"{k}={v}" for k, v in output_exts(step).items())
+        step[field] = ask(f"New value for {field}", str(current), self.input)
         self.save()
 
     # ------------------------------------------------------ references

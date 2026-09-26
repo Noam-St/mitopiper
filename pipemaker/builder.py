@@ -11,6 +11,16 @@ inside a value (e.g. ``{fastq_dir}/report``).  In addition
 another step, and the special values ``_if_SE`` / ``_if_PE`` turn a flag on
 only for single- / paired-end samples.
 
+Multiple outputs
+----------------
+A step's ``output_ext`` may declare several files, either as a JSON object
+``{"bam": "Aligned.sortedByCoord.out.bam", "log": "Log.final.out"}``, a list,
+or a string ``"bam=.bam;log=.log"`` / ``".bam;.bam.bai"`` (unnamed outputs are
+named ``0``, ``1``, ...).  ``output_<step>`` is the first output (so single
+output steps behave exactly as before), ``output_<step>:<name>`` a specific
+one and ``output_<step>:all`` all of them.  Experiment-level steps get the
+same forms for every sample through ``outputs_<step>[:<name>]``.
+
 No user text is ever evaluated as Python: substitution is a plain dictionary
 lookup.
 """
@@ -37,7 +47,7 @@ PLACEHOLDERS = (
 #: Structure shorthands inherited from maker.py (``input`` -> ``command_input``...).
 STRUCTURE_ALIASES = ("input", "key", "settings", "outdir", "output")
 
-_EMBEDDED = re.compile(r"\{([A-Za-z_][A-Za-z0-9_\-]*)\}")
+_EMBEDDED = re.compile(r"\{([A-Za-z_][A-Za-z0-9_\-:.]*)\}")
 _THREAD_TERMS = ("threads", "cores", "cpus", "cpu", "thread", "core")
 
 
@@ -174,13 +184,42 @@ def sample_variables(sample: Sample, workflow: Workflow, exp_dir: str, ref: Refe
     }
 
 
+def output_exts(conf: dict) -> dict:
+    """Normalise a step's ``output_ext`` into an ordered ``{name: extension}``."""
+    raw = conf.get("output_ext", "")
+    if isinstance(raw, dict):
+        items = [(str(k), str(v)) for k, v in raw.items()]
+    elif isinstance(raw, (list, tuple)):
+        items = [(str(i), str(v)) for i, v in enumerate(raw)]
+    else:
+        raw = "" if raw is None else str(raw)
+        parts = raw.split(";") if ";" in raw else [raw]
+        items = []
+        for i, part in enumerate(p.strip() for p in parts):
+            name, sep, ext = part.partition("=")
+            items.append((name.strip(), ext.strip()) if sep else (str(i), part))
+    return dict(items) if items else {"0": ""}
+
+
+def first_ext(conf: dict) -> str:
+    return next(iter(output_exts(conf).values()))
+
+
+def output_paths(conf: dict, exp_dir: str, sample_name: str) -> dict:
+    outdir = _join(exp_dir, conf.get("outdir", ""))
+    return {name: _join(outdir, f"{sample_name}{ext}") for name, ext in output_exts(conf).items()}
+
+
 def step_io(workflow: Workflow, exp_dir: str, sample_name: str) -> tuple:
-    """``output_<step>`` and ``dir_<step>`` lookup tables."""
+    """``output_<step>[:<name>|:all]`` and ``dir_<step>`` lookup tables."""
     outputs, dirs = {}, {}
     for step, conf in workflow.pipeline.items():
-        outdir = _join(exp_dir, conf.get("outdir", ""))
-        outputs[f"output_{step}"] = _join(outdir, f"{sample_name}{conf.get('output_ext', '')}")
-        dirs[f"dir_{step}"] = outdir
+        paths = output_paths(conf, exp_dir, sample_name)
+        outputs[f"output_{step}"] = next(iter(paths.values()))
+        for name, path in paths.items():
+            outputs[f"output_{step}:{name}"] = path
+        outputs[f"output_{step}:all"] = " ".join(paths.values())
+        dirs[f"dir_{step}"] = _join(exp_dir, conf.get("outdir", ""))
     return outputs, dirs
 
 
@@ -308,7 +347,7 @@ def build_sample_job(
         outdir = conf.get("outdir", "")
         inputdir = conf.get("inputdir", "")
         input_ext = conf.get("input_ext", "")
-        output_ext = conf.get("output_ext", "")
+        output_ext = first_ext(conf)
         variables = dict(base)
         variables.update(
             {
@@ -363,8 +402,11 @@ def build_experiment_steps(samples: list, workflow: Workflow, exp_dir: str, step
     _, dirs = step_io(workflow, exp_dir, "")
     all_outputs = {}
     for step, conf in workflow.pipeline.items():
-        outdir = _join(exp_dir, conf.get("outdir", ""))
-        all_outputs[f"outputs_{step}"] = " ".join(_join(outdir, f"{s.name}{conf.get('output_ext', '')}") for s in samples)
+        per_sample = [output_paths(conf, exp_dir, s.name) for s in samples]
+        all_outputs[f"outputs_{step}"] = " ".join(next(iter(p.values())) for p in per_sample)
+        for name in output_exts(conf):
+            all_outputs[f"outputs_{step}:{name}"] = " ".join(p[name] for p in per_sample)
+        all_outputs[f"outputs_{step}:all"] = " ".join(" ".join(p.values()) for p in per_sample)
     result = []
     for step in order:
         conf = workflow.pipeline[step]

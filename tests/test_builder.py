@@ -127,3 +127,48 @@ def test_guess_threads():
     wf.run_order.append("STAR-alignment")
     wf.settings["STAR-alignment"]["runThreadN"]["value"] = 12
     assert guess_threads(wf) == 12
+
+
+def test_output_ext_forms():
+    from pipemaker.builder import output_exts
+
+    assert output_exts({"output_ext": ".bam"}) == {"0": ".bam"}
+    assert output_exts({"output_ext": ""}) == {"0": ""}
+    assert output_exts({"output_ext": ".bam;.bam.bai"}) == {"0": ".bam", "1": ".bam.bai"}
+    assert output_exts({"output_ext": "bam=.bam; log=.log"}) == {"bam": ".bam", "log": ".log"}
+    assert output_exts({"output_ext": [".a", ".b"]}) == {"0": ".a", "1": ".b"}
+
+
+def test_multiple_outputs_are_referencable():
+    wf = Workflow.default()
+    for step in ("STAR-alignment", "htseq-count"):
+        wf.pipeline[step]["switch"] = True
+    # htseq counts STAR's sorted BAM and writes the count table plus a SAM of assignments
+    wf.pipeline["htseq-count"]["structure"] = "key settings -o output_htseq-count:assign output_STAR-alignment:bam gtf > output_htseq-count"
+    wf.pipeline["htseq-count"]["output_ext"] = {"counts": ".counts.txt", "assign": ".assign.sam"}
+    wf.run_order = ["STAR-alignment", "htseq-count", "multiqc"]
+    wf.pipeline["multiqc"]["switch"] = True
+    wf.pipeline["multiqc"]["structure"] = "echo outputs_STAR-alignment:log"
+    sample = se_sample()
+    got = lines(build_sample_job(sample, wf, EXP, REF))
+    assert got["htseq-count"][0].endswith(
+        "-o /data/output/EXP/count/SRR1_3_HS.assign.sam "
+        "/data/output/EXP/alignment/SRR1_3_HS" "Aligned.sortedByCoord.out.bam /refs/chrM.gff3 "
+        "> /data/output/EXP/count/SRR1_3_HS.counts.txt"
+    )
+    assert "--outFileNamePrefix /data/output/EXP/alignment/SRR1_3_HS" in got["STAR-alignment"][0]
+    (exp,) = build_experiment_steps([sample, pe_sample()], wf, EXP)
+    assert exp.lines == [
+        "echo /data/output/EXP/alignment/SRR1_3_HSLog.final.out /data/output/EXP/alignment/SAMN1_0_DRLog.final.out"
+    ]
+
+
+def test_output_all_and_embedded():
+    from pipemaker.builder import step_io, substitute
+
+    wf = Workflow.default()
+    wf.pipeline["index"]["output_ext"] = ".bai;.csi"
+    outputs, _ = step_io(wf, EXP, "S")
+    assert outputs["output_index"] == "/data/output/EXP/alignment/S.bai"
+    assert outputs["output_index:all"] == "/data/output/EXP/alignment/S.bai /data/output/EXP/alignment/S.csi"
+    assert substitute("x={output_index:1}", outputs) == "x=/data/output/EXP/alignment/S.csi"

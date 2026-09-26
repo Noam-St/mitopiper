@@ -189,12 +189,32 @@ a plain dictionary lookup; no user text is ever evaluated as code.
 | `_sam`, `_bam`, `_STAR_out`, `_STAR_final_log` | alignment outputs |
 | `_command_input`, `_command_output`, `_command_input_dir_path`, `_command_output_dir_path` | this step's input/output |
 | `_tsv_dir`, `_threads` | experiment directory, job threads |
-| `output_<step>`, `dir_<step>` | output file / directory of another step |
+| `output_<step>`, `dir_<step>` | output file / directory of another step (see *several output files* below) |
 | `{name}` | any of the above embedded inside a longer value, e.g. `{fastq_dir}/report` |
 | `_if_SE`, `_if_PE` | flag switched on only for single-/paired-end samples |
 
 In `structure`, the tokens `key`, `settings`, `input`, `output` and `output_pipe` (`> output`)
 are also available, e.g. `key settings fasta fastq output_pipe`.
+
+### Steps with several output files
+A step's `output_ext` can list several outputs, each with a name. Write them as name=extension
+pairs separated by `;` in the menus, or as a JSON object in `pipeline.json`:
+
+```json
+"STAR-alignment": { "outdir": "alignment",
+  "output_ext": {"bam": "Aligned.sortedByCoord.out.bam", "log": "Log.final.out", "junctions": "SJ.out.tab"} }
+```
+
+| Reference | Value |
+| --- | --- |
+| `output_<step>` | the first output (single-output steps work exactly as before) |
+| `output_<step>:<name>` | a specific output, e.g. `output_STAR-alignment:bam` |
+| `output_<step>:all` | all outputs, space separated |
+| `outputs_<step>[:<name>]` | experiment-level steps: that output for every sample |
+
+Unnamed lists (`.bai;.csi`) are named `0`, `1`, …. The forms also work embedded, e.g.
+`{output_STAR-alignment:log}`. `output_pipe` (`> file`) always writes to the first output. The
+bundled STAR step uses this to expose its BAM, log and splice-junction files.
 
 ### Experiment-level steps
 Set a step's `scope` to `experiment` to run it once, after all sample jobs have finished. Such

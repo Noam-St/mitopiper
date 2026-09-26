@@ -5,6 +5,7 @@
 The single `maker.py` script was refactored into the installable `pipemaker` package.
 
 ### Added
+- A step can produce several output files. `output_ext` accepts named outputs (`{"bam": ..., "log": ...}` or `bam=.bam;log=.log`), referenced as `output_<step>:<name>`, `output_<step>:all`, or `outputs_<step>:<name>` in experiment-level steps. The default STAR step exposes its BAM, log and splice-junction outputs.
 - Project/study/sample accessions (e.g. `PRJEB12345`, `PRJNA67890`, `SRP012345`) can be given instead of a metadata file. The run table is fetched from the ENA Portal API (`build`, the interactive prompt, and `fetch-metadata`).
 - `pipemaker` command with the sub-commands `build`, `presets`, `refs`, `make-tsv`, `cleanup` and `init`, for scripted, non-interactive builds. The interactive menus are still the default.
 - SRA metadata support (`SraRunInfo.csv`, SRA Run Selector tables). FASTQ URLs are derived from ENA's mirror.
