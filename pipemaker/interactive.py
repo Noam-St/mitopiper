@@ -7,15 +7,18 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .build import (
+    BuildError,
     BuildOptions,
     build_experiment,
     find_experiment_metadata,
     list_experiments,
+    resolve_metadata_source,
     write_master,
 )
 from .builder import PLACEHOLDERS, selected_steps
 from .config import INTERNAL_PRESETS, ConfigError, Workflow, Workspace
-from .metadata import MetadataError, load_samples
+from .ena import is_accession
+from .metadata import MetadataError, load_samples, parse_selection
 from .references import ReferenceRegistry, RefError, ReferenceSet, fetch_mt_reference
 from .schedulers import SCHEDULERS
 from .ui import ask, banner, choose, choose_many, table, yes_no
@@ -349,7 +352,8 @@ def _choose_metadata(workspace: Workspace, input_fn: Callable) -> list:
     for i, name in enumerate(experiments):
         print(f"  {i}\t{name}")
     print(
-        "\nEnter the path of a new ENA/SRA metadata file, or the number(s) of previous experiments\n"
+        "\nEnter the path of a new ENA/SRA metadata file, a project/study accession to fetch from ENA\n"
+        "(e.g. PRJEB12345, PRJNA67890, SRP012345), or the number(s) of previous experiments\n"
         "(e.g. '2', '0-3', '0 2 5' or 'all')."
     )
     while True:
@@ -360,15 +364,19 @@ def _choose_metadata(workspace: Workspace, input_fn: Callable) -> list:
         for path in (candidate, candidate.with_suffix(".tsv"), candidate.with_suffix(".txt"), candidate.with_suffix(".csv")):
             if path.is_file():
                 return [path]
+        if is_accession(answer):
+            try:
+                return [resolve_metadata_source(workspace, answer)]
+            except (BuildError, MetadataError) as exc:
+                print(f"Error: {exc}\n")
+                continue
         try:
-            from .metadata import parse_selection
-
             chosen = parse_selection(answer, len(experiments)) if experiments else []
         except ValueError:
             chosen = []
         if chosen:
             return [find_experiment_metadata(workspace.experiment_dir(experiments[i])) for i in chosen]
-        print(f"'{answer}' is neither an existing file nor a valid experiment selection.\n")
+        print(f"'{answer}' is not an existing file, an accession or a valid experiment selection.\n")
 
 
 def run_interactive(workspace: Workspace, input_fn: Callable = input) -> int:

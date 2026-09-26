@@ -81,6 +81,36 @@ def list_experiments(workspace: Workspace) -> list:
     return sorted(d.name for d in workspace.output_dir.iterdir() if d.is_dir() and find_experiment_metadata(d))
 
 
+def resolve_metadata_source(workspace: Workspace, item: str, refresh: bool = False, fetch=None) -> Path:
+    """Turn a user argument into a metadata file.
+
+    ``item`` may be a path to a table, the name of a previous experiment, or an
+    ENA/SRA/DDBJ accession (e.g. ``PRJEB12345``, ``PRJNA67890``, ``SRP012345``)
+    whose run report is downloaded from ENA into ``<workspace>/metadata/``.
+    With ``refresh`` an accession is downloaded again even if it was used before.
+    """
+    from .ena import fetch_run_report, is_accession
+
+    item = item.strip().strip('"')
+    path = Path(item).expanduser()
+    if path.is_file():
+        return path
+    accession = is_accession(item)
+    if not (accession and refresh):
+        exp = workspace.experiment_dir(item.upper() if accession else item)
+        if exp.is_dir():
+            found = find_experiment_metadata(exp)
+            if found:
+                return found
+    if accession:
+        dest = workspace.root / "metadata" / f"{item.upper()}.tsv"
+        if dest.is_file() and not refresh:
+            return dest
+        kwargs = {"fetch": fetch} if fetch else {}
+        return fetch_run_report(item, dest, **kwargs)
+    raise BuildError(f"'{item}' is not a metadata file, a previous experiment or an ENA/SRA accession")
+
+
 def prepare_experiment_dir(workspace: Workspace, metadata: Path, name: Optional[str] = None) -> tuple:
     """Create ``output/<name>`` and store a copy of the metadata file there.
 

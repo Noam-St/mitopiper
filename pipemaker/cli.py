@@ -4,6 +4,7 @@ Run ``pipemaker`` without arguments for the interactive menus, or use the
 sub-commands for scripted, reproducible builds::
 
     pipemaker build PRJNA12345.tsv --preset rnaseq --scheduler slurm --samples all
+    pipemaker build PRJEB12345 --scheduler slurm     # metadata fetched from ENA
     pipemaker build PRJNA12345.tsv --dry-run --steps wget,trim,fastqc
     pipemaker refs fetch-mt Danio_rerio
 """
@@ -18,7 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import __version__
-from .build import BuildError, BuildOptions, build_experiment, write_master
+from .build import BuildError, BuildOptions, build_experiment, resolve_metadata_source, write_master
 from .cleanup import cleanup
 from .config import ConfigError, Workspace
 from .metadata import MetadataError, load_samples, parse_selection
@@ -46,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init", help="create the workspace skeleton and default preset")
 
     b = sub.add_parser("build", help="generate job scripts non-interactively")
-    b.add_argument("metadata", nargs="+", help="ENA/SRA metadata file(s) or previous experiment name(s)")
+    b.add_argument("metadata", nargs="+", help="metadata file(s), previous experiment name(s), or ENA/SRA accession(s) such as PRJEB12345")
     b.add_argument("-p", "--preset", default="default", help="workflow preset to use (default: %(default)s)")
     b.add_argument("-s", "--scheduler", default="sge", help=f"one of {', '.join(SCHEDULERS)} (default: %(default)s)")
     b.add_argument("--samples", default="all", help="rows to process: all, 3, 1-4 (inclusive), '0 2 5' (default: all)")
@@ -56,6 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--reference", help="name of the reference set to use for every organism that has it")
     b.add_argument("--fetch-mt", action="store_true", help="download missing references (mtDNA) from NCBI instead of failing")
     b.add_argument("--dry-run", action="store_true", help="resolve everything and write plan.json, but no scripts")
+    b.add_argument("--refresh", action="store_true", help="download the metadata of an accession again even if it was used before")
+
+    f = sub.add_parser("fetch-metadata", help="download the ENA run report of a project/study/sample accession")
+    f.add_argument("accession", help="e.g. PRJEB12345, PRJNA67890, SRP012345, SAMN01234567")
+    f.add_argument("-o", "--output", help="output TSV (default: metadata/<ACCESSION>.tsv in the workspace)")
 
     p = sub.add_parser("presets", help="list, show or save workflow presets")
     psub = p.add_subparsers(dest="action", required=True)
@@ -106,20 +112,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _resolve_metadata(ws: Workspace, item: str) -> Path:
-    path = Path(item).expanduser()
-    if path.is_file():
-        return path
-    from .build import find_experiment_metadata
-
-    exp = ws.experiment_dir(item)
-    if exp.is_dir():
-        found = find_experiment_metadata(exp)
-        if found:
-            return found
-    raise BuildError(f"'{item}' is neither a metadata file nor an existing experiment")
-
-
 def cmd_build(ws: Workspace, args) -> int:
     ws.initialise()
     if args.name and len(args.metadata) > 1:
@@ -144,7 +136,7 @@ def cmd_build(ws: Workspace, args) -> int:
 
     results = []
     for item in args.metadata:
-        metadata = _resolve_metadata(ws, item)
+        metadata = resolve_metadata_source(ws, item, refresh=args.refresh)
         ignore_paired = str(workflow.general("ignore_paired_end", False)).lower() in ("true", "1", "yes")
         samples = load_samples(metadata, ignore_paired=ignore_paired)
         selection = parse_selection(args.samples, len(samples))
@@ -232,6 +224,17 @@ def _confirm(question: str) -> bool:
     return input(f"{question} (y/n) ").strip().lower().startswith("y")
 
 
+def cmd_fetch_metadata(ws: Workspace, args) -> int:
+    from .ena import fetch_run_report, is_accession
+
+    if not is_accession(args.accession):
+        raise BuildError(f"'{args.accession}' does not look like an ENA/SRA/DDBJ accession")
+    dest = Path(args.output) if args.output else ws.root / "metadata" / f"{args.accession.upper()}.tsv"
+    fetch_run_report(args.accession, dest)
+    print(f"Metadata written to {dest}")
+    return 0
+
+
 def cmd_make_tsv(ws: Workspace, args) -> int:
     from .local_samples import make_tsv
 
@@ -251,6 +254,7 @@ def main(argv: Optional[list] = None) -> int:
         "refs": cmd_refs,
         "cleanup": cmd_cleanup,
         "make-tsv": cmd_make_tsv,
+        "fetch-metadata": cmd_fetch_metadata,
     }
     try:
         if args.command in (None, "interactive"):

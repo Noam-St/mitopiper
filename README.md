@@ -9,8 +9,9 @@ them all with the correct job dependencies. It was built to analyse RNA-seq data
 different species, so it can also find and download each organism's mitochondrial reference
 genome from NCBI automatically.
 
-* Works directly with **ENA read-run reports** and **SRA metadata** (`SraRunInfo.csv` /
-  SRA Run Selector tables) as well as FASTQ files already on disk.
+* Give it a **project accession** (`PRJEB…`, `PRJNA…`, `SRP…`) and it fetches the run table from
+  ENA itself. It also works with **ENA read-run reports**, **SRA metadata** (`SraRunInfo.csv` /
+  SRA Run Selector tables), and FASTQ files already on disk.
 * Runs are grouped by biological sample and concatenated. Each run's download is checked against
   ENA's MD5 checksums.
 * Workflows are plain JSON *presets* that you can edit interactively, save, share and version.
@@ -46,15 +47,15 @@ available where the jobs run: on your `$PATH`, via `module load`/`conda activate
 mkdir my_project && cd my_project          # the *workspace*
 pipemaker init
 
-# 1. Get metadata: ENA browser -> project -> "Download report: TSV"  (or SRA RunInfo CSV)
+# 1. Pick a project accession (or download a metadata table yourself, see "Inputs")
 # 2. Tell pipemaker which reference to use for each organism ...
 pipemaker refs add "Danio rerio" --fasta /refs/GRCz11/GRCz11.fa --gtf /refs/GRCz11/genes.gtf
 #    ... or let it download the mitochondrial genome from NCBI
 pipemaker refs fetch-mt "Danio rerio"
 
 # 3. Preview, then build
-pipemaker build PRJNA123456.tsv --scheduler slurm --dry-run
-pipemaker build PRJNA123456.tsv --scheduler slurm --samples all
+pipemaker build PRJNA123456 --scheduler slurm --dry-run      # run table fetched from ENA
+pipemaker build PRJNA123456 --scheduler slurm --samples all
 
 # 4. Submit
 bash master.sh
@@ -69,7 +70,8 @@ scheduler → metadata → preset → configuration → sample selection → ste
 | --- | --- |
 | `pipemaker` / `pipemaker interactive` | Menu-driven interface (the original `maker.py` workflow) |
 | `pipemaker init` | Create the workspace skeleton and the `default` preset |
-| `pipemaker build META… [options]` | Generate job scripts non-interactively |
+| `pipemaker build META… [options]` | Generate job scripts non-interactively; `META` is a table, a previous experiment, or an accession |
+| `pipemaker fetch-metadata ACCESSION` | Only download the ENA run table of an accession |
 | `pipemaker presets list \| show NAME \| save NAME` | Inspect and save workflow presets |
 | `pipemaker refs list \| add \| use \| remove \| fetch-mt` | Manage reference genomes |
 | `pipemaker make-tsv FOLDER --org NAME` | Build a metadata table for local FASTQ files |
@@ -89,9 +91,19 @@ Global options: `-w/--workdir DIR` (workspace, default: current directory) and `
 | `--reference NAME` | Use the named reference set for every organism that has one |
 | `--fetch-mt` | Download missing references (mtDNA) from NCBI instead of skipping the organism |
 | `--dry-run` | Resolve everything and write `output/<exp>/plan.json`, but no scripts |
-| `--name NAME` | Experiment name (default: the metadata file name) |
+| `--name NAME` | Experiment name (default: the metadata file name or accession) |
+| `--refresh` | Download an accession's run table again instead of reusing the saved copy |
 
 ## Inputs
+
+### Accession (fetched automatically)
+Instead of a file, pass any accession that ENA can resolve to sequencing runs. This covers projects
+(`PRJEB…`, `PRJNA…`, `PRJDB…`), studies (`ERP…`/`SRP…`/`DRP…`), samples (`SAM…`, `ERS…`/`SRS…`),
+experiments (`ERX…`/`SRX…`) and single runs. NCBI and DDBJ data are mirrored by ENA, so the same
+call covers all three archives. pipemaker downloads the read-run report from the ENA Portal API
+to `metadata/<ACCESSION>.tsv` and names the experiment after the accession. Later builds reuse
+that copy. Pass `--refresh` to download it again, for example when new runs were added. In the
+interactive menu, type the accession at the metadata prompt.
 
 ### ENA read-run report (TSV)
 Required columns: `scientific_name`, `fastq_ftp`. If present, these are also used:

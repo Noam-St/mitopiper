@@ -5,6 +5,7 @@
 The single `maker.py` script was refactored into the installable `pipemaker` package.
 
 ### Added
+- Project/study/sample accessions (e.g. `PRJEB12345`, `PRJNA67890`, `SRP012345`) can be given instead of a metadata file. The run table is fetched from the ENA Portal API (`build`, the interactive prompt, and `fetch-metadata`).
 - `pipemaker` command with the sub-commands `build`, `presets`, `refs`, `make-tsv`, `cleanup` and `init`, for scripted, non-interactive builds. The interactive menus are still the default.
 - SRA metadata support (`SraRunInfo.csv`, SRA Run Selector tables). FASTQ URLs are derived from ENA's mirror.
 - Rows without a `fastq_ftp` link are skipped with a warning instead of breaking the build.

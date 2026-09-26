@@ -2,6 +2,7 @@
 /config/
 /output/
 /references/
+/metadata/
 /src/mtDNA_ref/
 /src/genbank/
 /master.sh
