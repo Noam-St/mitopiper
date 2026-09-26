@@ -113,6 +113,8 @@ def build_parser() -> argparse.ArgumentParser:
     mo.add_argument("--ignore", action="append", help="regular expression for stderr lines that are not errors (repeatable)")
     mo.add_argument("--json", action="store_true", help="machine readable output")
     mo.add_argument("--no-color", action="store_true")
+    mo.add_argument("-i", "--interactive", action="store_true",
+                    help="interactive monitor: live table plus commands to inspect, diagnose and rerun jobs")
     mo.add_argument("--rerun", action="store_true",
                     help="shortcut: resubmit failed jobs from their failed step with the automatic fixes (= rerun --auto-fix --submit)")
 
@@ -284,6 +286,16 @@ def cmd_rerun(ws: Workspace, args) -> int:
 def cmd_monitor(ws: Workspace, args) -> int:
     from .monitor import monitor
 
+    if args.interactive:
+        from .monitor import default_experiments
+        from .session import MonitorSession
+
+        experiments = args.experiments or default_experiments(ws)
+        if not experiments:
+            print("No submitted experiments found. Build and run master.sh first.")
+            return 1
+        return MonitorSession(ws, experiments, interval=args.watch or 15.0,
+                              color=False if args.no_color else None).run()
     if args.rerun:
         from .rerun import RerunOptions, rerun
 

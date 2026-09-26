@@ -467,7 +467,7 @@ def _contexts(workspace: Workspace, experiments: list) -> dict:
     return contexts
 
 
-def rerun_hint(failed: list, contexts: dict) -> str:
+def rerun_hint(failed: list, contexts: dict, shortcuts: bool = True) -> str:
     """Footer under the table: one-line cause per failed job and the rerun shortcuts."""
     from .diagnose import diagnose, merged_rerun_options
 
@@ -480,6 +480,8 @@ def rerun_hint(failed: list, contexts: dict) -> str:
         for key, value in merged_rerun_options(suggestions).items():
             if key in ("memory", "walltime"):
                 auto[key] = value
+    if not shortcuts:
+        return "\n".join(out) + "\n"
     out.append("")
     out.append("Shortcuts:")
     out.append("  python monitor.py --rerun        rerun failed jobs from the failed step, applying the automatic fixes")

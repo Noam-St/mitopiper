@@ -61,8 +61,34 @@ pipemaker build PRJNA123456 --scheduler slurm --samples all
 bash master.sh
 ```
 
-Run `pipemaker` with no arguments for the interactive, menu-driven interface. It walks you through
-scheduler → metadata → preset → configuration → sample selection → step selection.
+### Interactive mode: build → launch → monitor → fix → rerun
+
+Run `pipemaker` (or `python maker.py`) with no arguments for the menu-driven interface. It walks you
+through scheduler → metadata (a file or an accession) → preset → configuration → sample selection →
+step selection. Then it chains everything else:
+
+1. **Launch.** It asks *"Launch the jobs now and follow them in the monitor?"*. `master.sh` runs in the
+   background (log: `master.log`). If submitting fails, for example because `sbatch` is not found when
+   you are not on a login node, the reason is shown right away.
+2. **Monitor.** The live job table (see *Monitoring*) refreshes on its own, and you can type commands
+   while it runs:
+
+   | Command | Action |
+   | --- | --- |
+   | Enter | refresh now |
+   | `j NAME` (or just the name/id) | details of a job: steps, error lines, end of stderr, suggested fix |
+   | `e` | diagnose every failed job |
+   | `r` | rerun the failed jobs from their failed step, with the automatic fixes |
+   | `o` | rerun with your own options: which jobs, resume step, `--clean`, memory, time, extra setup line |
+   | `i SEC` | change the refresh interval |
+   | `q` | leave (submitted jobs keep running) |
+
+3. **Fix and rerun.** When every job has finished, the session summarises the results. If something
+   failed, it shows the cause per job and offers `r` / `o` right there. For environment problems such as a
+   missing tool, `o` proposes the diagnosed setup line (e.g. `module load fastqc`), so you only press
+   Enter. The rerun is submitted and monitoring continues.
+4. **Come back later.** On the next start, pipemaker offers to *monitor / rerun the jobs of the last
+   build* instead of building new ones, or run `python monitor.py -i`.
 
 ## Commands
 
@@ -182,6 +208,7 @@ s_SAMEA4_3     81237  RUNNING        trim          3:55
 | `pipemaker monitor --errors` | every failed job, and every job with errors in its stderr: step timeline, where it failed, the error lines (with line numbers), and the end of stderr |
 | `pipemaker monitor --job s_SAMEA2_1` | the same details for one job (by name or scheduler id) |
 | `pipemaker monitor --json` | machine readable output |
+| `pipemaker monitor -i` | the interactive session described under *Interactive mode* |
 
 How it knows:
 * **Job state.** Each job script keeps `status/<job>.status` up to date: the current step, then

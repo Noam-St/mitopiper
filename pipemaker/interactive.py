@@ -385,9 +385,39 @@ def _choose_metadata(workspace: Workspace, input_fn: Callable) -> list:
         print(f"'{answer}' is not an existing file, an accession or a valid experiment selection.\n")
 
 
-def run_interactive(workspace: Workspace, input_fn: Callable = input) -> int:
+def _last_build(workspace: Workspace) -> list:
+    """Experiments of the last build that were actually launched."""
+    import json
+
+    try:
+        last = json.loads((workspace.root / "last_build.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [e for e in last.get("experiments", []) if (workspace.experiment_dir(e) / "jobs.tsv").exists()]
+
+
+def _default_session(workspace: Workspace, experiments: list, input_fn: Callable):
+    from .session import MonitorSession
+
+    return MonitorSession(workspace, experiments, ask=input_fn)
+
+
+def run_interactive(workspace: Workspace, input_fn: Callable = input, session_factory: Callable = _default_session) -> int:
+    """Build -> launch -> monitor -> rerun, all from one interactive session.
+
+    ``session_factory(workspace, experiments, input_fn)`` creates the monitor
+    session (replaceable for testing).
+    """
     workspace.initialise()
     banner("Welcome to pipemaker - job script generator for sequencing pipelines")
+
+    previous = _last_build(workspace)
+    if previous:
+        what = choose("What would you like to do?",
+                      ["build and launch new jobs", f"monitor / rerun the jobs of the last build ({', '.join(previous)})"],
+                      allow_exit=False, input_fn=input_fn)
+        if what == 1:
+            return session_factory(workspace, previous, input_fn).run()
 
     idx = choose("Choose your job scheduler:", list(SCHEDULERS), allow_exit=False, input_fn=input_fn)
     scheduler = SCHEDULERS[idx]
@@ -432,6 +462,15 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input) -> int:
         return 1
     master = write_master(workspace, scheduler, results, shell=str(workflow.general("environment", "bash")))
     workspace.copy_preset("current", "last_used")
-    print(f"Run 'bash {master}' to submit all jobs.\n"
-          "IMPORTANT: every sample is submitted at once - make sure your cluster allows that many jobs!")
-    return 0
+    total = sum(len(r.jobs.samples) for r in results)
+    print(f"\nAll scripts are ready: {total} sample job(s), submitted by {master}.")
+    if scheduler == "local":
+        print("NOTE: the 'local' scheduler runs the jobs one after another on this machine.")
+    else:
+        print("IMPORTANT: every sample is submitted at once - make sure your cluster allows that many jobs!")
+    if not yes_no("Launch the jobs now and follow them in the monitor?", True, input_fn):
+        print(f"Submit later with 'bash {master}', then follow the jobs with 'python monitor.py --watch'.")
+        return 0
+    session = session_factory(workspace, [r.name for r in results if r.jobs.samples or r.jobs.experiment], input_fn)
+    session.start(master, "master.log")
+    return session.run()

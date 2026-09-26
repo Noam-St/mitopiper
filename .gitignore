@@ -20,3 +20,5 @@ dist/
 .pytest_cache/
 /last_build.json
 /rerun.sh
+/master.log
+/rerun.log

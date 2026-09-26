@@ -5,6 +5,7 @@
 The single `maker.py` script was refactored into the installable `pipemaker` package.
 
 ### Added
+- Interactive mode chains build → launch → monitor → diagnose → rerun. After the scripts are written it offers to launch them, then opens an interactive monitor session (live table plus the commands `j`, `e`, `r`, `o`, `i`, `q`). The rerun options pre-fill the diagnosed fix. On start-up it offers to monitor the last build. Also available as `pipemaker monitor -i`.
 - `pipemaker rerun` / `python monitor.py --rerun`: resubmit failed, killed or skipped jobs, resuming at the step that failed. It supports per-rerun resource overrides, `--free-form` setup lines, `--from`/`--from-start`/`--clean`, and `--auto-fix`. Stuck dependants are cancelled, and reruns are logged in the manifests.
 - Failure diagnosis: the monitor explains each failed job (out of memory, time limit, missing tool/reference/index/input, corrupt files, download and disk problems, …) and suggests fixes with ready-to-run commands.
 - The `local` scheduler honours dependencies. Jobs whose dependency failed are marked `SKIPPED`.

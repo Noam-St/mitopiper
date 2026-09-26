@@ -177,16 +177,16 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
              "'conda activate ENV'), or set the absolute path in the step's 'path' field "
              "(pipemaker -> configuration -> modify a pipeline step).",
              "One-off fix for the rerun only: pass the line with --free-form."],
-            [f"pipemaker rerun --free-form 'module load {name}'"], {}))
+            [f"pipemaker rerun --free-form 'module load {name}'"], {"free_form_hint": f"module load {name}"}))
     module = _find(r"ModuleNotFoundError: No module named '([\w.]+)'", text)
     if module:
         add(Suggestion(f"Python package '{module.group(1)}' is missing in the job's environment",
                        ["Activate the environment that has it in 'free_form' (conda activate ENV)."],
-                       ["pipemaker rerun --free-form 'conda activate ENV'"], {}))
+                       ["pipemaker rerun --free-form 'conda activate ENV'"], {"free_form_hint": "conda activate ENV"}))
     if _find(r"could not detect version of cutadapt|cutadapt.*not found", text):
         add(Suggestion("trim_galore cannot find cutadapt",
                        ["Load or install cutadapt (and pigz) in the environment used by the jobs."],
-                       ["pipemaker rerun --free-form 'module load cutadapt'"], {}))
+                       ["pipemaker rerun --free-form 'module load cutadapt'"], {"free_form_hint": "module load cutadapt"}))
     if rc == 126 or _find(r"permission denied", text):
         path = _find(r"(/[^\s:'\"]+)[:'\"]?\s*:?\s*permission denied", text)
         add(Suggestion("Permission denied" + (f" on {path.group(1)}" if path else ""),
@@ -280,7 +280,10 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
 
 
 def merged_rerun_options(suggestions: list) -> dict:
-    """Combine the automatic fixes of several suggestions for one job."""
+    """Combine the automatic fixes of several suggestions for one job.
+
+    ``free_form_hint`` is only a proposal shown to the user, never applied automatically.
+    """
     options: dict = {}
     for s in suggestions:
         for key, value in s.rerun.items():

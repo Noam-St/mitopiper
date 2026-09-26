@@ -64,7 +64,7 @@ def test_interactive_accepts_accession(tmp_path, fake_ena):
     from pipemaker.config import Workspace
     from pipemaker.interactive import run_interactive
 
-    answers = iter(["1", "PRJEB1", "0", "n", "0", "", "1", "/refs/dr.fa", "", "", ""])
+    answers = iter(["1", "PRJEB1", "0", "n", "0", "", "1", "/refs/dr.fa", "", "", "", "n"])
     ws = Workspace(tmp_path / "ws")
     assert run_interactive(ws, lambda prompt="": next(answers)) == 0
     assert (ws.output_dir / "PRJEB1" / "scripts" / "s_SAMEA1_0.sh").exists()
