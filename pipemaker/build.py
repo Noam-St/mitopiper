@@ -146,8 +146,44 @@ def job_resources(workflow: Workflow) -> JobResources:
     )
 
 
-def _preamble(workflow: Workflow) -> str:
-    text = ""
+TRACKED_SHELLS = ("bash", "zsh", "ksh")
+
+
+def tracks_status(workflow: Workflow) -> bool:
+    return str(workflow.general("environment", "bash") or "bash") in TRACKED_SHELLS
+
+
+def status_tracking(exp_dir: str, job_name: str) -> str:
+    """Shell snippet that keeps ``status/<job>.status`` up to date for ``pipemaker monitor``.
+
+    The status file holds one line ``STATE STEP START UPDATED RC`` and is
+    rewritten when a step starts and when the job exits (via an EXIT trap, so
+    failures are caught with their exit code).  ``status/<job>.steps`` keeps
+    the start time of every step.
+    """
+    return _STATUS_SNIPPET.replace("@STATUS@", f"{exp_dir}/status/{job_name}")
+
+
+_STATUS_SNIPPET = r"""PM_STATUS="@STATUS@.status"; PM_STEPS="@STATUS@.steps"; PM_STEP="-"; PM_START=$(date +%s)
+mkdir -p "$(dirname "$PM_STATUS")"; : > "$PM_STEPS"
+pm_step() {
+    PM_STEP="$1"
+    echo "RUNNING $1 $PM_START $(date +%s) -" > "$PM_STATUS"
+    echo "$1 $(date +%s)" >> "$PM_STEPS"
+    echo "[pipemaker] step $1 started $(date '+%F %T')"
+}
+pm_exit() {
+    pm_rc=$?
+    if [ "$pm_rc" -eq 0 ]; then pm_state=DONE; else pm_state=FAILED; fi
+    echo "$pm_state $PM_STEP $PM_START $(date +%s) $pm_rc" > "$PM_STATUS"
+}
+trap pm_exit EXIT
+echo "RUNNING - $PM_START $PM_START -" > "$PM_STATUS"
+"""
+
+
+def _preamble(workflow: Workflow, exp_dir: str = "", job_name: str = "") -> str:
+    text = status_tracking(exp_dir, job_name) if job_name and tracks_status(workflow) else ""
     free_form = str(workflow.general("free_form", "") or "")
     if free_form:
         text += free_form if free_form.endswith("\n") else free_form + "\n"
@@ -213,7 +249,6 @@ def build_experiment(
     exp = str(exp_dir)
     scheduler = options.scheduler
     resources = job_resources(workflow)
-    preamble = _preamble(workflow)
     scripts_dir = exp_dir / "scripts"
     plan = {"experiment": exp_dir.name, "directory": exp, "steps": steps, "samples": []}
 
@@ -254,21 +289,26 @@ def build_experiment(
             (exp_dir / directory).mkdir(parents=True, exist_ok=True)
     write_sample_table(samples, exp_dir / "samples.tsv")
 
+    # Script names equal job names, so logs and status files can be matched to them.
+    track = tracks_status(workflow)
+    jobs.directory = exp
     if prep_lines:
-        path = scripts_dir / "prepare_refs.sh"
-        content = header(scheduler, f"prep_{exp_dir.name}", exp, resources) + preamble + "\n".join(prep_lines) + "\n"
-        _write_script(path, content)
+        name = f"prep_{exp_dir.name}"
+        path = scripts_dir / f"{name}.sh"
+        body = ("pm_step prepare_references\n" if track else "") + "\n".join(prep_lines) + "\n"
+        _write_script(path, header(scheduler, name, exp, resources) + _preamble(workflow, exp, name) + body)
         jobs.prepare = str(path)
     for job in sample_jobs:
         path = scripts_dir / f"{job.job_name}.sh"
-        content = header(scheduler, job.job_name, exp, resources) + preamble
-        content += f'echo "Current organism: {job.sample.organism}"\n\n' + job.body()
+        content = header(scheduler, job.job_name, exp, resources) + _preamble(workflow, exp, job.job_name)
+        content += f'echo "Current organism: {job.sample.organism}"\n\n' + render_steps(job.steps, job.sample.name, track)
         _write_script(path, content)
         jobs.samples.append(str(path))
     if experiment_steps:
-        path = scripts_dir / "experiment.sh"
-        content = header(scheduler, f"e_{exp_dir.name}", exp, resources) + preamble + render_steps(experiment_steps, exp_dir.name)
-        _write_script(path, content)
+        name = f"e_{exp_dir.name}"
+        path = scripts_dir / f"{name}.sh"
+        content = header(scheduler, name, exp, resources) + _preamble(workflow, exp, name)
+        _write_script(path, content + render_steps(experiment_steps, exp_dir.name, track))
         jobs.experiment = str(path)
 
     write_manifest(exp_dir, workflow, options, samples, refs, plan)
@@ -277,8 +317,12 @@ def build_experiment(
 
 def write_master(workspace: Workspace, scheduler: str, results: list, shell: str = "bash") -> Path:
     path = workspace.root / "master.sh"
-    content = master_script(scheduler, [r.jobs for r in results if r.jobs.samples or r.jobs.experiment], shell=shell)
+    submitted = [r for r in results if r.jobs.samples or r.jobs.experiment]
+    content = master_script(scheduler, [r.jobs for r in submitted], shell=shell)
     _write_script(path, content)
+    last = {"scheduler": scheduler, "master": str(path), "experiments": [r.name for r in submitted],
+            "created": _dt.datetime.now().astimezone().isoformat(timespec="seconds")}
+    (workspace.root / "last_build.json").write_text(json.dumps(last, indent=2), encoding="utf-8")
     return path
 
 

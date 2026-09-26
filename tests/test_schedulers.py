@@ -30,7 +30,10 @@ def test_no_account_or_queue_when_empty():
 
 @pytest.mark.parametrize("scheduler,needle", [("sge", "qsub -terse"), ("slurm", "sbatch --parsable"), ("lsf", "bsub")])
 def test_master_script_dependencies(scheduler, needle):
-    text = master_script(scheduler, [ExperimentJobs("E", "/e/prep.sh", ["/e/a.sh", "/e/b.sh"], "/e/exp.sh")])
+    text = master_script(scheduler, [ExperimentJobs("E", "/e/scripts/prep.sh", ["/e/scripts/a.sh"], "/e/scripts/exp.sh")])
     assert needle in text
-    assert 'prep+=("$(submit /e/prep.sh)")' in text
-    assert "submit /e/exp.sh" in text
+    assert "jid=$(submit /e/scripts/prep.sh)" in text and 'prep+=("$jid")' in text
+    assert 'jid=$(submit /e/scripts/exp.sh ${jobs[@]+"${jobs[@]}"})' in text
+    # every submission is recorded for the monitor
+    assert "jobs_file=/e/jobs.tsv" in text and "marker=/e/.submitting" in text
+    assert 'record "$jid" "$script" sample' in text and "record \"$jid\" /e/scripts/exp.sh experiment" in text

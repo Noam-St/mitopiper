@@ -75,6 +75,7 @@ scheduler → metadata → preset → configuration → sample selection → ste
 | `pipemaker presets list \| show NAME \| save NAME` | Inspect and save workflow presets |
 | `pipemaker refs list \| add \| use \| remove \| fetch-mt` | Manage reference genomes |
 | `pipemaker make-tsv FOLDER --org NAME` | Build a metadata table for local FASTQ files |
+| `pipemaker monitor [EXP…]` / `python monitor.py` | Follow submitted jobs and their errors (see *Monitoring*) |
 | `pipemaker cleanup [FOLDERS…]` | Remove logs and generated scripts |
 
 Global options: `-w/--workdir DIR` (workspace, default: current directory) and `-v` (more logging).
@@ -140,19 +141,62 @@ are grouped and concatenated.
     ├── metadata.tsv              copy of your metadata (your file is never modified)
     ├── samples.tsv               resolved sample table (one row per sample)
     ├── scripts/
-    │   ├── prepare_refs.sh       indexing of auto-downloaded references (if needed)
+    │   ├── prep_<exp>.sh         indexing of auto-downloaded references (if needed)
     │   ├── s_<sample>_<i>.sh     one job per sample
-    │   └── experiment.sh         experiment-level steps (e.g. MultiQC), if any
+    │   └── e_<exp>.sh            experiment-level steps (e.g. MultiQC), if any
+    ├── jobs.tsv                  job ids recorded by master.sh
+    ├── status/                   live state of every job (read by `pipemaker monitor`)
     ├── fastq/ post_trim/ alignment/ pileup/ …   step output directories
     ├── stdout/ stderr/           scheduler logs
     ├── pipemaker_manifest.json   provenance of the latest build (+ manifests/ history)
     └── plan.json                 written by --dry-run
 ```
 
-`master.sh` submits `prepare_refs.sh` first, makes every sample job wait for it, and makes
-`experiment.sh` wait for every sample job. It uses `-hold_jid` on SGE, `--dependency=afterok`
+`master.sh` submits the reference job first, makes every sample job wait for it, and makes
+the experiment-level job wait for every sample job. It uses `-hold_jid` on SGE, `--dependency=afterok`
 on SLURM, and `-w done()` on LSF. Every file of a sample is named `<sample_accession>_<index>_<organism initials>`,
 e.g. `SAMN01234567_3_DR_1.fastq.gz`.
+
+## Monitoring
+
+After `bash master.sh`, follow the jobs from the workspace directory:
+
+```bash
+python monitor.py --watch          # or: pipemaker monitor --watch [SECONDS]  (refreshes every 30 s by default)
+```
+```
+== PRJEB12345: 24 job(s) - 1 failed, 1 killed, 6 running, 12 pending, 4 done
+JOB               ID  STATE          STEP       ELAPSED   ERR  LAST ERROR
+s_SAMEA1_0     81234  DONE           mpileup      41:07
+s_SAMEA2_1     81235  FAILED rc=127  fastqc        0:12     1  line 26: fastqc: command not found
+s_SAMEA3_2     81236  KILLED TIMEOUT bwa-align        -     1  slurmstepd: error: *** JOB 81236 CANCELLED DUE TO TIME LIMIT ***
+s_SAMEA4_3     81237  RUNNING        trim          3:55
+...
+```
+
+| Command | Shows |
+| --- | --- |
+| `pipemaker monitor` | one snapshot of the last build's experiments (or name them: `monitor EXP1 EXP2`) |
+| `pipemaker monitor --watch [S]` | live view, refreshed every *S* seconds until every job has finished |
+| `pipemaker monitor --errors` | every failed job, and every job with errors in its stderr: step timeline, where it failed, the error lines (with line numbers), and the end of stderr |
+| `pipemaker monitor --job s_SAMEA2_1` | the same details for one job (by name or scheduler id) |
+| `pipemaker monitor --json` | machine readable output |
+
+How it knows:
+* **Job state.** Each job script keeps `status/<job>.status` up to date: the current step, then
+  `DONE`, or `FAILED` with the exit code and the step that failed. Jobs that are queued, or were
+  killed before they could report (time or memory limit, `scancel`/`qdel`), come from the scheduler
+  (`sacct`/`squeue`, `qstat`, `bjobs`) when it is reachable. Jobs that `master.sh` has not reached
+  yet show as pending.
+* **Errors.** Each job's stderr is scanned for error messages (`error`, `exception`, `command not
+  found`, `No such file or directory`, `Segmentation fault`, `out of memory`, `killed`, time
+  limits, …). Only new output is read on each refresh. Errors are counted even for jobs that
+  finished with exit code 0, so warnings aren't lost. Add your own patterns with `--pattern REGEX`,
+  and silence noisy lines with `--ignore REGEX`.
+
+The exit code is 1 when a job failed, so `pipemaker monitor` can be used in scripts. Status
+tracking needs a bash, zsh or ksh `environment` (the default). With other shells, only the
+scheduler state and the stderr scan are available.
 
 ## Workflows (presets)
 
@@ -237,7 +281,7 @@ pipemaker refs list
 `src/final.csv`; columns `organism,RefSeq`). If none is listed, it searches NCBI for the
 organism's RefSeq complete mitochondrial genome. It downloads the FASTA and the GFF3, and validates
 the FASTA. Indices needed by the active steps (`samtools faidx`, `bwa index`, `STAR
-genomeGenerate`) are built by the `prepare_refs.sh` job before any sample job starts. Set
+genomeGenerate`) are built by the reference job (`scripts/prep_<exp>.sh`) before any sample job starts. Set
 `NCBI_EMAIL` / `NCBI_API_KEY` (or `config/credentials.json`: `{"Email": …, "API": …}`) to follow
 NCBI's usage policy.
 

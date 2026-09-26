@@ -102,6 +102,18 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("-y", "--yes", action="store_true", help="do not ask for confirmation")
     c.add_argument("--keep-scripts", action="store_true", help="keep generated job scripts")
 
+    mo = sub.add_parser("monitor", help="follow submitted jobs and show errors from their stderr")
+    mo.add_argument("experiments", nargs="*", help="experiments to follow (default: those of the last build)")
+    mo.add_argument("-w", "--watch", nargs="?", type=float, const=30.0, metavar="SECONDS",
+                    help="refresh every SECONDS (default 30) until all jobs have finished")
+    mo.add_argument("-j", "--job", help="details of one job (name or scheduler id): steps, error lines, stderr tail")
+    mo.add_argument("-e", "--errors", action="store_true", help="details of every failed job and every job with errors in stderr")
+    mo.add_argument("--tail", type=int, default=20, help="stderr lines to show in details (default: %(default)s)")
+    mo.add_argument("--pattern", action="append", help="extra regular expression that counts as an error (repeatable)")
+    mo.add_argument("--ignore", action="append", help="regular expression for stderr lines that are not errors (repeatable)")
+    mo.add_argument("--json", action="store_true", help="machine readable output")
+    mo.add_argument("--no-color", action="store_true")
+
     m = sub.add_parser("make-tsv", help="create a metadata table for local FASTQ files")
     m.add_argument("folder", help="folder containing the FASTQ files")
     m.add_argument("--org", required=True, help="scientific name of the organism")
@@ -235,6 +247,16 @@ def cmd_fetch_metadata(ws: Workspace, args) -> int:
     return 0
 
 
+def cmd_monitor(ws: Workspace, args) -> int:
+    from .monitor import monitor
+
+    return monitor(
+        ws, args.experiments, watch=args.watch, job=args.job, errors_only=args.errors, as_json=args.json,
+        color=False if args.no_color else None, tail_lines=args.tail,
+        extra_patterns=args.pattern, extra_ignore=args.ignore,
+    )
+
+
 def cmd_make_tsv(ws: Workspace, args) -> int:
     from .local_samples import make_tsv
 
@@ -255,6 +277,7 @@ def main(argv: Optional[list] = None) -> int:
         "cleanup": cmd_cleanup,
         "make-tsv": cmd_make_tsv,
         "fetch-metadata": cmd_fetch_metadata,
+        "monitor": cmd_monitor,
     }
     try:
         if args.command in (None, "interactive"):

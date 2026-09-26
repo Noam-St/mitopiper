@@ -7,6 +7,7 @@ workstation or for testing).
 
 from __future__ import annotations
 
+import posixpath
 import shlex
 from dataclasses import dataclass
 from typing import Optional
@@ -111,7 +112,9 @@ _SUBMIT_FUNCTIONS = {
     local name; name=$(basename "$script" .sh)
     local logdir; logdir=$(dirname "$(dirname "$script")")
     echo "[pipemaker] running $script" >&2
-    SHELL_BIN "$script" > "$logdir/stdout/$name.out" 2> "$logdir/stderr/$name.err"
+    # A failing job must not stop the other (independent) jobs from running.
+    SHELL_BIN "$script" > "$logdir/stdout/$name.out" 2> "$logdir/stderr/$name.err" \
+        || echo "[pipemaker] $script failed (see $logdir/stderr/$name.err)" >&2
     echo "$name"
 }""",
 }
@@ -125,6 +128,7 @@ class ExperimentJobs:
     prepare: Optional[str]
     samples: list
     experiment: Optional[str]
+    directory: str = ""
 
 
 def master_script(scheduler: str, experiments: list, delay: float = 0.5, shell: str = "bash") -> str:
@@ -141,23 +145,43 @@ def master_script(scheduler: str, experiments: list, delay: float = 0.5, shell: 
         "",
         submit,
         "",
+        "# Every submitted job is recorded in <experiment>/jobs.tsv for 'pipemaker monitor'.",
+        "record() {",
+        "    [ -s \"$jobs_file\" ] || printf 'job_id\\tjob_name\\tscript\\tsubmitted\\tkind\\n' > \"$jobs_file\"",
+        "    printf '%s\\t%s\\t%s\\t%s\\t%s\\n' \"$1\" \"$(basename \"$2\" .sh)\" \"$2\" \"$(date +%s)\" \"$3\" >> \"$jobs_file\"",
+        "}",
+        "# <experiment>/.submitting exists while this script is still submitting that experiment.",
+        "marker=''",
+        "trap 'rm -f \"$marker\"' EXIT",
+        "",
     ]
     pause = f"sleep {delay}" if delay and scheduler != "local" else ""
     for exp in experiments:
+        directory = exp.directory or posixpath.dirname(posixpath.dirname((exp.samples or [exp.experiment or exp.prepare])[0]))
         lines.append(f"# ---- {exp.name}")
+        lines.append(f"jobs_file={shlex.quote(posixpath.join(directory, 'jobs.tsv'))}")
+        lines.append(f"marker={shlex.quote(posixpath.join(directory, '.submitting'))}")
+        lines.append('touch "$marker"')
         lines.append("prep=()")
         if exp.prepare:
-            lines.append(f"prep+=(\"$(submit {shlex.quote(exp.prepare)})\")")
+            lines.append(f"jid=$(submit {shlex.quote(exp.prepare)})")
+            lines.append('prep+=("$jid")')
+            lines.append(f"record \"$jid\" {shlex.quote(exp.prepare)} prepare")
         lines.append("jobs=()")
         if exp.samples:
             quoted = " ".join(shlex.quote(s) for s in exp.samples)
             lines.append(f"for script in {quoted}; do")
-            lines.append('    jobs+=("$(submit "$script" ${prep[@]+"${prep[@]}"})")')
+            lines.append('    jid=$(submit "$script" ${prep[@]+"${prep[@]}"})')
+            lines.append('    jobs+=("$jid")')
+            lines.append('    record "$jid" "$script" sample')
             if pause:
                 lines.append(f"    {pause}")
             lines.append("done")
         if exp.experiment:
-            lines.append(f"submit {shlex.quote(exp.experiment)} ${{jobs[@]+\"${{jobs[@]}}\"}} > /dev/null")
+            lines.append(f"jid=$(submit {shlex.quote(exp.experiment)} ${{jobs[@]+\"${{jobs[@]}}\"}})")
+            lines.append(f"record \"$jid\" {shlex.quote(exp.experiment)} experiment")
+        lines.append('rm -f "$marker"')
         lines.append(f'echo "Submitted {exp.name}: ${{#jobs[@]}} sample job(s)"')
         lines.append("")
-    return "\n".join(lines)
+    lines.append('echo "Follow the jobs with: pipemaker monitor --watch   (or: python monitor.py --watch)"')
+    return "\n".join(lines) + "\n"

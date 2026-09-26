@@ -430,9 +430,12 @@ def build_experiment_steps(samples: list, workflow: Workflow, exp_dir: str, step
     return result
 
 
-def render_steps(steps: list, label: str) -> str:
+def render_steps(steps: list, label: str, track: bool = False) -> str:
+    """Commands of ``steps``; with ``track`` each step reports itself via ``pm_step``."""
     out = []
     for step in steps:
+        if track:
+            out.append(f"pm_step {step.step}")
         out.append(f'echo "Running {step.step}: {step.description} on {label}"')
         out.extend(step.lines)
     return "\n".join(out) + ("\n" if out else "")

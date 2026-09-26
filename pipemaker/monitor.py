@@ -1,0 +1,510 @@
+"""Follow submitted jobs and surface their errors.
+
+Sources of truth, combined per job:
+
+* ``<exp>/jobs.tsv``            – written by ``master.sh``: job id, name, script
+* ``<exp>/status/<job>.status`` – written by the job itself: state, current
+  step, start/update time and exit code (see :func:`build.status_tracking`)
+* the scheduler (``squeue``/``sacct``, ``qstat``, ``bjobs``) – queued jobs and
+  jobs killed before they could report (time limit, out of memory, ``scancel``)
+* ``<exp>/stderr/``             – scanned for error messages
+
+Run ``pipemaker monitor`` (or ``python monitor.py``) after ``bash master.sh``.
+"""
+
+from __future__ import annotations
+
+import csv
+import datetime as _dt
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Callable, Optional
+
+from .config import Workspace
+
+# Job states, in display order.
+NOT_SUBMITTED, PENDING, RUNNING, DONE, FAILED, KILLED, UNKNOWN = (
+    "NOT SUBMITTED", "PENDING", "RUNNING", "DONE", "FAILED", "KILLED", "UNKNOWN",
+)
+FINAL_STATES = (NOT_SUBMITTED, DONE, FAILED, KILLED)
+STATE_ORDER = (FAILED, KILLED, RUNNING, PENDING, UNKNOWN, DONE, NOT_SUBMITTED)
+
+DEFAULT_ERROR_PATTERNS = (
+    r"\berrors?\b", r"\bexceptions?\b", r"traceback", r"\bfatal\b", r"segmentation fault", r"core dumped",
+    r"command not found", r"no such file or directory", r"permission denied", r"out of memory",
+    r"oom[- ]kill", r"\bkilled\b", r"cannot allocate memory", r"disk quota exceeded", r"no space left on device",
+    r"\bfailed\b", r"\baborted?\b", r"time limit", r"exceeded", r"not found", r"invalid",
+)
+# Lines that match an error pattern but are known to be harmless.
+DEFAULT_IGNORE_PATTERNS = (
+    r"\b0 errors?\b", r"errors?:\s*0\b", r"no errors?\b", r"--error", r"ignore_errors",
+)
+
+_SCRIPT_PREFIX = re.compile(r"^\S+\.sh: line (\d+): ")
+
+_SLURM_ACTIVE = {"PENDING": PENDING, "CONFIGURING": PENDING, "REQUEUED": PENDING, "RESIZING": RUNNING,
+                 "RUNNING": RUNNING, "COMPLETING": RUNNING, "SUSPENDED": RUNNING}
+_SLURM_FINAL = {"COMPLETED": DONE, "FAILED": FAILED, "CANCELLED": KILLED, "TIMEOUT": KILLED,
+                "OUT_OF_MEMORY": KILLED, "NODE_FAIL": KILLED, "PREEMPTED": KILLED, "BOOT_FAIL": KILLED,
+                "DEADLINE": KILLED}
+_LSF = {"PEND": PENDING, "PSUSP": PENDING, "WAIT": PENDING, "RUN": RUNNING, "USUSP": RUNNING,
+        "SSUSP": RUNNING, "DONE": DONE, "EXIT": FAILED, "ZOMBI": KILLED, "UNKWN": UNKNOWN}
+
+
+@dataclass
+class ErrorLine:
+    line: int
+    text: str
+
+
+@dataclass
+class JobStatus:
+    experiment: str
+    name: str
+    kind: str = "sample"
+    job_id: str = ""
+    script: str = ""
+    submitted: Optional[float] = None
+    state: str = NOT_SUBMITTED
+    step: str = ""
+    started: Optional[float] = None
+    updated: Optional[float] = None
+    exit_code: Optional[int] = None
+    scheduler_state: str = ""
+    stdout: str = ""
+    stderr: str = ""
+    error_count: int = 0
+    errors: list = field(default_factory=list)
+    steps: list = field(default_factory=list)
+
+    @property
+    def elapsed(self) -> Optional[float]:
+        if self.started is None or self.state == KILLED:  # a killed job never reported its end
+            return None
+        end = self.updated if self.state in FINAL_STATES and self.updated else time.time()
+        return max(0.0, end - self.started)
+
+    @property
+    def last_error(self) -> str:
+        """Most recent error line, without the ``/path/to/script.sh: line N:`` prefix bash adds."""
+        if not self.errors:
+            return ""
+        return _SCRIPT_PREFIX.sub(r"line \1: ", self.errors[-1].text)
+
+
+# ----------------------------------------------------------- job sources
+def read_jobs_file(exp_dir: Path) -> dict:
+    """Latest submission of every job name in ``jobs.tsv``."""
+    path = exp_dir / "jobs.tsv"
+    jobs = {}
+    if not path.exists():
+        return jobs
+    with open(path, newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle, delimiter="\t"):
+            if row.get("job_name"):
+                jobs[row["job_name"]] = row
+    return jobs
+
+
+def read_status_file(exp_dir: Path, name: str) -> Optional[dict]:
+    path = exp_dir / "status" / f"{name}.status"
+    try:
+        parts = path.read_text(encoding="utf-8").split()
+    except OSError:
+        return None
+    if len(parts) < 4:
+        return None
+
+    def num(value):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+
+    return {"state": parts[0], "step": parts[1], "started": num(parts[2]), "updated": num(parts[3]),
+            "exit_code": num(parts[4]) if len(parts) > 4 else None}
+
+
+def read_steps_file(exp_dir: Path, name: str) -> list:
+    path = exp_dir / "status" / f"{name}.steps"
+    steps = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[1].isdigit():
+                steps.append((parts[0], int(parts[1])))
+    except OSError:
+        pass
+    return steps
+
+
+def find_log(exp_dir: Path, kind: str, name: str, job_id: str) -> Optional[Path]:
+    """Locate a job's stdout/stderr file, whatever scheduler wrote it.
+
+    SGE: ``<name>.o<id>``/``<name>.e<id>``; SLURM: ``<name>_<id>.out/.err``;
+    LSF: ``<id>.out/.err``; local: ``<name>.out/.err``.
+    """
+    directory = exp_dir / kind
+    if not directory.is_dir():
+        return None
+    suffix, sge = (".out", "o") if kind == "stdout" else (".err", "e")
+    candidates = []
+    if job_id:
+        candidates += [f"{name}_{job_id}{suffix}", f"{name}.{sge}{job_id}", f"{job_id}{suffix}"]
+    candidates.append(f"{name}{suffix}")
+    for candidate in candidates:
+        path = directory / candidate
+        if path.is_file():
+            return path
+    matches = sorted(directory.glob(f"{name}[._]*"), key=lambda p: p.stat().st_mtime)
+    return matches[-1] if matches else None
+
+
+# ------------------------------------------------------------- scheduler
+def _run(cmd: list, timeout: int = 30) -> Optional[str]:
+    if shutil.which(cmd[0]) is None:
+        return None
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.stdout if result.returncode == 0 else None
+
+
+def query_scheduler(scheduler: str, job_ids: list, runner: Callable = _run) -> Optional[dict]:
+    """Ask the scheduler about ``job_ids``.
+
+    Returns ``{job_id: (state, raw_state)}`` for the jobs it knows, or ``None``
+    when the scheduler cannot be queried (not installed, not on a login node).
+    A job missing from the result is no longer known to the scheduler.
+    """
+    ids = [j for j in job_ids if j and j.isdigit()]
+    if not ids or scheduler == "local":
+        return None
+    found = {}
+    if scheduler == "slurm":
+        out = runner(["sacct", "-n", "-P", "-X", "-j", ",".join(ids), "-o", "JobID,State"])
+        if out is not None:
+            for line in out.splitlines():
+                parts = line.split("|")
+                if len(parts) >= 2:
+                    raw = parts[1].split()[0] if parts[1] else ""
+                    found[parts[0].split("_")[0]] = (_SLURM_ACTIVE.get(raw) or _SLURM_FINAL.get(raw) or UNKNOWN, raw)
+            return found
+        out = runner(["squeue", "-h", "-j", ",".join(ids), "-o", "%i|%T"])
+        if out is None:
+            return None
+        for line in out.splitlines():
+            parts = line.split("|")
+            if len(parts) == 2:
+                found[parts[0]] = (_SLURM_ACTIVE.get(parts[1], RUNNING), parts[1])
+        return found
+    if scheduler == "sge":
+        out = runner(["qstat"])
+        if out is None:
+            return None
+        for line in out.splitlines()[2:]:
+            parts = line.split()
+            if len(parts) >= 5 and parts[0] in ids:
+                raw = parts[4]
+                state = FAILED if "E" in raw else PENDING if ("q" in raw or "h" in raw) else RUNNING
+                found[parts[0]] = (state, raw)
+        return found
+    if scheduler == "lsf":
+        out = runner(["bjobs", "-a", "-noheader", "-o", "jobid stat delimiter='|'", *ids])
+        if out is None:
+            return None
+        for line in out.splitlines():
+            parts = line.split("|")
+            if len(parts) == 2 and parts[0].strip().isdigit():
+                raw = parts[1].strip()
+                found[parts[0].strip()] = (_LSF.get(raw, UNKNOWN), raw)
+        return found
+    return None
+
+
+# --------------------------------------------------------------- errors
+class ErrorScanner:
+    """Find error lines in log files; re-scans only what was appended since last time."""
+
+    def __init__(self, patterns=DEFAULT_ERROR_PATTERNS, ignore=DEFAULT_IGNORE_PATTERNS, keep: int = 50):
+        # Scheduler headers are also written to stderr on some systems; they are not errors.
+        self.pattern = re.compile("|".join(patterns), re.IGNORECASE)
+        self.ignore = re.compile("|".join(ignore), re.IGNORECASE) if ignore else None
+        self.keep = keep
+        self._cache: dict = {}
+
+    def scan(self, path: Optional[Path]) -> tuple:
+        """Return ``(count, [ErrorLine, ...])`` (the last ``keep`` matches)."""
+        if path is None:
+            return 0, []
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return 0, []
+        key = str(path)
+        offset, line_no, count, errors = self._cache.get(key, (0, 0, 0, []))
+        if size < offset:  # truncated / rewritten
+            offset, line_no, count, errors = 0, 0, 0, []
+        if size > offset:
+            with open(path, "rb") as handle:
+                handle.seek(offset)
+                chunk = handle.read()
+            # Only consume complete lines; a partial last line is re-read next time.
+            end = chunk.rfind(b"\n")
+            if end >= 0:
+                for raw in chunk[:end].split(b"\n"):
+                    line_no += 1
+                    text = raw.decode("utf-8", errors="replace").rstrip("\r")
+                    if self.pattern.search(text) and not (self.ignore and self.ignore.search(text)):
+                        count += 1
+                        errors = (errors + [ErrorLine(line_no, text.strip())])[-self.keep:]
+                offset += end + 1
+        self._cache[key] = (offset, line_no, count, errors)
+        return count, list(errors)
+
+
+def tail(path: Optional[Path], lines: int = 20) -> list:
+    if path is None:
+        return []
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - 64 * 1024))
+            data = handle.read().decode("utf-8", errors="replace")
+    except OSError:
+        return []
+    return data.splitlines()[-lines:]
+
+
+# ------------------------------------------------------------- collect
+def experiment_scheduler(exp_dir: Path, default: str = "") -> str:
+    try:
+        return json.loads((exp_dir / "pipemaker_manifest.json").read_text(encoding="utf-8")).get("scheduler", default)
+    except (OSError, ValueError):
+        return default
+
+
+def default_experiments(workspace: Workspace) -> list:
+    """Experiments of the last build, else every experiment that has jobs."""
+    try:
+        last = json.loads((workspace.root / "last_build.json").read_text(encoding="utf-8"))
+        names = [n for n in last.get("experiments", []) if workspace.experiment_dir(n).is_dir()]
+        if names:
+            return names
+    except (OSError, ValueError):
+        pass
+    if not workspace.output_dir.is_dir():
+        return []
+    return sorted(d.name for d in workspace.output_dir.iterdir()
+                  if (d / "jobs.tsv").exists() or (d / "status").is_dir())
+
+
+def collect(workspace: Workspace, experiments: list, scanner: ErrorScanner,
+            query: Callable = query_scheduler) -> list:
+    """Current status of every job of ``experiments``."""
+    statuses = []
+    for exp in experiments:
+        exp_dir = workspace.experiment_dir(exp)
+        submitted = read_jobs_file(exp_dir)
+        names = list(submitted)
+        scripts = exp_dir / "scripts"
+        if scripts.is_dir():
+            names += sorted(p.stem for p in scripts.glob("*.sh") if p.stem not in submitted)
+        submitting = (exp_dir / ".submitting").exists()
+        scheduler_info = query(experiment_scheduler(exp_dir), [submitted[n].get("job_id", "") for n in submitted])
+        for name in names:
+            row = submitted.get(name, {})
+            kind = row.get("kind") or ("prepare" if name.startswith("prep_") else "experiment" if name.startswith("e_") else "sample")
+            job = JobStatus(experiment=exp, name=name, kind=kind, job_id=row.get("job_id", ""), script=row.get("script", ""))
+            if row.get("submitted", "").isdigit():
+                job.submitted = int(row["submitted"])
+            if row:
+                job.state = PENDING
+            elif submitting:
+                job.state, job.scheduler_state = PENDING, "waiting for master.sh"
+            status = read_status_file(exp_dir, name)
+            sched = scheduler_info.get(job.job_id) if scheduler_info else None
+            if sched:
+                job.scheduler_state = sched[1]
+            if status:
+                job.step = "" if status["step"] == "-" else status["step"]
+                job.started, job.updated, job.exit_code = status["started"], status["updated"], status["exit_code"]
+                if status["state"] == "DONE":
+                    job.state = DONE
+                elif status["state"] == "FAILED":
+                    job.state = FAILED
+                else:
+                    job.state = RUNNING
+                    # The job said it is running but the scheduler has finished with it:
+                    # it was killed before the EXIT trap could run (time/memory limit, scancel ...).
+                    if scheduler_info is not None and (sched is None or sched[0] in (DONE, FAILED, KILLED)):
+                        job.state = KILLED
+            elif sched:
+                job.state = sched[0]
+            elif row and scheduler_info is not None:
+                job.state = UNKNOWN  # submitted, never started, unknown to the scheduler
+            job.stdout = str(find_log(exp_dir, "stdout", name, job.job_id) or "")
+            stderr = find_log(exp_dir, "stderr", name, job.job_id)
+            job.stderr = str(stderr or "")
+            job.error_count, job.errors = scanner.scan(stderr)
+            job.steps = read_steps_file(exp_dir, name)
+            statuses.append(job)
+    return statuses
+
+
+# ------------------------------------------------------------- display
+_COLORS = {FAILED: "31", KILLED: "31", RUNNING: "36", PENDING: "33", DONE: "32", UNKNOWN: "35", NOT_SUBMITTED: "2"}
+
+
+def _fmt_duration(seconds: Optional[float]) -> str:
+    if seconds is None:
+        return "-"
+    seconds = int(seconds)
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def _color(text: str, state: str, enabled: bool) -> str:
+    return f"\033[{_COLORS.get(state, '0')}m{text}\033[0m" if enabled else text
+
+
+def summary(statuses: list) -> dict:
+    counts = {}
+    for job in statuses:
+        counts[job.state] = counts.get(job.state, 0) + 1
+    return {state: counts[state] for state in STATE_ORDER if state in counts}
+
+
+def render_table(statuses: list, color: bool = False, width: int = 120) -> str:
+    out = []
+    by_exp: dict = {}
+    for job in statuses:
+        by_exp.setdefault(job.experiment, []).append(job)
+    for exp, jobs in by_exp.items():
+        counts = ", ".join(f"{n} {s.lower()}" for s, n in summary(jobs).items())
+        out.append(f"== {exp}: {len(jobs)} job(s) - {counts}")
+        name_w = max([len(j.name) for j in jobs] + [3])
+        step_w = max([len(j.step) for j in jobs] + [4])
+        head = f"{'JOB':<{name_w}}  {'ID':>9}  {'STATE':<13}  {'STEP':<{step_w}}  {'ELAPSED':>8}  {'ERR':>4}  LAST ERROR"
+        out.append(head)
+        for job in jobs:
+            state = job.state
+            if job.state in (FAILED, KILLED):
+                extra = f" rc={job.exit_code}" if job.exit_code is not None else f" {job.scheduler_state}" if job.scheduler_state else ""
+                state = (job.state + extra)[:13]
+            prefix = (f"{job.name:<{name_w}}  {job.job_id or '-':>9}  {state:<13}  {job.step or '-':<{step_w}}  "
+                      f"{_fmt_duration(job.elapsed):>8}  {job.error_count or '':>4}  ")
+            last = job.last_error[: max(10, width - len(prefix))]
+            line = prefix + last
+            out.append(_color(line, job.state, color))
+        out.append("")
+    return "\n".join(out)
+
+
+def render_detail(job: JobStatus, tail_lines: int = 20) -> str:
+    out = [f"### {job.experiment} / {job.name}",
+           f"state      : {job.state}" + (f" (exit code {job.exit_code})" if job.exit_code not in (None, 0) else "")
+           + (f"  [scheduler: {job.scheduler_state}]" if job.scheduler_state else ""),
+           f"job id     : {job.job_id or '-'}",
+           f"script     : {job.script or '-'}",
+           f"stdout     : {job.stdout or '-'}",
+           f"stderr     : {job.stderr or '-'}"]
+    if job.submitted:
+        out.append(f"submitted  : {_dt.datetime.fromtimestamp(job.submitted):%Y-%m-%d %H:%M:%S}")
+    if job.steps:
+        out.append("steps      :")
+        ends = [t for _, t in job.steps[1:]] + [job.updated if job.state in FINAL_STATES else None]
+        for (step, start), end in zip(job.steps, ends):
+            took = _fmt_duration((end or time.time()) - start)
+            mark = "  <-- failed here" if job.state in (FAILED, KILLED) and step == job.step else ""
+            out.append(f"   {step:<20} {took:>8}{mark}")
+    if job.errors:
+        out.append(f"error lines in stderr ({job.error_count}, last {len(job.errors)} shown):")
+        out += [f"   {e.line:>6}: {e.text}" for e in job.errors]
+    lines = tail(Path(job.stderr)) if job.stderr else []
+    if lines:
+        out.append(f"last {min(tail_lines, len(lines))} line(s) of stderr:")
+        out += ["   " + l for l in lines[-tail_lines:]]
+    return "\n".join(out) + "\n"
+
+
+# ------------------------------------------------------------------ run
+def monitor(
+    workspace: Workspace,
+    experiments: Optional[list] = None,
+    watch: Optional[float] = None,
+    job: Optional[str] = None,
+    errors_only: bool = False,
+    as_json: bool = False,
+    color: Optional[bool] = None,
+    tail_lines: int = 20,
+    extra_patterns: Optional[list] = None,
+    extra_ignore: Optional[list] = None,
+    stream=None,
+    query: Callable = query_scheduler,
+) -> int:
+    """Print the status of the jobs; with ``watch`` refresh until all jobs are finished.
+
+    Returns 1 if any job failed or was killed, else 0.
+    """
+    stream = stream or sys.stdout
+    experiments = experiments or default_experiments(workspace)
+    if not experiments:
+        print("No submitted experiments found. Build and run master.sh first.", file=stream)
+        return 1
+    missing = [e for e in experiments if not workspace.experiment_dir(e).is_dir()]
+    if missing:
+        print(f"Unknown experiment(s): {', '.join(missing)}", file=stream)
+        return 1
+    if color is None:
+        color = hasattr(stream, "isatty") and stream.isatty() and os.environ.get("NO_COLOR") is None
+    scanner = ErrorScanner(DEFAULT_ERROR_PATTERNS + tuple(extra_patterns or ()),
+                           DEFAULT_IGNORE_PATTERNS + tuple(extra_ignore or ()))
+
+    while True:
+        statuses = collect(workspace, experiments, scanner, query)
+        if job:
+            statuses = [s for s in statuses if s.name == job or s.job_id == job]
+            if not statuses:
+                print(f"No job named '{job}'", file=stream)
+                return 1
+        if errors_only:
+            statuses = [s for s in statuses if s.state in (FAILED, KILLED) or s.error_count]
+        if as_json:
+            payload = [dict(asdict(s), elapsed=s.elapsed) for s in statuses]
+            text = json.dumps(payload, indent=2, default=str)
+        elif job or errors_only:
+            text = "\n".join(render_detail(s, tail_lines) for s in statuses) or "No failed jobs and no errors in stderr.\n"
+        else:
+            width = shutil.get_terminal_size((120, 40)).columns
+            text = render_table(statuses, color, width)
+        if watch and not as_json:
+            stamp = _dt.datetime.now().strftime("%H:%M:%S")
+            stream.write("\033[H\033[J" if color else "")
+            stream.write(f"pipemaker monitor - {stamp} - refreshing every {watch:g}s (Ctrl-C to quit)\n\n{text}\n")
+        else:
+            stream.write(text + ("\n" if not text.endswith("\n") else ""))
+        stream.flush()
+        all_final = all(s.state in FINAL_STATES for s in statuses)
+        if not watch or all_final:
+            if watch and all_final:
+                stream.write("All jobs have finished.\n")
+            break
+        try:
+            time.sleep(watch)
+        except KeyboardInterrupt:
+            break
+    failed = [s for s in statuses if s.state in (FAILED, KILLED)]
+    if failed and not (job or errors_only or as_json):
+        stream.write(f"{len(failed)} job(s) failed - details: pipemaker monitor --errors\n")
+    return 1 if failed else 0

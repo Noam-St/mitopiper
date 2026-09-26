@@ -5,6 +5,7 @@
 The single `maker.py` script was refactored into the installable `pipemaker` package.
 
 ### Added
+- `pipemaker monitor` / `python monitor.py`: a live view (`--watch`) of submitted jobs with state, current step, elapsed time and error lines from each job's stderr. `--errors` and `--job` show the failed step and its errors, `--json` gives machine readable output. It detects jobs killed by the scheduler (time/memory limits) through `sacct`/`qstat`/`bjobs`. Job scripts now report their progress to `status/<job>.status`, and `master.sh` records job ids in `jobs.tsv`.
 - A step can produce several output files. `output_ext` accepts named outputs (`{"bam": ..., "log": ...}` or `bam=.bam;log=.log`), referenced as `output_<step>:<name>`, `output_<step>:all`, or `outputs_<step>:<name>` in experiment-level steps. The default STAR step exposes its BAM, log and splice-junction outputs.
 - Project/study/sample accessions (e.g. `PRJEB12345`, `PRJNA67890`, `SRP012345`) can be given instead of a metadata file. The run table is fetched from the ENA Portal API (`build`, the interactive prompt, and `fetch-metadata`).
 - `pipemaker` command with the sub-commands `build`, `presets`, `refs`, `make-tsv`, `cleanup` and `init`, for scripted, non-interactive builds. The interactive menus are still the default.
@@ -23,7 +24,8 @@ The single `maker.py` script was refactored into the installable `pipemaker` pac
 - Test suite and CI.
 
 ### Changed
-- Scripts are written to `output/<exp>/scripts/*.sh`. The submit script is `master.sh`.
+- Scripts are written to `output/<exp>/scripts/<job name>.sh` (`prep_<exp>.sh`, `s_<sample>_<i>.sh`, `e_<exp>.sh`). The submit script is `master.sh`.
+- With the `local` scheduler, a failing job no longer stops the remaining jobs.
 - The user's metadata file is copied into the experiment, not moved and rewritten.
 - Row selections such as `1-4` are inclusive.
 - Jobs stop at the first failing command (`set -eo pipefail`, configurable).
