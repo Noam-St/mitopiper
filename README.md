@@ -76,6 +76,7 @@ scheduler → metadata → preset → configuration → sample selection → ste
 | `pipemaker refs list \| add \| use \| remove \| fetch-mt` | Manage reference genomes |
 | `pipemaker make-tsv FOLDER --org NAME` | Build a metadata table for local FASTQ files |
 | `pipemaker monitor [EXP…]` / `python monitor.py` | Follow submitted jobs and their errors (see *Monitoring*) |
+| `pipemaker rerun [options]` / `python monitor.py --rerun` | Resubmit failed jobs, resuming at the failed step (see *Rerunning failed samples*) |
 | `pipemaker cleanup [FOLDERS…]` | Remove logs and generated scripts |
 
 Global options: `-w/--workdir DIR` (workspace, default: current directory) and `-v` (more logging).
@@ -194,9 +195,63 @@ How it knows:
   finished with exit code 0, so warnings aren't lost. Add your own patterns with `--pattern REGEX`,
   and silence noisy lines with `--ignore REGEX`.
 
+When jobs fail, the monitor prints a diagnosis per job and the shortcuts to fix them. `--errors`
+and `--job` add a full **suggested fix** with ready-to-run commands.
+
 The exit code is 1 when a job failed, so `pipemaker monitor` can be used in scripts. Status
 tracking needs a bash, zsh or ksh `environment` (the default). With other shells, only the
 scheduler state and the stderr scan are available.
+
+## Rerunning failed samples
+
+```
+2 job(s) failed:
+  s_SAMEA2_1: 'fastqc' is not installed or not on the PATH of the compute nodes  ->  pipemaker rerun --free-form 'module load fastqc'
+  s_SAMEA3_2: The job ran out of memory in step 'bwa-align'  ->  pipemaker rerun --memory 60G
+
+Shortcuts:
+  python monitor.py --rerun        rerun failed jobs from the failed step, applying the automatic fixes
+  pipemaker rerun --memory 60G --dry-run   preview; drop --dry-run to write rerun.sh
+```
+
+`pipemaker rerun` regenerates the scripts of only the failed, killed or skipped jobs. Each one
+**resumes at the step that failed**: steps that already succeeded (for example the download) are not
+repeated. It writes `rerun.sh`, which submits them with the same dependencies as `master.sh`:
+
+* a failed reference job goes first, and its dependent samples are rerun with it;
+* the experiment-level job waits for the rerun samples;
+* jobs still stuck in the queue behind a failed dependency are cancelled first.
+
+The monitor then follows the new jobs as usual.
+
+| Option | Effect |
+| --- | --- |
+| `--submit` | run `rerun.sh` right away |
+| `--dry-run` | only show what would be rerun, and why |
+| `--auto-fix` | apply each job's automatic fixes: double the memory after an out-of-memory kill, double the time after a time-out, re-download or recreate a corrupt/empty input (`--from <step> --clean`) |
+| `--memory 64G`, `--walltime 3-00:00:00`, `--threads N`, `--queue Q` | resources for the rerun only |
+| `--free-form 'module load samtools'` | extra setup line for the rerun only (repeatable) |
+| `--from STEP` / `--from-start` | resume elsewhere than the failed step |
+| `--clean` | delete the outputs of the resume step first |
+| `-j JOB` | only these jobs (repeatable) |
+| `-p PRESET` | use a preset you fixed instead of the workflow recorded at build time |
+| `-s local` | e.g. rerun on the login node |
+
+`python monitor.py --rerun` is the one-word shortcut for `pipemaker rerun --auto-fix --submit`.
+Fixes that need your input (a missing tool, a wrong reference path) are only suggested, never
+applied automatically. To make a fix permanent, put it in your preset (e.g. the `free_form`
+general setting).
+
+The diagnosis recognises, among others:
+* the scheduler killing the job (out of memory, time limit, cancelled, SGE `Eqw`);
+* missing tools (`command not found`, missing Python modules, cutadapt for trim_galore) and permission problems;
+* missing reference files or indices (BWA, `.fai`, STAR genome);
+* inputs that an earlier step should have produced, and corrupt or truncated FASTQ/BAM files
+  (including failed MD5 checks);
+* download failures (404 at ENA, no internet on compute nodes);
+* a full disk or quota, segmentation faults, and htseq-count annotation mismatches.
+
+Every rerun is logged in `output/<exp>/manifests/rerun_<time>.json`.
 
 ## Workflows (presets)
 

@@ -113,6 +113,28 @@ def build_parser() -> argparse.ArgumentParser:
     mo.add_argument("--ignore", action="append", help="regular expression for stderr lines that are not errors (repeatable)")
     mo.add_argument("--json", action="store_true", help="machine readable output")
     mo.add_argument("--no-color", action="store_true")
+    mo.add_argument("--rerun", action="store_true",
+                    help="shortcut: resubmit failed jobs from their failed step with the automatic fixes (= rerun --auto-fix --submit)")
+
+    rr = sub.add_parser("rerun", help="resubmit failed jobs, resuming at the step that failed")
+    rr.add_argument("experiments", nargs="*", help="experiments (default: those of the last build)")
+    rr.add_argument("-j", "--job", action="append", help="only this job (name or id; repeatable), whatever its state")
+    rr.add_argument("--from", dest="from_step", metavar="STEP", help="resume at STEP instead of the step that failed")
+    rr.add_argument("--from-start", action="store_true", help="run the whole job again")
+    rr.add_argument("--clean", action="store_true", help="delete the outputs of the step the job resumes at first")
+    rr.add_argument("--auto-fix", action="store_true",
+                    help="apply the suggested automatic fixes per job (more memory/time, clean corrupt input, earlier resume point)")
+    rr.add_argument("--memory", help="memory per job for the rerun, e.g. 64G")
+    rr.add_argument("--walltime", help="time limit for the rerun, e.g. 3-00:00:00")
+    rr.add_argument("--threads", type=int, help="threads per job for the rerun")
+    rr.add_argument("--queue", help="queue/partition for the rerun")
+    rr.add_argument("--free-form", action="append", default=[], metavar="LINE",
+                    help="extra line for the rerun jobs, e.g. 'module load samtools' (repeatable)")
+    rr.add_argument("-p", "--preset", help="use this (fixed) preset instead of the workflow recorded at build time")
+    rr.add_argument("-s", "--scheduler", help="submit with another scheduler (e.g. local)")
+    rr.add_argument("--include-pending", action="store_true", help="also resubmit jobs that are still pending (they are cancelled first)")
+    rr.add_argument("--dry-run", action="store_true", help="only show what would be rerun")
+    rr.add_argument("--submit", action="store_true", help="run rerun.sh right away")
 
     m = sub.add_parser("make-tsv", help="create a metadata table for local FASTQ files")
     m.add_argument("folder", help="folder containing the FASTQ files")
@@ -247,8 +269,25 @@ def cmd_fetch_metadata(ws: Workspace, args) -> int:
     return 0
 
 
+def cmd_rerun(ws: Workspace, args) -> int:
+    from .rerun import RerunOptions, rerun
+
+    options = RerunOptions(
+        jobs=args.job, from_step=args.from_step, from_start=args.from_start, clean=args.clean,
+        include_pending=args.include_pending, auto_fix=args.auto_fix, preset=args.preset,
+        scheduler=normalise(args.scheduler) if args.scheduler else None, memory=args.memory,
+        walltime=args.walltime, threads=args.threads, queue=args.queue, free_form=args.free_form,
+    )
+    return rerun(ws, args.experiments, options, submit=args.submit, dry_run=args.dry_run)
+
+
 def cmd_monitor(ws: Workspace, args) -> int:
     from .monitor import monitor
+
+    if args.rerun:
+        from .rerun import RerunOptions, rerun
+
+        return rerun(ws, args.experiments, RerunOptions(auto_fix=True), submit=True)
 
     return monitor(
         ws, args.experiments, watch=args.watch, job=args.job, errors_only=args.errors, as_json=args.json,
@@ -278,6 +317,7 @@ def main(argv: Optional[list] = None) -> int:
         "make-tsv": cmd_make_tsv,
         "fetch-metadata": cmd_fetch_metadata,
         "monitor": cmd_monitor,
+        "rerun": cmd_rerun,
     }
     try:
         if args.command in (None, "interactive"):

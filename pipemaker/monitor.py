@@ -33,8 +33,9 @@ from .config import Workspace
 NOT_SUBMITTED, PENDING, RUNNING, DONE, FAILED, KILLED, UNKNOWN = (
     "NOT SUBMITTED", "PENDING", "RUNNING", "DONE", "FAILED", "KILLED", "UNKNOWN",
 )
-FINAL_STATES = (NOT_SUBMITTED, DONE, FAILED, KILLED)
-STATE_ORDER = (FAILED, KILLED, RUNNING, PENDING, UNKNOWN, DONE, NOT_SUBMITTED)
+SKIPPED = "SKIPPED"  # not run because a job it depends on failed (local scheduler)
+FINAL_STATES = (NOT_SUBMITTED, DONE, FAILED, KILLED, SKIPPED)
+STATE_ORDER = (FAILED, KILLED, SKIPPED, RUNNING, PENDING, UNKNOWN, DONE, NOT_SUBMITTED)
 
 DEFAULT_ERROR_PATTERNS = (
     r"\berrors?\b", r"\bexceptions?\b", r"traceback", r"\bfatal\b", r"segmentation fault", r"core dumped",
@@ -342,6 +343,8 @@ def collect(workspace: Workspace, experiments: list, scanner: ErrorScanner,
                     job.state = DONE
                 elif status["state"] == "FAILED":
                     job.state = FAILED
+                elif status["state"] == "SKIPPED":
+                    job.state, job.scheduler_state, job.step = SKIPPED, f"skipped: {job.step} did not finish", ""
                 else:
                     job.state = RUNNING
                     # The job said it is running but the scheduler has finished with it:
@@ -362,7 +365,7 @@ def collect(workspace: Workspace, experiments: list, scanner: ErrorScanner,
 
 
 # ------------------------------------------------------------- display
-_COLORS = {FAILED: "31", KILLED: "31", RUNNING: "36", PENDING: "33", DONE: "32", UNKNOWN: "35", NOT_SUBMITTED: "2"}
+_COLORS = {SKIPPED: "33", FAILED: "31", KILLED: "31", RUNNING: "36", PENDING: "33", DONE: "32", UNKNOWN: "35", NOT_SUBMITTED: "2"}
 
 
 def _fmt_duration(seconds: Optional[float]) -> str:
@@ -404,14 +407,23 @@ def render_table(statuses: list, color: bool = False, width: int = 120) -> str:
                 state = (job.state + extra)[:13]
             prefix = (f"{job.name:<{name_w}}  {job.job_id or '-':>9}  {state:<13}  {job.step or '-':<{step_w}}  "
                       f"{_fmt_duration(job.elapsed):>8}  {job.error_count or '':>4}  ")
-            last = job.last_error[: max(10, width - len(prefix))]
+            last = (job.last_error or (job.scheduler_state if job.state == SKIPPED else ""))[: max(10, width - len(prefix))]
             line = prefix + last
             out.append(_color(line, job.state, color))
         out.append("")
     return "\n".join(out)
 
 
-def render_detail(job: JobStatus, tail_lines: int = 20) -> str:
+def render_suggestions(suggestions: list) -> list:
+    out = []
+    for i, sug in enumerate(suggestions, 1):
+        out.append(f"   {i}. {sug.cause}")
+        out += [f"      {line}" for line in sug.advice]
+        out += [f"      $ {cmd}" for cmd in sug.commands]
+    return out
+
+
+def render_detail(job: JobStatus, tail_lines: int = 20, suggestions: Optional[list] = None) -> str:
     out = [f"### {job.experiment} / {job.name}",
            f"state      : {job.state}" + (f" (exit code {job.exit_code})" if job.exit_code not in (None, 0) else "")
            + (f"  [scheduler: {job.scheduler_state}]" if job.scheduler_state else ""),
@@ -435,6 +447,45 @@ def render_detail(job: JobStatus, tail_lines: int = 20) -> str:
     if lines:
         out.append(f"last {min(tail_lines, len(lines))} line(s) of stderr:")
         out += ["   " + l for l in lines[-tail_lines:]]
+    if suggestions:
+        out.append("suggested fix:")
+        out += render_suggestions(suggestions)
+    return "\n".join(out) + "\n"
+
+
+def _contexts(workspace: Workspace, experiments: list) -> dict:
+    from .diagnose import Context
+
+    contexts = {}
+    for exp in experiments:
+        exp_dir = workspace.experiment_dir(exp)
+        try:
+            manifest = json.loads((exp_dir / "pipemaker_manifest.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            manifest = None
+        contexts[exp] = Context.from_manifest(manifest, str(exp_dir))
+    return contexts
+
+
+def rerun_hint(failed: list, contexts: dict) -> str:
+    """Footer under the table: one-line cause per failed job and the rerun shortcuts."""
+    from .diagnose import diagnose, merged_rerun_options
+
+    out = [f"{len(failed)} job(s) failed:"]
+    auto = {}
+    for job in failed:
+        suggestions = diagnose(job, contexts.get(job.experiment))
+        cause = suggestions[0].cause if suggestions else "unknown cause"
+        out.append(f"  {job.name}: {cause}" + (f"  ->  {suggestions[0].commands[0]}" if suggestions and suggestions[0].commands else ""))
+        for key, value in merged_rerun_options(suggestions).items():
+            if key in ("memory", "walltime"):
+                auto[key] = value
+    out.append("")
+    out.append("Shortcuts:")
+    out.append("  python monitor.py --rerun        rerun failed jobs from the failed step, applying the automatic fixes")
+    flags = " ".join(f"--{k} {v}" for k, v in auto.items())
+    out.append(f"  pipemaker rerun {flags + ' ' if flags else ''}--dry-run   preview; drop --dry-run to write rerun.sh")
+    out.append("  python monitor.py --errors       full diagnosis of every failed job")
     return "\n".join(out) + "\n"
 
 
@@ -468,6 +519,7 @@ def monitor(
         return 1
     if color is None:
         color = hasattr(stream, "isatty") and stream.isatty() and os.environ.get("NO_COLOR") is None
+    contexts = _contexts(workspace, experiments)
     scanner = ErrorScanner(DEFAULT_ERROR_PATTERNS + tuple(extra_patterns or ()),
                            DEFAULT_IGNORE_PATTERNS + tuple(extra_ignore or ()))
 
@@ -479,12 +531,16 @@ def monitor(
                 print(f"No job named '{job}'", file=stream)
                 return 1
         if errors_only:
-            statuses = [s for s in statuses if s.state in (FAILED, KILLED) or s.error_count]
+            statuses = [s for s in statuses if s.state in (FAILED, KILLED, SKIPPED) or s.error_count]
         if as_json:
             payload = [dict(asdict(s), elapsed=s.elapsed) for s in statuses]
             text = json.dumps(payload, indent=2, default=str)
         elif job or errors_only:
-            text = "\n".join(render_detail(s, tail_lines) for s in statuses) or "No failed jobs and no errors in stderr.\n"
+            from .diagnose import diagnose
+
+            text = "\n".join(
+                render_detail(s, tail_lines, diagnose(s, contexts.get(s.experiment)) if s.state in (FAILED, KILLED, UNKNOWN, SKIPPED) else None)
+                for s in statuses) or "No failed jobs and no errors in stderr.\n"
         else:
             width = shutil.get_terminal_size((120, 40)).columns
             text = render_table(statuses, color, width)
@@ -506,5 +562,5 @@ def monitor(
             break
     failed = [s for s in statuses if s.state in (FAILED, KILLED)]
     if failed and not (job or errors_only or as_json):
-        stream.write(f"{len(failed)} job(s) failed - details: pipemaker monitor --errors\n")
+        stream.write(rerun_hint(failed, contexts))
     return 1 if failed else 0

@@ -111,6 +111,16 @@ _SUBMIT_FUNCTIONS = {
     local script=$1; shift
     local name; name=$(basename "$script" .sh)
     local logdir; logdir=$(dirname "$(dirname "$script")")
+    # Same rule as afterok on a cluster: only run when every dependency finished successfully.
+    local dep state
+    for dep in "$@"; do
+        state=$(cut -d' ' -f1 "$logdir/status/$dep.status" 2>/dev/null || true)
+        if [ "$state" != DONE ]; then
+            echo "[pipemaker] skipping $script: $dep did not finish successfully" >&2
+            mkdir -p "$logdir/status"; echo "SKIPPED $dep $(date +%s) $(date +%s) -" > "$logdir/status/$name.status"
+            echo "$name"; return 0
+        fi
+    done
     echo "[pipemaker] running $script" >&2
     # A failing job must not stop the other (independent) jobs from running.
     SHELL_BIN "$script" > "$logdir/stdout/$name.out" 2> "$logdir/stderr/$name.err" \

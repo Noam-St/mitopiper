@@ -5,6 +5,9 @@
 The single `maker.py` script was refactored into the installable `pipemaker` package.
 
 ### Added
+- `pipemaker rerun` / `python monitor.py --rerun`: resubmit failed, killed or skipped jobs, resuming at the step that failed. It supports per-rerun resource overrides, `--free-form` setup lines, `--from`/`--from-start`/`--clean`, and `--auto-fix`. Stuck dependants are cancelled, and reruns are logged in the manifests.
+- Failure diagnosis: the monitor explains each failed job (out of memory, time limit, missing tool/reference/index/input, corrupt files, download and disk problems, …) and suggests fixes with ready-to-run commands.
+- The `local` scheduler honours dependencies. Jobs whose dependency failed are marked `SKIPPED`.
 - `pipemaker monitor` / `python monitor.py`: a live view (`--watch`) of submitted jobs with state, current step, elapsed time and error lines from each job's stderr. `--errors` and `--job` show the failed step and its errors, `--json` gives machine readable output. It detects jobs killed by the scheduler (time/memory limits) through `sacct`/`qstat`/`bjobs`. Job scripts now report their progress to `status/<job>.status`, and `master.sh` records job ids in `jobs.tsv`.
 - A step can produce several output files. `output_ext` accepts named outputs (`{"bam": ..., "log": ...}` or `bam=.bam;log=.log`), referenced as `output_<step>:<name>`, `output_<step>:all`, or `outputs_<step>:<name>` in experiment-level steps. The default STAR step exposes its BAM, log and splice-junction outputs.
 - Project/study/sample accessions (e.g. `PRJEB12345`, `PRJNA67890`, `SRP012345`) can be given instead of a metadata file. The run table is fetched from the ENA Portal API (`build`, the interactive prompt, and `fetch-metadata`).
