@@ -1,0 +1,4 @@
+Run,ReleaseDate,spots,LibraryStrategy,LibraryLayout,SRAStudy,BioProject,Sample,BioSample,SampleName,ScientificName,download_path
+SRR1234567,2020-01-01,1000,RNA-Seq,PAIRED,SRP1,PRJNA1,SRS1,SAMN01,liver_1,Mus musculus,https://sra-downloadb.be-md.ncbi.nlm.nih.gov/x
+SRR12345678,2020-01-01,1000,RNA-Seq,SINGLE,SRP1,PRJNA1,SRS2,SAMN02,liver_2,Mus musculus,https://x
+SRR123456,2020-01-01,1000,RNA-Seq,SINGLE,SRP1,PRJNA1,SRS3,SAMN03,liver_3,Mus musculus,https://x

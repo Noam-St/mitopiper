@@ -1,6 +1,19 @@
-*
-!.gitignore
-!README.md
-!*.py
-!LICENSE
-!final.csv
+# Workspace data created at run time
+/config/
+/output/
+/references/
+/src/mtDNA_ref/
+/src/genbank/
+/master.sh
+/master.csh
+*.tsv
+!tests/data/*.tsv
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/

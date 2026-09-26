@@ -1,0 +1,2 @@
+sample_accession	run_accession	fastq_ftp	study_accession	scientific_name
+SAMN9	['SRR1', 'SRR2']	['ftp/SRR1_1.fastq.gz;ftp/SRR1_2.fastq.gz', 'ftp/SRR2_1.fastq.gz;ftp/SRR2_2.fastq.gz']	PRJ	Homo_sapiens

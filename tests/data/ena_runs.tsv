@@ -1,0 +1,5 @@
+study_accession	sample_accession	run_accession	tax_id	scientific_name	fastq_ftp	fastq_md5	sample_title	library_strategy
+PRJEB1	SAMEA1	ERR100	7955	Danio rerio	ftp.sra.ebi.ac.uk/vol1/fastq/ERR100/ERR100_1.fastq.gz;ftp.sra.ebi.ac.uk/vol1/fastq/ERR100/ERR100_2.fastq.gz	aaa;bbb	fish liver	RNA-Seq
+PRJEB1	SAMEA1	ERR101	7955	Danio rerio	ftp.sra.ebi.ac.uk/vol1/fastq/ERR101/ERR101.fastq.gz;ftp.sra.ebi.ac.uk/vol1/fastq/ERR101/ERR101_1.fastq.gz;ftp.sra.ebi.ac.uk/vol1/fastq/ERR101/ERR101_2.fastq.gz	x;ccc;ddd	fish liver	RNA-Seq
+PRJEB1	SAMEA2	ERR102	7955	Danio rerio			fish gill	RNA-Seq
+PRJEB1	SAMEA3	ERR103	9606	Homo sapiens	ftp.sra.ebi.ac.uk/vol1/fastq/ERR103/ERR103.fastq.gz	eee	hela	RNA-Seq

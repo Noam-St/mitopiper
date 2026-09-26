@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "pipemaker: HPC job-script generation for sequencing pipelines from ENA/SRA metadata"
+type: software
+authors:
+  - family-names: Shtolz
+    given-names: Noam
+    email: shtolz@post.bgu.ac.il
+    affiliation: "Ben-Gurion University of the Negev"
+version: 2.0.0.dev0
+license: Apache-2.0
+repository-code: "https://github.com/Noam-St/Semi-automatic_csh_files_for_qsub"
+keywords:
+  - bioinformatics
+  - RNA-seq
+  - HPC
+  - mitochondrial genome
