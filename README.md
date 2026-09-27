@@ -57,9 +57,19 @@ Install pipemaker on the cluster's **login node**, where jobs are submitted from
 ```bash
 git clone https://github.com/Noam-St/Semi-automatic_csh_files_for_qsub.git
 cd Semi-automatic_csh_files_for_qsub
-pip install --user .            # or, in a virtual/conda environment: pip install .
+pip install .                  # inside an active conda/virtual environment
 pipemaker --version
 ```
+
+Without a conda/virtual environment, use `pip install --user .` instead. That puts the `pipemaker`
+command in `~/.local/bin`. If `pipemaker` is then "command not found", add that folder to your
+`PATH` once:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
+```
+
+`python -m pipemaker` always works as a drop-in replacement for `pipemaker`, whatever your `PATH`.
 
 <details>
 <summary>Running from the cloned folder without installing</summary>
@@ -588,6 +598,7 @@ policy.
 
 | Problem | What to do |
 | --- | --- |
+| `pipemaker: command not found` right after installing | pip put it in a folder that isn't on your `PATH`, usually `~/.local/bin` after `pip install --user`. Add that folder to `PATH` (see [Installation](#installation)), install inside a conda environment, or use `python -m pipemaker`. |
 | `Submitting failed … sbatch: command not found` | Run pipemaker on the cluster's login node, and pick the scheduler your cluster uses. |
 | Jobs fail with `command not found` | Add `module load …` / `conda activate …` to the `free_form` general setting (or use `pipemaker rerun --free-form …` once). |
 | Downloads fail on compute nodes | Many clusters have no internet on compute nodes. Download on the login node first: `pipemaker build EXP --steps wget -s local && bash master.sh`, then build or rerun the remaining steps. |
