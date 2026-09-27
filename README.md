@@ -372,7 +372,7 @@ the command line and use `pipemaker monitor -i` to handle failures.
 | `pipemaker build META… [options]` | Generate job scripts; `META` is a table, a previous experiment, or an accession |
 | `pipemaker fetch-metadata ACCESSION` | Only download the ENA run table of an accession |
 | `pipemaker presets list \| show NAME \| save NAME` | Inspect and save workflow presets |
-| `pipemaker refs list \| add \| use \| remove \| fetch-mt` | Manage reference genomes |
+| `pipemaker refs list \| add \| use \| remove \| fetch-mt \| fetch-genome` | Manage reference genomes (mtDNA or whole nuclear genome from NCBI) |
 | `pipemaker make-tsv FOLDER --org NAME` | Build a metadata table for local FASTQ files |
 | `pipemaker monitor [EXP…] [options]` | Follow submitted jobs and their errors |
 | `pipemaker rerun [options]` | Resubmit failed jobs, resuming at the failed step |
@@ -621,6 +621,29 @@ pipemaker refs use "Mus musculus" GRCm39                     # switch the active
 pipemaker build exp.tsv --reference mt                       # or override for one build
 pipemaker refs list
 ```
+
+### Downloading the nuclear genome (not recommended)
+
+```bash
+pipemaker refs fetch-genome "Danio rerio"                  # new reference set "genome"
+pipemaker refs fetch-genome "Danio rerio" --nuclear-of mt  # or: the nuclear FASTA (_fasta_nuc) of the "mt" set
+pipemaker refs fetch-genome "Homo sapiens" --accession GCF_000001405.40 --yes
+```
+
+pipemaker looks the organism up in the **NCBI Genome** database (NCBI Datasets API). It picks the
+RefSeq *reference genome* if there is one, otherwise the best RefSeq and then GenBank assembly. It
+then prints a warning with the genome size and asks for confirmation (or `--yes`). Whole genomes are
+large: gigabytes to download, hours to index, and a lot of memory for STAR. If your cluster has a
+shared, pre-indexed copy, register it with `refs add` instead. If NCBI has no assembly for the
+organism, you get an error, and the interactive mode offers to enter a path by hand.
+
+Nothing large is downloaded when you run the command. The first build that uses the reference
+downloads the FASTA and GFF in its reference job (`prep_<exp>.sh`), checks them against NCBI's
+`md5checksums.txt`, unpacks them into `references/genome/<organism>/` and indexes them, all before
+any sample job starts. Later builds reuse the files. In the interactive mode, the same download is
+offered when an organism has no reference, and under *configuration → manage references*.
+
+### Where references come from
 
 `fetch-mt` looks for the accession in `references/mt_accessions.csv` (or the legacy
 `src/final.csv`; columns `organism,RefSeq`). If none is listed, it searches NCBI for the organism's

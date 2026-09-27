@@ -103,6 +103,14 @@ def build_parser() -> argparse.ArgumentParser:
     rf.add_argument("--accession", help="RefSeq accession (default: search NCBI)")
     rf.add_argument("--name", default="mt")
     rf.add_argument("--no-activate", action="store_true")
+    rg = rsub.add_parser("fetch-genome", help="plan the download of the nuclear genome from NCBI Genome (large!)")
+    rg.add_argument("organism")
+    rg.add_argument("--accession", help="assembly accession, e.g. GCF_000002035.6 (default: the reference genome)")
+    rg.add_argument("--name", default="genome", help="name of the new reference set (default: %(default)s)")
+    rg.add_argument("--nuclear-of", metavar="SET",
+                    help="instead of a new set, use the genome as the nuclear FASTA (_fasta_nuc) of reference set SET")
+    rg.add_argument("--no-activate", action="store_true")
+    rg.add_argument("-y", "--yes", action="store_true", help="do not ask for confirmation after the size warning")
 
     c = sub.add_parser("cleanup", help="remove temporary files (logs, scripts) from experiments")
     c.add_argument("folders", nargs="*", default=["stdout", "stderr"], help="folders to empty (default: stdout stderr)")
@@ -263,6 +271,32 @@ def cmd_refs(ws: Workspace, args) -> int:
         print(f"{args.organism} now uses reference '{args.name}'")
     elif args.action == "remove":
         registry.remove(args.organism.replace(" ", "_"), args.name)
+    elif args.action == "fetch-genome":
+        from .references import attach_nuclear, fetch_genome_reference
+
+        organism = args.organism.replace(" ", "_")
+        try:
+            ref, genome = fetch_genome_reference(ws, organism, args.accession)
+        except RefError as exc:
+            raise RefError(f"{exc}. Register an existing genome instead: "
+                           f"pipemaker refs add {organism} --fasta /path/genome.fa --gtf /path/genes.gtf") from exc
+        print(genome.warning())
+        if not args.yes:
+            if not sys.stdin.isatty():
+                raise RefError("Confirm the download with --yes")
+            if not input("Continue? (y/N) ").strip().lower().startswith("y"):
+                print("Nothing was changed.")
+                return 1
+        if args.nuclear_of:
+            base = registry.get(organism, args.nuclear_of)
+            if base is None or args.nuclear_of not in registry.names(organism):
+                raise RefError(f"{organism} has no reference set '{args.nuclear_of}'")
+            registry.add(organism, attach_nuclear(base, ref), args.nuclear_of, activate=False)
+            print(f"'{args.nuclear_of}' now has the nuclear genome {genome.accession} as _fasta_nuc")
+        else:
+            registry.add(organism, ref, args.name, activate=not args.no_activate)
+            print(f"Registered '{args.name}' = {genome.accession} ({genome.assembly_name})")
+        print(f"The files will be downloaded to {ref.refpath.rsplit('/', 1)[0]} by the reference job of the next build.")
     elif args.action == "fetch-mt":
         organism = args.organism.replace(" ", "_")
         ref = fetch_mt_reference(ws, organism, args.accession)

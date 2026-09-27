@@ -259,7 +259,8 @@ class Menus:
             print(table(rows, ["Organism", "Name (*active)", "FASTA", "GTF/GFF", "Source"]) if rows else "No references registered yet.\n")
             action = choose(
                 "References:",
-                ["add/replace a reference", "switch active reference", "download mtDNA reference from NCBI", "remove a reference"],
+                ["add/replace a reference", "switch active reference", "download mtDNA reference from NCBI", "remove a reference",
+                 "download the nuclear genome from NCBI Genome (not recommended: very large)"],
                 input_fn=self.input,
             )
             if action is None:
@@ -279,6 +280,12 @@ class Menus:
                     if ni is None:
                         continue
                     (registry.use if action == 1 else registry.remove)(orgs[oi], names[ni])
+                elif action == 4:
+                    org = ask("Organism (e.g. Homo_sapiens)", input_fn=self.input).replace(" ", "_")
+                    ref = fetch_genome_interactive(self.ws, org, self.input)
+                    if ref is not None:
+                        name = ask("Name of this reference set", "genome" if ref.source == "ncbi_genome" else "default", self.input)
+                        registry.add(org, ref, name, activate=True)
                 elif action == 2:
                     org = ask("Organism (e.g. Homo_sapiens)", input_fn=self.input).replace(" ", "_")
                     acc = ask("RefSeq accession (leave empty to search NCBI)", input_fn=self.input)
@@ -322,6 +329,28 @@ def prompt_reference_paths(input_fn: Callable = input) -> ReferenceSet:
     return ReferenceSet(refpath=fasta.strip('"'), nuc_refpath=nuc.strip('"'), gtfpath=gtf.strip('"'), chrominfopath=chrom.strip('"'))
 
 
+def fetch_genome_interactive(workspace: Workspace, organism: str, input_fn: Callable = input, client=None):
+    """Find the nuclear genome in NCBI Genome, warn about its size and confirm.
+
+    If NCBI has none (or it cannot be reached), the user can enter a path instead.
+    Returns the reference set, or ``None`` to go back.
+    """
+    from .references import fetch_genome_reference
+
+    print(f"Looking up the {organism.replace('_', ' ')} genome in the NCBI Genome database ...")
+    try:
+        ref, genome = fetch_genome_reference(workspace, organism, client=client)
+    except RefError as exc:
+        print(f"Error: {exc}")
+        if yes_no("Enter the path to a genome FASTA manually instead?", True, input_fn):
+            return prompt_reference_paths(input_fn)
+        return None
+    print("\n" + genome.warning() + "\n")
+    if not yes_no(f"Download {genome.accession} ({genome.assembly_name}) anyway?", False, input_fn):
+        return None
+    return ref
+
+
 def interactive_resolver(workspace: Workspace, input_fn: Callable = input):
     """Ask the user what to do when an organism has no reference."""
     registry = ReferenceRegistry(workspace)
@@ -334,6 +363,7 @@ def interactive_resolver(workspace: Workspace, input_fn: Callable = input):
                     "download the mitochondrial genome from NCBI automatically",
                     "enter paths to an existing reference (recommended)",
                     "skip this organism",
+                    "download the whole nuclear genome from NCBI Genome (not recommended: very large)",
                 ],
                 allow_exit=False,
                 input_fn=input_fn,
@@ -347,6 +377,12 @@ def interactive_resolver(workspace: Workspace, input_fn: Callable = input):
                     ref = prompt_reference_paths(input_fn)
                     registry.add(organism, ref, "default")
                     return ref
+                if idx == 3:
+                    ref = fetch_genome_interactive(workspace, organism, input_fn)
+                    if ref is not None:
+                        registry.add(organism, ref, "genome" if ref.source == "ncbi_genome" else "default")
+                        return ref
+                    continue
                 return None
             except RefError as exc:
                 print(f"Error: {exc}\n")

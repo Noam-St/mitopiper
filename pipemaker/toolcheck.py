@@ -34,7 +34,8 @@ IGNORED = {
     "if", "then", "else", "elif", "fi", "for", "foreach", "do", "done", "end", "endif", "while", "case", "esac",
     "[", "[[", "]", "test", "echo", "printf", "set", "unset", "setenv", "export", "exit", "cd", "true", "false",
     "source", ".", "eval", "exec", "time", "nohup", "env", "module", "conda", "mamba", "trap", "wait", "sleep",
-    "mkdir", "rm", "ln", "cat", "cp", "mv", "cut", "date", "ls", "touch", "!", "(", ")", "{", "}",
+    "mkdir", "rm", "ln", "cat", "cp", "mv", "cut", "date", "ls", "touch", "grep", "sed", "sh", "bash",
+    "!", "(", ")", "{", "}",
 }
 #: Tools that other tools call behind the scenes.
 HIDDEN_DEPENDENCIES = {"trim_galore": ["cutadapt"]}
@@ -80,6 +81,9 @@ class CheckResult:
 # ------------------------------------------------------------------ collect
 def executables(line: str) -> list:
     """Executables a generated command line runs (first word of each pipeline segment)."""
+    wrapped = re.match(r"^\s*(?:\S*/)?(?:ba)?sh -c '(.*)'\s*$", line)
+    if wrapped:  # e.g. the reference downloads: sh -c 'set -e; wget ...; md5sum -c -'
+        return executables(wrapped.group(1))
     found = []
     for segment in re.split(r"\|\||&&|\||;", line):
         try:

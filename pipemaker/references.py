@@ -36,7 +36,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -45,6 +45,8 @@ from .config import Workspace
 log = logging.getLogger(__name__)
 
 EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+DATASETS = "https://api.ncbi.nlm.nih.gov/datasets/v2"
+GENOMES_FTP = "https://ftp.ncbi.nlm.nih.gov/genomes/all"
 SVIEWER = "https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi"
 TOOL_NAME = "pipemaker"
 
@@ -61,20 +63,23 @@ class ReferenceSet:
     chrominfopath: str = ""
     source: str = "user"
     accession: str = ""
+    #: Files the reference job downloads first: local path -> {"url": ..., "md5_url": ...}.
+    downloads: dict = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict) -> "ReferenceSet":
-        known = {k: str(data.get(k, "") or "").replace('"', "") for k in cls.__dataclass_fields__}
+        known = {k: str(data.get(k, "") or "").replace('"', "") for k in cls.__dataclass_fields__ if k != "downloads"}
         known["source"] = known["source"] or "user"
-        return cls(**known)
+        downloads = data.get("downloads") or {}
+        return cls(**known, downloads=dict(downloads) if isinstance(downloads, dict) else {})
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     @property
     def needs_indexing(self) -> bool:
-        """Automatically downloaded references are indexed by pipemaker."""
-        return self.source == "ncbi_mt"
+        """References downloaded by pipemaker are downloaded (if needed) and indexed by the reference job."""
+        return self.source in ("ncbi_mt", "ncbi_genome") or bool(self.downloads)
 
 
 # -------------------------------------------------------------- registry
@@ -245,7 +250,10 @@ class NCBIClient:
         last_error = None
         for attempt in range(1, self.retries + 1):
             try:
-                request = urllib.request.Request(url, headers={"User-Agent": TOOL_NAME})
+                headers = {"User-Agent": TOOL_NAME}
+                if self.api_key and url.startswith(DATASETS):
+                    headers["api-key"] = self.api_key
+                request = urllib.request.Request(url, headers=headers)
                 with urllib.request.urlopen(request, timeout=self.timeout) as response:
                     return response.read().decode("utf-8")
             except (urllib.error.URLError, TimeoutError) as exc:
@@ -265,6 +273,27 @@ class NCBIClient:
         summary = json.loads(self.get(f"{EUTILS}/esummary.fcgi?" + self._params(db="nuccore", id=ids[0], retmode="json")))
         record = summary.get("result", {}).get(ids[0], {})
         return record.get("accessionversion") or record.get("caption") or ids[0]
+
+    def genome_reports(self, organism: str = "", accession: str = "", reference_only: bool = True) -> list:
+        """Assembly reports from the NCBI Genome database (NCBI Datasets API)."""
+        if accession:
+            url = f"{DATASETS}/genome/accession/{urllib.parse.quote(accession)}/dataset_report"
+        else:
+            query = {"page_size": 20}
+            if reference_only:
+                query["filters.reference_only"] = "true"
+            url = (f"{DATASETS}/genome/taxon/{urllib.parse.quote(organism.replace('_', ' '))}/dataset_report?"
+                   + urllib.parse.urlencode(query))
+        try:
+            text = self.get(url)
+        except RefError as exc:
+            if "404" in str(exc) or "400" in str(exc):
+                return []
+            raise
+        try:
+            return json.loads(text).get("reports", []) or []
+        except ValueError as exc:
+            raise RefError(f"Unexpected answer from NCBI Datasets: {text[:200]!r}") from exc
 
     def fetch_fasta(self, accession: str) -> str:
         return self.get(f"{EUTILS}/efetch.fcgi?" + self._params(db="nuccore", id=accession, rettype="fasta", retmode="text"))
@@ -308,6 +337,135 @@ def fetch_mt_reference(
     return ReferenceSet(refpath=str(fasta), gtfpath=str(gff), source="ncbi_mt", accession=accession)
 
 
+# ------------------------------------------------------ nuclear genomes
+@dataclass
+class GenomeInfo:
+    accession: str
+    assembly_name: str
+    organism: str = ""
+    total_length: int = 0
+    category: str = ""
+    level: str = ""
+
+    @property
+    def size_gb(self) -> float:
+        return self.total_length / 1e9
+
+    @property
+    def ftp_name(self) -> str:
+        """``<accession>_<assembly name>`` as used in NCBI's genomes/all FTP tree."""
+        return f"{self.accession}_{re.sub(r'[^A-Za-z0-9._-]', '_', self.assembly_name)}"
+
+    def urls(self) -> dict:
+        match = re.fullmatch(r"(GC[AF])_(\d{3})(\d{3})(\d{3})\.\d+", self.accession)
+        if not match:
+            raise RefError(f"'{self.accession}' is not an NCBI assembly accession (GCF_/GCA_)")
+        base = f"{GENOMES_FTP}/{match.group(1)}/{match.group(2)}/{match.group(3)}/{match.group(4)}/{self.ftp_name}"
+        return {"fasta": f"{base}/{self.ftp_name}_genomic.fna.gz", "gff": f"{base}/{self.ftp_name}_genomic.gff.gz",
+                "md5": f"{base}/md5checksums.txt"}
+
+    def warning(self) -> str:
+        size = f"{self.size_gb:.1f} Gb" if self.total_length else "an unknown size"
+        return (
+            f"NOT RECOMMENDED: {self.organism or 'this'} genome {self.accession} ({self.assembly_name}) has {size} of sequence.\n"
+            f"  * the download is large (roughly {max(self.size_gb * 0.3, 0.1):.1f} GB compressed, more once unpacked) "
+            "and can take hours;\n"
+            "  * indexing it is slow and memory-hungry (STAR needs ~32 GB of RAM for a human-sized genome; "
+            "raise qsub_memory/walltime for the reference job);\n"
+            "  * your cluster probably has a shared, pre-indexed copy - ask your admins or look for iGenomes/"
+            "shared reference folders, then use 'refs add' instead.\n"
+            "The download, checksum test and indexing run in the reference job (prep_<exp>.sh) on the cluster, "
+            "before the samples."
+        )
+
+
+def _genome_info(report: dict) -> GenomeInfo:
+    info = report.get("assembly_info", {}) or {}
+    stats = report.get("assembly_stats", {}) or {}
+    try:
+        length = int(stats.get("total_sequence_length") or 0)
+    except (TypeError, ValueError):
+        length = 0
+    return GenomeInfo(
+        accession=report.get("accession", ""), assembly_name=info.get("assembly_name", ""),
+        organism=(report.get("organism") or {}).get("organism_name", ""), total_length=length,
+        category=info.get("refseq_category", ""), level=info.get("assembly_level", ""),
+    )
+
+
+def find_genome(organism: str, accession: Optional[str] = None, client: Optional["NCBIClient"] = None) -> GenomeInfo:
+    """The reference genome assembly of ``organism`` in the NCBI Genome database.
+
+    Prefers the RefSeq reference genome, then any RefSeq (GCF_) assembly, then
+    GenBank.  Raises :class:`RefError` when nothing is found.
+    """
+    client = client or NCBIClient()
+    reports = client.genome_reports(accession=accession) if accession else client.genome_reports(organism)
+    if not reports and not accession:
+        reports = client.genome_reports(organism, reference_only=False)
+    candidates = [_genome_info(r) for r in reports if r.get("accession")]
+    if not candidates:
+        what = accession or organism.replace("_", " ")
+        raise RefError(f"No genome assembly found for {what} in the NCBI Genome database")
+
+    def rank(g: GenomeInfo):
+        return (g.category != "reference genome", not g.accession.startswith("GCF_"),
+                g.level not in ("Complete Genome", "Chromosome"))
+
+    return sorted(candidates, key=rank)[0]
+
+
+def fetch_genome_reference(workspace: Workspace, organism: str, accession: Optional[str] = None,
+                           client: Optional["NCBIClient"] = None) -> tuple:
+    """Find the nuclear genome and plan its download; returns ``(ReferenceSet, GenomeInfo)``.
+
+    Nothing large is downloaded here: the reference job fetches the FASTA and
+    GFF (checking NCBI's MD5 sums) and indexes them on the cluster.
+    """
+    if client is None:
+        email, api_key = workspace.ncbi_credentials()
+        client = NCBIClient(email, api_key)
+    genome = find_genome(organism, accession, client)
+    urls = genome.urls()
+    out_dir = workspace.references_dir / "genome" / organism
+    fasta = str(out_dir / f"{genome.ftp_name}_genomic.fna")
+    gff = str(out_dir / f"{genome.ftp_name}_genomic.gff")
+    ref = ReferenceSet(refpath=fasta, gtfpath=gff, source="ncbi_genome", accession=genome.accession,
+                       downloads={fasta: {"url": urls["fasta"], "md5_url": urls["md5"]},
+                                  gff: {"url": urls["gff"], "md5_url": urls["md5"]}})
+    return ref, genome
+
+
+def attach_nuclear(ref: ReferenceSet, genome_ref: ReferenceSet) -> ReferenceSet:
+    """Use a downloaded genome as the nuclear FASTA (``_fasta_nuc``) of an existing reference set."""
+    downloads = dict(ref.downloads)
+    downloads[genome_ref.refpath] = genome_ref.downloads[genome_ref.refpath]
+    return ReferenceSet(refpath=ref.refpath, gtfpath=ref.gtfpath, nuc_refpath=genome_ref.refpath,
+                        chrominfopath=ref.chrominfopath, source=ref.source, accession=ref.accession, downloads=downloads)
+
+
+def download_commands(ref: ReferenceSet) -> list:
+    """Download, MD5-check and unpack every file of ``ref.downloads`` that is not there yet.
+
+    The commands run through ``sh -c`` so they work whatever the job shell is.
+    """
+    commands = []
+    for local, spec in sorted(ref.downloads.items()):
+        folder, name = local.rsplit("/", 1)
+        remote = spec["url"].rsplit("/", 1)[1]
+        packed = remote if remote.endswith(".gz") else ""
+        script = [f'mkdir -p "{folder}"', f'cd "{folder}"', f'if [ ! -s "{name}" ]; then',
+                  f'echo "Downloading {remote}"', f'wget -c -q -O "{remote}" "{spec["url"]}"']
+        if spec.get("md5_url"):
+            script += [f'wget -q -O "{name}.md5checksums" "{spec["md5_url"]}"',
+                       f'grep " \\./{remote}$" "{name}.md5checksums" | md5sum -c -']
+        if packed:
+            script.append(f'gunzip -f "{packed}"')
+        script.append("fi")
+        commands.append("sh -c '" + "; ".join(["set -e"] + script).replace("then;", "then") + "'")
+    return commands
+
+
 def _unless_exists(path: str, command: str, csh: bool) -> str:
     """Run ``command`` only if ``path`` is missing or empty, in the job's shell syntax."""
     if csh:
@@ -325,13 +483,16 @@ def index_commands(ref: ReferenceSet, workflow) -> list:
     fasta = ref.refpath
     if not fasta:
         return []
+    commands = download_commands(ref)
+    if ref.nuc_refpath and ref.nuc_refpath in ref.downloads:
+        nuclear = ReferenceSet(refpath=ref.nuc_refpath, source="ncbi_genome")
+        commands += [c for c in index_commands(nuclear, workflow) if "genomeGenerate" not in c]
     shell = str(workflow.general("environment", "bash") or "bash").strip()
     csh = shell in ("csh", "tcsh")
     fasta_dir = str(Path(fasta).parent)
     active = workflow.active_order()
     pipeline = workflow.pipeline
     keys = {s: pipeline[s].get("key", "") for s in active}
-    commands = []
     if any(k.startswith("samtools") for k in keys.values()) or "bwa-align" in active:
         commands.append(_unless_exists(f"{fasta}.fai", f'samtools faidx "{fasta}"', csh))
     if "bwa-align" in active:
