@@ -203,7 +203,7 @@ def cmd_build(ws: Workspace, args) -> int:
             print(f"[dry-run] {result.name}: {len(result.plan['samples'])} sample(s), steps: {' -> '.join(result.plan['steps'])}")
             print(f"[dry-run] plan written to {result.directory / 'plan.json'}")
         else:
-            count = len(result.jobs.samples) + bool(result.jobs.experiment) + bool(result.jobs.prepare) + bool(result.jobs.check)
+            count = len(result.jobs.scripts())
             print(f"{result.name}: {count} job script(s) in {result.directory / 'scripts'}")
     if args.dry_run:
         return 0
@@ -212,12 +212,14 @@ def cmd_build(ws: Workspace, args) -> int:
         return 1
     master = write_master(ws, scheduler, results, shell=str(workflow.general("environment", "bash")))
     ws.copy_preset("current", "last_used")
-    if not args.no_check:
+    from .build import tool_check_enabled
+
+    if not args.no_check and tool_check_enabled(workflow):
         from . import toolcheck
 
         tools = toolcheck.merge(*[r.tools for r in results])
         result = toolcheck.run_preflight(tools, workflow, auto_fix=args.auto_fix)
-        if result.checked and result.missing:
+        if result.failed:
             log.error("Halted: %d tool(s) the jobs call were not found here (%s). Make them available "
                       "(module load / conda activate in 'free_form'), rerun with --auto-fix to install them, "
                       "or --no-check if the jobs run in a different environment. The scripts are written; "
@@ -284,14 +286,13 @@ def cmd_refs(ws: Workspace, args) -> int:
         if not args.yes:
             if not sys.stdin.isatty():
                 raise RefError("Confirm the download with --yes")
-            if not input("Continue? (y/N) ").strip().lower().startswith("y"):
+            if not _confirm("Continue?"):
                 print("Nothing was changed.")
                 return 1
         if args.nuclear_of:
-            base = registry.get(organism, args.nuclear_of)
-            if base is None or args.nuclear_of not in registry.names(organism):
+            if args.nuclear_of not in registry.names(organism):
                 raise RefError(f"{organism} has no reference set '{args.nuclear_of}'")
-            registry.add(organism, attach_nuclear(base, ref), args.nuclear_of, activate=False)
+            registry.add(organism, attach_nuclear(registry.get(organism, args.nuclear_of), ref), args.nuclear_of, activate=False)
             print(f"'{args.nuclear_of}' now has the nuclear genome {genome.accession} as _fasta_nuc")
         else:
             registry.add(organism, ref, args.name, activate=not args.no_activate)
@@ -334,12 +335,19 @@ def cmd_check(ws: Workspace, args) -> int:
     if not experiments:
         print("No builds found. Run 'pipemaker build' first.")
         return 1
-    status = 0
+    # Experiments that share a job environment (shell + set-up lines) are checked in one go.
+    groups: dict = {}
     for exp in experiments:
         tools, workflow = toolcheck.experiment_tools(ws, exp)
-        print(f"== {exp}")
-        result = toolcheck.run_preflight(tools, workflow, auto_fix=args.auto_fix)
-        status |= int(result.checked and bool(result.missing))
+        key = (toolcheck.jobscript.shell_of(workflow), str(workflow.general("free_form", "") or ""))
+        group = groups.setdefault(key, {"experiments": [], "tools": [], "workflow": workflow})
+        group["experiments"].append(exp)
+        group["tools"].append(tools)
+    status = 0
+    for group in groups.values():
+        print(f"== {', '.join(group['experiments'])}")
+        result = toolcheck.run_preflight(toolcheck.merge(*group["tools"]), group["workflow"], auto_fix=args.auto_fix)
+        status |= int(result.failed)
     return status
 
 

@@ -36,7 +36,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -438,10 +439,8 @@ def fetch_genome_reference(workspace: Workspace, organism: str, accession: Optio
 
 def attach_nuclear(ref: ReferenceSet, genome_ref: ReferenceSet) -> ReferenceSet:
     """Use a downloaded genome as the nuclear FASTA (``_fasta_nuc``) of an existing reference set."""
-    downloads = dict(ref.downloads)
-    downloads[genome_ref.refpath] = genome_ref.downloads[genome_ref.refpath]
-    return ReferenceSet(refpath=ref.refpath, gtfpath=ref.gtfpath, nuc_refpath=genome_ref.refpath,
-                        chrominfopath=ref.chrominfopath, source=ref.source, accession=ref.accession, downloads=downloads)
+    return replace(ref, nuc_refpath=genome_ref.refpath,
+                   downloads={**ref.downloads, genome_ref.refpath: genome_ref.downloads[genome_ref.refpath]})
 
 
 def download_commands(ref: ReferenceSet) -> list:
@@ -453,16 +452,14 @@ def download_commands(ref: ReferenceSet) -> list:
     for local, spec in sorted(ref.downloads.items()):
         folder, name = local.rsplit("/", 1)
         remote = spec["url"].rsplit("/", 1)[1]
-        packed = remote if remote.endswith(".gz") else ""
-        script = [f'mkdir -p "{folder}"', f'cd "{folder}"', f'if [ ! -s "{name}" ]; then',
-                  f'echo "Downloading {remote}"', f'wget -c -q -O "{remote}" "{spec["url"]}"']
+        fetch = [f'echo "Downloading {remote}"', f'wget -c -q -O "{remote}" "{spec["url"]}"']
         if spec.get("md5_url"):
-            script += [f'wget -q -O "{name}.md5checksums" "{spec["md5_url"]}"',
-                       f'grep " \\./{remote}$" "{name}.md5checksums" | md5sum -c -']
-        if packed:
-            script.append(f'gunzip -f "{packed}"')
-        script.append("fi")
-        commands.append("sh -c '" + "; ".join(["set -e"] + script).replace("then;", "then") + "'")
+            fetch += [f'wget -q -O "{name}.md5checksums" "{spec["md5_url"]}"',
+                      f'grep " \\./{remote}$" "{name}.md5checksums" | md5sum -c -']
+        if remote.endswith(".gz"):
+            fetch.append(f'gunzip -f "{remote}"')
+        script = f'set -e; mkdir -p "{folder}"; cd "{folder}"; if [ ! -s "{name}" ]; then {"; ".join(fetch)}; fi'
+        commands.append(f"sh -c '{script}'")
     return commands
 
 
@@ -473,41 +470,58 @@ def _unless_exists(path: str, command: str, csh: bool) -> str:
     return f'if [ ! -s "{path}" ]; then {command}; fi'
 
 
-def index_commands(ref: ReferenceSet, workflow) -> list:
-    """Shell commands that index an automatically downloaded reference.
+@lru_cache(maxsize=64)
+def _fasta_length(path: str, size: int, mtime: float) -> int:
+    """Sequence length of a FASTA; cached by file identity so large genomes are read only once."""
+    return validate_fasta(path)
 
-    Only indices required by the active steps are built, and every command is
-    guarded so it is skipped when the index already exists.  The syntax
-    follows the job shell (``environment``): POSIX shells or csh/tcsh.
-    """
-    fasta = ref.refpath
-    if not fasta:
-        return []
-    commands = download_commands(ref)
-    if ref.nuc_refpath and ref.nuc_refpath in ref.downloads:
-        nuclear = ReferenceSet(refpath=ref.nuc_refpath, source="ncbi_genome")
-        commands += [c for c in index_commands(nuclear, workflow) if "genomeGenerate" not in c]
-    shell = str(workflow.general("environment", "bash") or "bash").strip()
-    csh = shell in ("csh", "tcsh")
-    fasta_dir = str(Path(fasta).parent)
+
+def _sa_index_nbases(fasta: str) -> int:
+    try:
+        stat = Path(fasta).stat()
+        return sa_index_nbases(_fasta_length(fasta, stat.st_size, stat.st_mtime))
+    except (OSError, RefError):
+        return 14  # not downloaded yet: STAR's default
+
+
+def _fasta_index_commands(fasta: str, workflow, csh: bool, star: bool) -> list:
+    """Guarded commands building the indices of ``fasta`` that the active steps need."""
     active = workflow.active_order()
     pipeline = workflow.pipeline
-    keys = {s: pipeline[s].get("key", "") for s in active}
-    if any(k.startswith("samtools") for k in keys.values()) or "bwa-align" in active:
+    commands = []
+    if any(pipeline[s].get("key", "").startswith("samtools") for s in active) or "bwa-align" in active:
         commands.append(_unless_exists(f"{fasta}.fai", f'samtools faidx "{fasta}"', csh))
     if "bwa-align" in active:
         step = pipeline["bwa-align"]
         bwa = step.get("path") or step.get("key", "bwa").split(" ")[0]
         commands.append(_unless_exists(f"{fasta}.bwt", f'{bwa} index "{fasta}"', csh))
-    if "STAR-alignment" in active:
+    if star and "STAR-alignment" in active:
         step = pipeline["STAR-alignment"]
-        star = step.get("path") or step.get("key", "STAR")
-        try:
-            nbases = sa_index_nbases(validate_fasta(fasta))
-        except RefError:
-            nbases = 14
+        star_bin = step.get("path") or step.get("key", "STAR")
+        fasta_dir = str(Path(fasta).parent)
         commands.append(_unless_exists(
             f"{fasta_dir}/SA",
-            f'{star} --runMode genomeGenerate --genomeDir "{fasta_dir}" --runThreadN 4 '
-            f'--genomeFastaFiles "{fasta}" --genomeSAindexNbases {nbases}', csh))
+            f'{star_bin} --runMode genomeGenerate --genomeDir "{fasta_dir}" --runThreadN 4 '
+            f'--genomeFastaFiles "{fasta}" --genomeSAindexNbases {_sa_index_nbases(fasta)}', csh))
     return commands
+
+
+def index_commands(ref: ReferenceSet, workflow, csh: Optional[bool] = None) -> list:
+    """Shell commands that download (if needed) and index a reference pipemaker manages.
+
+    Only indices required by the active steps are built, and every command is
+    guarded so it is skipped when the index already exists.  The syntax
+    follows the job shell (``environment``) unless ``csh`` is given.  A
+    downloaded nuclear FASTA gets the same indices, except STAR's (whose
+    genome directory is the main reference's).
+    """
+    if not ref.refpath:
+        return []
+    if csh is None:
+        from .jobscript import family, shell_of
+
+        csh = family(shell_of(workflow)) == "csh"
+    commands = download_commands(ref)
+    if ref.nuc_refpath and ref.nuc_refpath in ref.downloads:
+        commands += _fasta_index_commands(ref.nuc_refpath, workflow, csh, star=False)
+    return commands + _fasta_index_commands(ref.refpath, workflow, csh, star=True)

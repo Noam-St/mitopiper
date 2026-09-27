@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .config import Workflow
+from .config import truthy as _truthy
 from .metadata import Sample
 from .references import ReferenceSet
 
@@ -75,10 +76,6 @@ def _join(*parts) -> str:
     return posixpath.join(*parts) if parts else ""
 
 
-def _truthy(value) -> bool:
-    if isinstance(value, str):
-        return value.strip().lower() in ("1", "true", "yes", "y", "on")
-    return bool(value)
 
 
 def is_local_path(source: str) -> bool:

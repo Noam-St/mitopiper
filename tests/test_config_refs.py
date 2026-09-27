@@ -116,3 +116,22 @@ def test_index_commands_follow_active_steps(workspace, tmp_path):
     wf.pipeline["STAR-alignment"]["switch"] = True
     wf.run_order.append("STAR-alignment")
     assert any("--genomeSAindexNbases 6" in c for c in index_commands(ref, wf))
+
+
+def test_large_fasta_is_read_once_per_file_version(tmp_path, monkeypatch):
+    from pipemaker import references
+    from pipemaker.config import Workflow
+
+    fasta = tmp_path / "g.fa"
+    fasta.write_text(">g\n" + "A" * 16569 + "\n")
+    reads = []
+    real = references.validate_fasta
+    monkeypatch.setattr(references, "validate_fasta", lambda p: reads.append(p) or real(p))
+    references._fasta_length.cache_clear()
+    wf = Workflow.default()
+    wf.pipeline["STAR-alignment"]["switch"] = True
+    wf.run_order.append("STAR-alignment")
+    ref = ReferenceSet(refpath=str(fasta), source="ncbi_mt")
+    for _ in range(3):
+        assert any("--genomeSAindexNbases 6" in c for c in index_commands(ref, wf))
+    assert len(reads) == 1

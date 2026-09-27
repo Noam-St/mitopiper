@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import posixpath
 import shlex
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 SCHEDULERS = ("sge", "slurm", "lsf", "local")
@@ -150,6 +150,36 @@ class ExperimentJobs:
     directory: str = ""
     check: Optional[str] = None      # tool check, submitted before everything else
 
+    def scripts(self) -> list:
+        """Every script of the experiment, in stage order."""
+        return [s for s in (self.check, self.prepare, *self.samples, self.experiment) if s]
+
+
+#: Job stages in run order. Each stage waits for the nearest earlier stage that exists.
+STAGES = ("check", "prepare", "sample", "experiment")
+_PREFIXES = {"check": "check_", "prepare": "prep_", "experiment": "e_"}
+
+
+def job_name(kind: str, experiment: str) -> str:
+    """Name of an experiment's check / prepare / experiment-level job (sample jobs are named per sample)."""
+    return _PREFIXES[kind] + experiment
+
+
+def kind_of(name: str) -> str:
+    """Stage of a job, from its name."""
+    return next((kind for kind, prefix in _PREFIXES.items() if name.startswith(prefix)), "sample")
+
+
+def stage_dependencies(check: Optional[str] = None, prepare: Optional[str] = None, samples: tuple = ()) -> dict:
+    """Jobs each stage waits for, given the jobs that exist: ``{stage: [job names]}``."""
+    first = [prepare or check] if (prepare or check) else []
+    return {"check": [], "prepare": [check] if check else [], "sample": first, "experiment": list(samples) or first}
+
+
+def check_resources(resources: "JobResources") -> "JobResources":
+    """The tool check only runs ``command -v``: ask the scheduler for as little as possible."""
+    return replace(resources, threads=1, memory="1G" if resources.memory else "", walltime="00:15:00" if resources.walltime else "")
+
 
 def master_script(scheduler: str, experiments: list, delay: float = 0.5, shell: str = "bash") -> str:
     """A bash script that submits every job, wiring up dependencies.
@@ -177,8 +207,7 @@ def master_script(scheduler: str, experiments: list, delay: float = 0.5, shell: 
     ]
     pause = f"sleep {delay}" if delay and scheduler != "local" else ""
     for exp in experiments:
-        directory = exp.directory or posixpath.dirname(posixpath.dirname(
-            (exp.samples or [exp.experiment or exp.prepare or exp.check])[0]))
+        directory = exp.directory or posixpath.dirname(posixpath.dirname(exp.scripts()[0]))
         lines.append(f"# ---- {exp.name}")
         lines.append(f"jobs_file={shlex.quote(posixpath.join(directory, 'jobs.tsv'))}")
         lines.append(f"marker={shlex.quote(posixpath.join(directory, '.submitting'))}")

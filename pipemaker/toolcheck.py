@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Callable, Optional
 
 from . import jobscript
@@ -66,6 +67,11 @@ class CheckResult:
     def ok(self) -> bool:
         return self.checked and not self.missing
 
+    @property
+    def failed(self) -> bool:
+        """The check ran and found missing tools."""
+        return self.checked and bool(self.missing)
+
     def describe(self) -> str:
         if not self.checked:
             return f"The tool check could not run here: {self.reason}"
@@ -91,14 +97,12 @@ def executables(line: str) -> list:
         except ValueError:
             words = segment.split()
         words = [w for w in words if not re.match(r"^\d*[<>]", w)]
-        # skip leading keywords (if / then / !) to reach the command itself
-        while words and words[0] in ("if", "then", "else", "elif", "!", "do", "(", "[", "[["):
-            if words[0] in ("[", "[["):
-                words = []
-                break
+        # skip leading keywords (if / then / !) to reach the command itself; a test ([ ... ]) runs nothing
+        while words and words[0] in ("if", "then", "else", "elif", "!", "do", "("):
             words = words[1:]
-        if words:
-            found.append(words[0])
+        if not words or words[0] in ("[", "[["):
+            continue
+        found.append(words[0])
         for i, word in enumerate(words[:-1]):
             if word in COMMAND_OPTIONS:
                 found.append(words[i + 1])
@@ -111,12 +115,13 @@ def required_tools(step_lines: dict) -> dict:
     for step, lines in step_lines.items():
         for line in lines:
             for exe in executables(line):
-                name = os.path.basename(exe) if not exe.startswith("/") else exe
-                if name in IGNORED or os.path.basename(name) in IGNORED or name.startswith("$"):
+                base = os.path.basename(exe)
+                if base in IGNORED or exe.startswith("$"):
                     continue
+                name = exe if exe.startswith("/") else base
                 tools.setdefault(name, set()).add(step)
-                for dep in HIDDEN_DEPENDENCIES.get(os.path.basename(name), []):
-                    tools.setdefault(dep, set()).add(f"{step} (via {os.path.basename(name)})")
+                for dep in HIDDEN_DEPENDENCIES.get(base, []):
+                    tools.setdefault(dep, set()).add(f"{step} (via {base})")
     return {tool: sorted(steps) for tool, steps in sorted(tools.items(), key=lambda kv: kv[0].lower())}
 
 
@@ -129,41 +134,29 @@ def merge(*tool_maps: dict) -> dict:
 
 
 # ---------------------------------------------------------------- job script
+def lookup_script(tools: dict) -> str:
+    """A POSIX ``sh`` script that prints ``MISSING <tool> (used by: ...)`` on stderr for every
+    tool it cannot find and exits with status 1 if any is missing."""
+    lines = ['m=""']
+    for tool, steps in tools.items():
+        quoted = shlex.quote(tool)
+        lines.append(f'command -v {quoted} >/dev/null 2>&1 || {{ echo "MISSING {tool} (used by: {", ".join(steps)})" >&2; m="$m {tool}"; }}')
+    lines.append('if [ -n "$m" ]; then echo "[pipemaker] not found:$m - load or install them (general setting free_form), then rerun" >&2; exit 1; fi')
+    lines.append(f'echo "[pipemaker] all {len(tools)} tools found"')
+    return "; ".join(lines)
+
+
+def lookup_command(tools: dict) -> str:
+    """:func:`lookup_script` as one command line that works in every job shell."""
+    return "sh -c " + shlex.quote(lookup_script(tools))
+
+
 def check_job_body(tools: dict, workflow: Workflow) -> str:
     """Body of ``check_<exp>.sh``: report every missing tool, fail if any is missing."""
-    fam = jobscript.family(jobscript.shell_of(workflow))
-    if fam == "csh":
-        out = jobscript._csh_step("check_tools") + ['set pm_missing = ""']
-        for tool, steps in tools.items():
-            out += [
-                f"sh -c 'command -v {shlex.quote(tool)}' >& /dev/null",
-                "if ( $status != 0 ) then",
-                "    sh -c " + shlex.quote(f'echo "MISSING {tool} (used by: {", ".join(steps)})" >&2'),
-                f'    set pm_missing = "$pm_missing {tool}"',
-                "endif",
-            ]
-        out += [
-            'if ( "$pm_missing" != "" ) then',
-            '    sh -c "echo \'[pipemaker] not found:$pm_missing - load or install them (general setting free_form), then rerun\' >&2"',
-            '    echo "FAILED check_tools $PM_START `date +%s` 1" > "$PM_STATUS"',
-            "    exit 1",
-            "endif",
-            f'echo "[pipemaker] all {len(tools)} tools found"',
-            'echo "DONE check_tools $PM_START `date +%s` 0" > "$PM_STATUS"',
-        ]
-        return "\n".join(out) + "\n"
-    out = ["pm_step check_tools" if fam == "posix" else "", 'pm_missing=""']
-    for tool, steps in tools.items():
-        out.append(f'if ! command -v {shlex.quote(tool)} >/dev/null 2>&1; then '
-                   f'echo "MISSING {tool} (used by: {", ".join(steps)})" >&2; pm_missing="$pm_missing {tool}"; fi')
-    out += [
-        'if [ -n "$pm_missing" ]; then',
-        '    echo "[pipemaker] not found:$pm_missing - load or install them (general setting free_form), then rerun" >&2',
-        "    exit 1",
-        "fi",
-        f'echo "[pipemaker] all {len(tools)} tools found"',
-    ]
-    return "\n".join(line for line in out if line) + "\n"
+    from .builder import StepCommands
+
+    step = StepCommands("check_tools", "check that the tools of the pipeline can be found", [lookup_command(tools)])
+    return jobscript.body([step], "this build", workflow)
 
 
 # ------------------------------------------------------------- local check
@@ -172,21 +165,14 @@ def check_here(tools: dict, workflow: Workflow, runner: Callable = subprocess.ru
     if not tools:
         return CheckResult(tools)
     shell = jobscript.shell_of(workflow)
-    fam = jobscript.family(shell)
     shell_path = shutil.which(shell)
-    if fam is None or shell_path is None:
+    if jobscript.family(shell) is None or shell_path is None:
         return CheckResult(tools, checked=False,
                            reason=f"the job shell '{shell}' is not available on this machine" if shell_path is None
                            else f"unsupported job shell '{shell}'")
     free_form = str(workflow.general("free_form", "") or "")
-    names = " ".join(shlex.quote(t) for t in tools)
-    if fam == "csh":
-        script = f"{free_form}\nforeach pm_t ({names})\n  sh -c \"command -v $pm_t\" >& /dev/null\n" \
-                 "  if ( $status != 0 ) echo \"MISSING $pm_t\"\nend\n"
-    else:
-        script = f"{free_form}\nfor pm_t in {names}; do command -v \"$pm_t\" >/dev/null 2>&1 || echo \"MISSING $pm_t\"; done\n"
     with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as handle:
-        handle.write(script)
+        handle.write(f"{free_form}\n{lookup_command(tools)}\n")
         path = handle.name
     try:
         result = runner([shell_path, path], capture_output=True, text=True, timeout=timeout, check=False)
@@ -194,7 +180,7 @@ def check_here(tools: dict, workflow: Workflow, runner: Callable = subprocess.ru
         return CheckResult(tools, checked=False, reason=str(exc))
     finally:
         os.unlink(path)
-    missing = [line.split(None, 1)[1].strip() for line in result.stdout.splitlines() if line.startswith("MISSING ")]
+    missing = [line.split()[1] for line in result.stderr.splitlines() if line.startswith("MISSING ")]
     return CheckResult(tools, missing=missing)
 
 
@@ -274,13 +260,10 @@ def run_preflight(tools: dict, workflow: Workflow, auto_fix: bool = False, strea
                   runner: Callable = subprocess.run, check: Callable = None) -> CheckResult:
     """Check the tools here; with ``auto_fix`` try to install the missing ones and check again."""
     stream = stream or sys.stdout
-    check = check or (lambda t, w: check_here(t, w, runner=runner))
+    check = check or partial(check_here, runner=runner)
     result = check(tools, workflow)
-    if result.ok or not result.checked:
-        stream.write(result.describe() + "\n")
-        return result
     stream.write(result.describe() + "\n")
-    if not auto_fix:
+    if not (result.failed and auto_fix):
         return result
     plan = install_plan(result.missing)
     stream.write(plan.describe() + "\n")
@@ -296,9 +279,7 @@ def run_preflight(tools: dict, workflow: Workflow, auto_fix: bool = False, strea
 
 def experiment_tools(workspace, experiment: str) -> tuple:
     """``(tools, workflow)`` recorded in the manifest of a build."""
-    import json
+    from .build import load_manifest  # build imports this module
 
-    from .config import Workflow as _Workflow
-
-    manifest = json.loads((workspace.experiment_dir(experiment) / "pipemaker_manifest.json").read_text(encoding="utf-8"))
-    return manifest.get("tools", {}), _Workflow(**manifest["workflow"])
+    manifest = load_manifest(workspace.experiment_dir(experiment))
+    return manifest.get("tools", {}), Workflow(**manifest["workflow"])

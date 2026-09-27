@@ -25,14 +25,14 @@ from pathlib import Path
 from typing import Optional
 
 from . import jobscript, toolcheck
-from .build import BuildError, _write_script, find_experiment_metadata, job_resources
+from .build import BuildError, _write_script, find_experiment_metadata, job_resources, load_manifest
 from .builder import StepCommands, _join, build_experiment_steps, build_sample_job, output_paths, step_scope
 from .config import Workflow, Workspace
 from .diagnose import Context, diagnose, merged_rerun_options
 from .metadata import load_samples
 from .monitor import DONE, FAILED, KILLED, PENDING, RUNNING, SKIPPED, UNKNOWN, ErrorScanner, collect, default_experiments
 from .references import ReferenceSet, index_commands
-from .schedulers import ExperimentJobs, header, master_script
+from .schedulers import STAGES, ExperimentJobs, check_resources, header, job_name, master_script, stage_dependencies
 
 log = logging.getLogger(__name__)
 
@@ -71,24 +71,13 @@ class RerunJob:
     suggestions: list = field(default_factory=list)
 
 
-def load_manifest(exp_dir: Path) -> dict:
-    try:
-        return json.loads((exp_dir / "pipemaker_manifest.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise BuildError(f"{exp_dir.name} has no readable pipemaker_manifest.json; rebuild it with 'pipemaker build'") from exc
-
-
 def _apply_overrides(workflow: Workflow, overrides: dict, free_form: list) -> Workflow:
     wf = workflow.copy()
     mapping = {"memory": "qsub_memory", "walltime": "walltime", "threads": "qsub_threads", "queue": "qsub_queue"}
     for key, setting in mapping.items():
         if overrides.get(key) not in (None, ""):
             wf.set_general(setting, overrides[key])
-    if free_form:
-        current = str(wf.general("free_form", "") or "")
-        if current and not current.endswith("\n"):
-            current += "\n"
-        wf.set_general("free_form", current + "\n".join(free_form) + "\n")
+    jobscript.append_free_form(wf, free_form)
     return wf
 
 
@@ -134,13 +123,10 @@ def plan(workspace: Workspace, experiments: Optional[list] = None, options: Opti
         sample_steps = [s for s in manifest.get("steps", []) if ctx.pipeline.get(s, {}).get("scope", "sample") == "sample"]
         chosen = [j for j in jobs if (j.name in options.jobs or j.job_id in options.jobs)] if options.jobs else \
                  [j for j in jobs if j.state in wanted]
-        if any(j.kind == "check" for j in chosen):  # nothing after a failed tool check ran properly
-            chosen += [j for j in jobs if j.kind == "prepare" and j.state not in (DONE, RUNNING) and j not in chosen]
-        prep_failed = any(j.kind in ("prepare", "check") for j in chosen)
-        if prep_failed:  # dependants of a failed reference job / tool check never ran properly
-            chosen += [j for j in jobs if j.kind == "sample" and j.state != DONE and j not in chosen and j.state != RUNNING]
-        if any(j.kind == "sample" for j in chosen):
-            chosen += [j for j in jobs if j.kind == "experiment" and j.state not in (DONE, RUNNING) and j not in chosen]
+        if chosen:  # jobs of later stages than the earliest rerun one did not run properly: rerun them too
+            earliest = min(STAGES.index(j.kind) for j in chosen)
+            chosen += [j for j in jobs if STAGES.index(j.kind) > earliest and j.state not in (DONE, RUNNING)
+                       and j not in chosen]
         for job in chosen:
             item = RerunJob(exp, job.name, job.kind, job.state, job.step, job.job_id)
             item.suggestions = diagnose(job, ctx) if job.state in RERUN_STATES else []
@@ -199,18 +185,17 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
         jobs = ExperimentJobs(name=exp, prepare=None, samples=[], experiment=None, directory=exp_s)
         scripts = exp_dir / "scripts"
 
-        prep_cmds = lambda wf: [c for ref in refs.values() if ref.needs_indexing for c in index_commands(ref, wf)]  # noqa: E731
         # Rerun jobs only wait for jobs that this rerun resubmits: the others are not run again, and
         # builds made by older versions may have no status files to check.
         rerun_names = {i.name for i in items if i.experiment == exp}
-        check_name = f"check_{exp}" if f"check_{exp}" in rerun_names else None
-        prep_name = f"prep_{exp}" if f"prep_{exp}" in rerun_names else None
-        first = [prep_name or check_name] if (prep_name or check_name) else None
+        present = {kind: job_name(kind, exp) if job_name(kind, exp) in rerun_names else None for kind in ("check", "prepare")}
+        waits = stage_dependencies(present["check"], present["prepare"], tuple(n for n in by_job if n in rerun_names))
         for item in (i for i in items if i.experiment == exp):
             wf = _apply_overrides(base, item.overrides, options.free_form)
             res = job_resources(wf)
             path = scripts / f"{item.name}.sh"
-            content = header(scheduler, item.name, exp_s, res)
+            content = header(scheduler, item.name, exp_s, check_resources(res) if item.kind == "check" else res)
+            content += jobscript.preamble(wf, exp_s, item.name, waits[item.kind])
             if item.kind == "sample":
                 sample = by_job.get(item.name)
                 if sample is None or sample.organism not in refs:
@@ -218,24 +203,20 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
                 sample_steps = [s for s in steps if step_scope(wf, s) == "sample"]
                 todo = sample_steps[sample_steps.index(item.start_step):] if item.start_step else sample_steps
                 job = build_sample_job(sample, wf, exp_s, refs[sample.organism], todo)
-                content += jobscript.preamble(wf, exp_s, item.name, first)
                 content += f'echo "Current organism: {sample.organism}"\n'
                 content += f'echo "[pipemaker] rerun starting at step {item.start_step or todo[0]}"\n\n'
                 clean = _clean_lines(sample, wf, exp_s, item.start_step) if item.clean and item.start_step else []
                 content += jobscript.body(job.steps, sample.name, wf, before=clean)
                 jobs.samples.append(str(path))
             elif item.kind == "experiment":
-                sample_deps = [n for n in by_job if n in rerun_names]
-                content += jobscript.preamble(wf, exp_s, item.name, sample_deps or first)
                 content += jobscript.body(build_experiment_steps(samples, wf, exp_s, steps), exp, wf)
                 jobs.experiment = str(path)
             elif item.kind == "check":
-                content += jobscript.preamble(wf, exp_s, item.name)
                 content += toolcheck.check_job_body(manifest.get("tools", {}), wf)
                 jobs.check = str(path)
-            else:
-                content += jobscript.preamble(wf, exp_s, item.name, [check_name] if check_name else None)
-                prep = [StepCommands("prepare_references", "Index the automatically downloaded references", prep_cmds(wf))]
+            elif item.kind == "prepare":
+                commands = [c for ref in refs.values() if ref.needs_indexing for c in index_commands(ref, wf)]
+                prep = [StepCommands("prepare_references", "Index the automatically downloaded references", commands)]
                 content += jobscript.body(prep, exp, wf)
                 jobs.prepare = str(path)
             _write_script(path, content)

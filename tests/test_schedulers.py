@@ -48,3 +48,17 @@ def test_master_script_submits_the_tool_check_first():
     # without a reference job the samples wait for the check directly
     text = master_script("slurm", [ExperimentJobs("E", None, ["/e/scripts/a.sh"], None, "/e", check="/e/scripts/check.sh")])
     assert 'prep=("$jid")' in text and 'submit "$script" ${prep[@]+"${prep[@]}"}' in text
+
+
+def test_stage_helpers():
+    from pipemaker.schedulers import JobResources, check_resources, job_name, kind_of, stage_dependencies
+
+    assert [kind_of(job_name(k, "E")) for k in ("check", "prepare", "experiment")] == ["check", "prepare", "experiment"]
+    assert kind_of("s_SAMN1_0") == "sample"
+    assert stage_dependencies("c", "p", ("a", "b")) == {"check": [], "prepare": ["c"], "sample": ["p"], "experiment": ["a", "b"]}
+    assert stage_dependencies("c", None, ()) == {"check": [], "prepare": ["c"], "sample": ["c"], "experiment": ["c"]}
+    assert stage_dependencies() == {"check": [], "prepare": [], "sample": [], "experiment": []}
+    small = check_resources(JobResources(queue="q", threads=16, memory="64G", walltime="3-00:00:00"))
+    assert (small.queue, small.threads, small.memory, small.walltime) == ("q", 1, "1G", "00:15:00")
+    jobs = ExperimentJobs("E", "/p.sh", ["/a.sh"], "/e.sh", check="/c.sh")
+    assert jobs.scripts() == ["/c.sh", "/p.sh", "/a.sh", "/e.sh"]

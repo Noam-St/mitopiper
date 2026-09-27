@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import toolcheck
+from . import jobscript, toolcheck
 from .build import (
     BuildError,
     BuildOptions,
@@ -551,7 +551,7 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input, session_fa
             continue
         results.append(result)
         builds.append((metadata, selection, options, samples))
-        count = len(result.jobs.samples) + bool(result.jobs.experiment) + bool(result.jobs.prepare) + bool(result.jobs.check)
+        count = len(result.jobs.scripts())
         print(f"{count} job script(s) written to {result.directory / 'scripts'}\n")
 
     if not results:
@@ -561,22 +561,20 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input, session_fa
     def rebuild(setup_line: str) -> list:
         """Add a set-up line to every job (saved in the current preset) and regenerate the scripts."""
         wf = workspace.load_workflow("current")
-        current = str(wf.general("free_form", "") or "")
-        wf.set_general("free_form", (current if current.endswith("\n") or not current else current + "\n") + setup_line + "\n")
+        jobscript.append_free_form(wf, [setup_line])
         workspace.write_workflow(wf)
         return [build_experiment(workspace, wf, m, sel, opt, resolver, samples=smp) for m, sel, opt, smp in builds]
 
+    proceed = True
     if tool_check_enabled(workflow):
         results, proceed = preflight(workspace, results, input_fn, rebuild)
-        if not proceed:
-            print("Stopped before launching; the scripts are kept. Fix the environment and run 'bash master.sh', "
-                  "or start pipemaker again.")
-            write_master(workspace, scheduler, results, shell=str(workflow.general("environment", "bash")))
-            workspace.copy_preset("current", "last_used")
-            return 1
         workflow = workspace.load_workflow("current")
     master = write_master(workspace, scheduler, results, shell=str(workflow.general("environment", "bash")))
     workspace.copy_preset("current", "last_used")
+    if not proceed:
+        print("Stopped before launching; the scripts are kept. Fix the environment and run 'bash master.sh', "
+              "or start pipemaker again.")
+        return 1
     total = sum(len(r.jobs.samples) for r in results)
     print(f"\nAll scripts are ready: {total} sample job(s), submitted by {master}.")
     if scheduler == "local":

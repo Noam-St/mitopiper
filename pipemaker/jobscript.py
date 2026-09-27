@@ -39,7 +39,18 @@ def family(shell: str) -> Optional[str]:
 
 
 def fail_fast(workflow: Workflow) -> bool:
-    return str(workflow.general("fail_fast", True)).strip().lower() in ("true", "1", "yes")
+    return workflow.flag("fail_fast", True)
+
+
+def append_free_form(workflow: Workflow, lines: list) -> None:
+    """Append set-up lines to the ``free_form`` general setting (one per line)."""
+    lines = [line for line in lines if line]
+    if not lines:
+        return
+    current = str(workflow.general("free_form", "") or "")
+    if current and not current.endswith("\n"):
+        current += "\n"
+    workflow.set_general("free_form", current + "\n".join(lines) + "\n")
 
 
 # ------------------------------------------------------------------ posix

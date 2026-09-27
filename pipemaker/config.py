@@ -60,6 +60,10 @@ class Workflow:
             return entry[0] if entry else default
         return entry
 
+    def flag(self, key: str, default: bool = False) -> bool:
+        """A boolean general setting."""
+        return truthy(self.general(key, default))
+
     def set_general(self, key: str, value: Any) -> None:
         entry = self.general_settings.get(key)
         if isinstance(entry, list) and len(entry) > 1:
@@ -87,10 +91,14 @@ class Workflow:
         return cls(**default_config())
 
 
-def _truthy(value: Any) -> bool:
+def truthy(value: Any) -> bool:
+    """Interpret a setting value (``True``, ``1``, ``"yes"``, ``"on"``, ...) as a boolean."""
     if isinstance(value, str):
         return value.strip().lower() in ("1", "true", "yes", "y", "on")
     return bool(value)
+
+
+_truthy = truthy  # kept for callers of the old private name
 
 
 @dataclass

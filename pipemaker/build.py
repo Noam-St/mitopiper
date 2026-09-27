@@ -24,7 +24,9 @@ from .builder import (
 from .config import Workflow, Workspace
 from .metadata import load_samples, write_sample_table
 from .references import ReferenceRegistry, ReferenceSet, index_commands
-from .schedulers import ExperimentJobs, JobResources, header, master_script
+from .schedulers import (
+    ExperimentJobs, JobResources, check_resources, header, job_name, master_script, stage_dependencies,
+)
 
 log = logging.getLogger(__name__)
 
@@ -147,9 +149,15 @@ def job_resources(workflow: Workflow) -> JobResources:
     )
 
 
-def _preamble(workflow: Workflow, exp_dir: str = "", job_name: str = "", depends_on: Optional[list] = None) -> str:
-    """Kept for backwards compatibility; see :func:`jobscript.preamble`."""
-    return jobscript.preamble(workflow, exp_dir, job_name, depends_on)
+MANIFEST = "pipemaker_manifest.json"
+
+
+def load_manifest(exp_dir: Path) -> dict:
+    """The provenance manifest of a build (raises :class:`BuildError` when missing or unreadable)."""
+    try:
+        return json.loads((exp_dir / MANIFEST).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise BuildError(f"{exp_dir.name} has no readable {MANIFEST}; rebuild it with 'pipemaker build'") from exc
 
 
 def _write_script(path: Path, content: str) -> None:
@@ -252,44 +260,35 @@ def build_experiment(
 
     # Script names equal job names, so logs and status files can be matched to them.
     jobs.directory = exp
-    check_name = f"check_{exp_dir.name}" if tools and tool_check_enabled(workflow) else None
-    if check_name:
-        path = scripts_dir / f"{check_name}.sh"
-        _write_script(path, header(scheduler, check_name, exp, resources) + jobscript.preamble(workflow, exp, check_name)
-                      + toolcheck.check_job_body(tools, workflow))
-        jobs.check = str(path)
-    prep_name = f"prep_{exp_dir.name}" if prep_lines else None
-    if prep_name:
-        path = scripts_dir / f"{prep_name}.sh"
-        steps_ = [StepCommands("prepare_references", "Index the automatically downloaded references", prep_lines)]
-        _write_script(path, header(scheduler, prep_name, exp, resources)
-                      + jobscript.preamble(workflow, exp, prep_name, [check_name] if check_name else None)
-                      + jobscript.body(steps_, exp_dir.name, workflow))
-        jobs.prepare = str(path)
-    first = [prep_name or check_name] if (prep_name or check_name) else None
+    check_name = job_name("check", exp_dir.name) if tools and tool_check_enabled(workflow) else None
+    prep_name = job_name("prepare", exp_dir.name) if prep_lines else None
     # A build of experiment-level steps only (e.g. --steps multiqc) has no sample jobs to run.
     runnable = [job for job in sample_jobs if job.steps]
-    for job in runnable:
-        path = scripts_dir / f"{job.job_name}.sh"
-        content = header(scheduler, job.job_name, exp, resources)
-        content += jobscript.preamble(workflow, exp, job.job_name, first)
-        content += f'echo "Current organism: {job.sample.organism}"\n\n' + jobscript.body(job.steps, job.sample.name, workflow)
-        _write_script(path, content)
-        jobs.samples.append(str(path))
-    if experiment_steps:
-        name = f"e_{exp_dir.name}"
+    waits = stage_dependencies(check_name, prep_name, tuple(j.job_name for j in runnable))
+
+    def write(name: str, stage: str, body: str, res: JobResources = resources) -> str:
         path = scripts_dir / f"{name}.sh"
-        content = header(scheduler, name, exp, resources)
-        content += jobscript.preamble(workflow, exp, name, [j.job_name for j in runnable] or first)
-        _write_script(path, content + jobscript.body(experiment_steps, exp_dir.name, workflow))
-        jobs.experiment = str(path)
+        _write_script(path, header(scheduler, name, exp, res) + jobscript.preamble(workflow, exp, name, waits[stage]) + body)
+        return str(path)
+
+    if check_name:
+        jobs.check = write(check_name, "check", toolcheck.check_job_body(tools, workflow), check_resources(resources))
+    if prep_name:
+        steps_ = [StepCommands("prepare_references", "Index the automatically downloaded references", prep_lines)]
+        jobs.prepare = write(prep_name, "prepare", jobscript.body(steps_, exp_dir.name, workflow))
+    for job in runnable:
+        body = f'echo "Current organism: {job.sample.organism}"\n\n' + jobscript.body(job.steps, job.sample.name, workflow)
+        jobs.samples.append(write(job.job_name, "sample", body))
+    if experiment_steps:
+        jobs.experiment = write(job_name("experiment", exp_dir.name), "experiment",
+                                jobscript.body(experiment_steps, exp_dir.name, workflow))
 
     write_manifest(exp_dir, workflow, options, samples, refs, plan)
     return ExperimentResult(exp_dir.name, exp_dir, samples, skipped, jobs, plan, tools)
 
 
 def tool_check_enabled(workflow: Workflow) -> bool:
-    return str(workflow.general("tool_check", True)).strip().lower() in ("true", "1", "yes")
+    return workflow.flag("tool_check", True)
 
 
 def pipeline_tools(workflow: Workflow, sample_jobs: list, experiment_steps: list, refs: dict) -> dict:
@@ -301,11 +300,9 @@ def pipeline_tools(workflow: Workflow, sample_jobs: list, experiment_steps: list
     for step in experiment_steps:
         step_lines.setdefault(step.step, []).extend(step.lines)
     # Reference preparation: read the POSIX form of the commands (same tools in every shell).
-    posix = workflow.copy()
-    posix.set_general("environment", "bash")
     for ref in refs.values():
         if ref.needs_indexing:
-            step_lines.setdefault("prepare_references", []).extend(index_commands(ref, posix))
+            step_lines.setdefault("prepare_references", []).extend(index_commands(ref, workflow, csh=False))
     return toolcheck.required_tools(step_lines)
 
 
@@ -343,5 +340,5 @@ def write_manifest(exp_dir: Path, workflow: Workflow, options: BuildOptions, sam
     path = manifests / f"build_{now.strftime('%Y%m%d_%H%M%S')}.json"
     text = json.dumps(manifest, indent=2, default=str)
     path.write_text(text, encoding="utf-8")
-    (exp_dir / "pipemaker_manifest.json").write_text(text, encoding="utf-8")
+    (exp_dir / MANIFEST).write_text(text, encoding="utf-8")
     return path
