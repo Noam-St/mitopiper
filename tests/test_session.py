@@ -84,7 +84,7 @@ def test_start_menu_offers_monitoring_the_last_build(tmp_path):
     second = scripted(["1", "e", "", "q"], [])
     assert run_interactive(ws, second, session_factory=factory) == 1
     text = out.getvalue()
-    assert "suggested fix:" in text and "Leaving the monitor" in text and "python monitor.py -i" in text
+    assert "suggested fix:" in text and "Leaving the monitor" in text and "pipemaker monitor -i" in text
 
 
 def test_session_commands_while_jobs_run(tmp_path):

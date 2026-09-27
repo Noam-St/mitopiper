@@ -41,6 +41,7 @@ The single `maker.py` script was refactored into the installable `pipemaker` pac
 - pandas and Biopython are no longer needed.
 
 ### Fixed
+- Ending input (Ctrl-D or piped answers running out) and piping output into `head` no longer print Python tracebacks.
 - Placeholders are resolved by dictionary lookup; `eval()` of user text was removed.
 - Downloads use Python's `urllib` with retries; the reference download no longer shells out through `os.system`.
 - `command_input_dir_path` pointed to the output directory.

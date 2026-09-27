@@ -308,5 +308,5 @@ class MonitorSession:
         self.write(f"\nLeaving the monitor ({counts}).")
         if not done:
             self.write("Submitted jobs keep running.")
-        self.write("Come back any time with: python monitor.py -i   (or run pipemaker and choose 'monitor')")
+        self.write("Come back any time with: pipemaker monitor -i   (or start pipemaker and choose 'monitor')")
         return 1 if any(s.state in PROBLEM_STATES for s in self.statuses) else 0

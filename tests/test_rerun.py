@@ -148,7 +148,7 @@ def test_monitor_shows_diagnosis_and_shortcuts(tmp_path):
     out = io.StringIO()
     assert mon.monitor(ws, stream=out, color=False) == 1
     text = out.getvalue()
-    assert "'mytool' is not installed" in text and "python monitor.py --rerun" in text
+    assert "'mytool' is not installed" in text and "pipemaker monitor --rerun" in text
     out = io.StringIO()
     mon.monitor(ws, errors_only=True, stream=out, color=False)
     assert "suggested fix:" in out.getvalue() and "$ pipemaker rerun --free-form 'module load mytool'" in out.getvalue()

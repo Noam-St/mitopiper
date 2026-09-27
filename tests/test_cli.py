@@ -81,3 +81,12 @@ def test_presets_and_cleanup(registered, data_dir, capsys):
     assert not (exp / "scripts").exists()
     assert not (ws.root / "master.sh").exists()
     assert (exp / "metadata.tsv").exists()
+
+
+def test_end_of_input_exits_cleanly(tmp_path, monkeypatch, capsys):
+    import io
+    import sys
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))  # Ctrl-D / piped input ran out
+    assert main(["-w", str(tmp_path / "ws")]) == 130
+    assert "Aborted." in capsys.readouterr().out

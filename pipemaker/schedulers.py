@@ -193,5 +193,5 @@ def master_script(scheduler: str, experiments: list, delay: float = 0.5, shell: 
         lines.append('rm -f "$marker"')
         lines.append(f'echo "Submitted {exp.name}: ${{#jobs[@]}} sample job(s)"')
         lines.append("")
-    lines.append('echo "Follow the jobs with: pipemaker monitor --watch   (or: python monitor.py --watch)"')
+    lines.append('echo "Follow the jobs with: pipemaker monitor -i   (or, from the pipemaker folder: python monitor.py -i)"')
     return "\n".join(lines) + "\n"

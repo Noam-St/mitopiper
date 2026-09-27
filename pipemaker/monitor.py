@@ -484,10 +484,10 @@ def rerun_hint(failed: list, contexts: dict, shortcuts: bool = True) -> str:
         return "\n".join(out) + "\n"
     out.append("")
     out.append("Shortcuts:")
-    out.append("  python monitor.py --rerun        rerun failed jobs from the failed step, applying the automatic fixes")
+    out.append("  pipemaker monitor --rerun        rerun failed jobs from the failed step, applying the automatic fixes")
     flags = " ".join(f"--{k} {v}" for k, v in auto.items())
     out.append(f"  pipemaker rerun {flags + ' ' if flags else ''}--dry-run   preview; drop --dry-run to write rerun.sh")
-    out.append("  python monitor.py --errors       full diagnosis of every failed job")
+    out.append("  pipemaker monitor --errors       full diagnosis of every failed job")
     return "\n".join(out) + "\n"
 
 

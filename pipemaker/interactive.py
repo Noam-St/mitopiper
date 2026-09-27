@@ -469,7 +469,7 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input, session_fa
     else:
         print("IMPORTANT: every sample is submitted at once - make sure your cluster allows that many jobs!")
     if not yes_no("Launch the jobs now and follow them in the monitor?", True, input_fn):
-        print(f"Submit later with 'bash {master}', then follow the jobs with 'python monitor.py --watch'.")
+        print(f"Submit later with 'bash {master}', then follow the jobs with 'pipemaker monitor -i'.")
         return 0
     session = session_factory(workspace, [r.name for r in results if r.jobs.samples or r.jobs.experiment], input_fn)
     session.start(master, "master.log")

@@ -345,9 +345,14 @@ def main(argv: Optional[list] = None) -> int:
         message = exc.args[0] if isinstance(exc, KeyError) and exc.args else exc
         log.error("%s", message)
         return 2
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, EOFError):  # Ctrl-C, or Ctrl-D / end of piped input
         print("\nAborted.")
         return 130
+    except BrokenPipeError:  # output piped into e.g. `head`, which stopped reading
+        import os
+
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 0
 
 
 if __name__ == "__main__":
