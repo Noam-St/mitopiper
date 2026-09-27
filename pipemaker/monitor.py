@@ -34,8 +34,11 @@ NOT_SUBMITTED, PENDING, RUNNING, DONE, FAILED, KILLED, UNKNOWN = (
     "NOT SUBMITTED", "PENDING", "RUNNING", "DONE", "FAILED", "KILLED", "UNKNOWN",
 )
 SKIPPED = "SKIPPED"  # not run because a job it depends on failed (local scheduler)
-FINAL_STATES = (NOT_SUBMITTED, DONE, FAILED, KILLED, SKIPPED)
-STATE_ORDER = (FAILED, KILLED, SKIPPED, RUNNING, PENDING, UNKNOWN, DONE, NOT_SUBMITTED)
+# The job has left the scheduler but its shell cannot report success or failure
+# (no status tracking for that shell): finished, outcome unknown.
+ENDED = "ENDED"
+FINAL_STATES = (NOT_SUBMITTED, DONE, FAILED, KILLED, SKIPPED, ENDED)
+STATE_ORDER = (FAILED, KILLED, SKIPPED, RUNNING, PENDING, UNKNOWN, ENDED, DONE, NOT_SUBMITTED)
 
 DEFAULT_ERROR_PATTERNS = (
     r"\berrors?\b", r"\bexceptions?\b", r"traceback", r"\bfatal\b", r"segmentation fault", r"core dumped",
@@ -251,9 +254,11 @@ class ErrorScanner:
         except OSError:
             return 0, []
         key = str(path)
-        offset, line_no, count, errors = self._cache.get(key, (0, 0, 0, []))
-        if size < offset:  # truncated / rewritten
-            offset, line_no, count, errors = 0, 0, 0, []
+        offset, line_no, count, errors, head = self._cache.get(key, (0, 0, 0, [], b""))
+        if size < offset or (head and self._head(path, len(head)) != head):
+            # Truncated or rewritten (e.g. the same log reused by a rerun), even if it is
+            # already longer than what was read before: start over.
+            offset, line_no, count, errors, head = 0, 0, 0, [], b""
         if size > offset:
             with open(path, "rb") as handle:
                 handle.seek(offset)
@@ -268,8 +273,20 @@ class ErrorScanner:
                         count += 1
                         errors = (errors + [ErrorLine(line_no, text.strip())])[-self.keep:]
                 offset += end + 1
-        self._cache[key] = (offset, line_no, count, errors)
+        if len(head) < self.HEAD and offset:
+            head = self._head(path, min(self.HEAD, offset))
+        self._cache[key] = (offset, line_no, count, errors, head)
         return count, list(errors)
+
+    HEAD = 256  # bytes compared to recognise a rewritten file
+
+    @staticmethod
+    def _head(path: Path, size: int) -> bytes:
+        try:
+            with open(path, "rb") as handle:
+                return handle.read(size)
+        except OSError:
+            return b""
 
 
 def tail(path: Optional[Path], lines: int = 20) -> list:
@@ -292,6 +309,19 @@ def experiment_scheduler(exp_dir: Path, default: str = "") -> str:
         return json.loads((exp_dir / "pipemaker_manifest.json").read_text(encoding="utf-8")).get("scheduler", default)
     except (OSError, ValueError):
         return default
+
+
+def experiment_tracks_status(exp_dir: Path) -> bool:
+    """Whether the jobs of this build write status files (recorded in the manifest)."""
+    try:
+        manifest = json.loads((exp_dir / "pipemaker_manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    if "status_tracking" in manifest:
+        return bool(manifest["status_tracking"])
+    shell = manifest.get("workflow", {}).get("general_settings", {}).get("environment", ["bash"])
+    shell = shell[0] if isinstance(shell, list) and shell else shell
+    return str(shell) in ("bash", "zsh", "ksh")  # builds made before the flag existed
 
 
 def default_experiments(workspace: Workspace) -> list:
@@ -321,6 +351,7 @@ def collect(workspace: Workspace, experiments: list, scanner: ErrorScanner,
         if scripts.is_dir():
             names += sorted(p.stem for p in scripts.glob("*.sh") if p.stem not in submitted)
         submitting = (exp_dir / ".submitting").exists()
+        tracked = experiment_tracks_status(exp_dir)
         scheduler_info = query(experiment_scheduler(exp_dir), [submitted[n].get("job_id", "") for n in submitted])
         for name in names:
             row = submitted.get(name, {})
@@ -354,7 +385,9 @@ def collect(workspace: Workspace, experiments: list, scanner: ErrorScanner,
             elif sched:
                 job.state = sched[0]
             elif row and scheduler_info is not None:
-                job.state = UNKNOWN  # submitted, never started, unknown to the scheduler
+                # Gone from the scheduler without a status file: with tracking it never started
+                # (worth a rerun); without tracking there is no way to tell how it ended.
+                job.state = UNKNOWN if tracked else ENDED
             job.stdout = str(find_log(exp_dir, "stdout", name, job.job_id) or "")
             stderr = find_log(exp_dir, "stderr", name, job.job_id)
             job.stderr = str(stderr or "")
@@ -365,7 +398,7 @@ def collect(workspace: Workspace, experiments: list, scanner: ErrorScanner,
 
 
 # ------------------------------------------------------------- display
-_COLORS = {SKIPPED: "33", FAILED: "31", KILLED: "31", RUNNING: "36", PENDING: "33", DONE: "32", UNKNOWN: "35", NOT_SUBMITTED: "2"}
+_COLORS = {ENDED: "2", SKIPPED: "33", FAILED: "31", KILLED: "31", RUNNING: "36", PENDING: "33", DONE: "32", UNKNOWN: "35", NOT_SUBMITTED: "2"}
 
 
 def _fmt_duration(seconds: Optional[float]) -> str:
@@ -526,7 +559,7 @@ def monitor(
                            DEFAULT_IGNORE_PATTERNS + tuple(extra_ignore or ()))
 
     while True:
-        statuses = collect(workspace, experiments, scanner, query)
+        everything = statuses = collect(workspace, experiments, scanner, query)
         if job:
             statuses = [s for s in statuses if s.name == job or s.job_id == job]
             if not statuses:
@@ -553,7 +586,8 @@ def monitor(
         else:
             stream.write(text + ("\n" if not text.endswith("\n") else ""))
         stream.flush()
-        all_final = all(s.state in FINAL_STATES for s in statuses)
+        # Decide on *all* jobs: with --errors the list shown may be empty while jobs still run.
+        all_final = all(s.state in FINAL_STATES for s in (statuses if job else everything))
         if not watch or all_final:
             if watch and all_final:
                 stream.write("All jobs have finished.\n")

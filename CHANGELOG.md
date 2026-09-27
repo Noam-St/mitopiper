@@ -41,6 +41,14 @@ The single `maker.py` script was refactored into the installable `pipemaker` pac
 - pandas and Biopython are no longer needed.
 
 ### Fixed
+- Diagnosis: a missing or corrupt file is traced to the step that writes that file, matched by folder *and* extension and never later than the failed step. Before, a `view` failure on a missing `.sam` suggested resuming at `index`, and a corrupt trimmed FASTQ pointed to `fastqc`. A corrupt file that no step of the build produces gets no automatic resume point.
+- `rerun --auto-fix` / `monitor --rerun` ignore a suggested resume step that is not before the failed step of that build, instead of aborting the whole rerun.
+- csh/tcsh jobs report their status (exit status checked after each command) and honour `fail_fast`. Automatic reference indexing uses csh syntax under csh/tcsh. The `local` scheduler records the exit code of jobs that cannot report it themselves.
+- SGE: dependent jobs no longer run after a failed dependency (`-hold_jid` releases them anyway). Every dependent job checks its dependencies and marks itself `SKIPPED`.
+- Jobs of untracked shells that have left the scheduler show as `ENDED` rather than `UNKNOWN`, so they are not resubmitted and `--watch` terminates.
+- `monitor --errors --watch` no longer stops while jobs are still running.
+- The stderr scanner notices a log that was rewritten (e.g. by a local rerun) even if it grew past the previous read position.
+- `build --steps <experiment-level step>` builds only that job instead of reporting "No job scripts were generated", and empty per-sample scripts are no longer written.
 - Ending input (Ctrl-D or piped answers running out) and piping output into `head` no longer print Python tracebacks.
 - Placeholders are resolved by dictionary lookup; `eval()` of user text was removed.
 - Downloads use Python's `urllib` with retries; the reference download no longer shells out through `os.system`.

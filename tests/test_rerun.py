@@ -17,11 +17,15 @@ def job(errors=(), rc=None, sched="", step="bwa-align", state=mon.FAILED):
                          errors=[mon.ErrorLine(i, t) for i, t in enumerate(errors, 1)])
 
 
-CTX = Context(steps=["wget", "trim", "bwa-align", "view"], memory="30G", walltime="1-20:00:00", scheduler="slurm",
-              exp_dir="/w/output/E",
-              pipeline={"wget": {"outdir": "fastq"}, "trim": {"outdir": "post_trim"},
-                        "bwa-align": {"outdir": "alignment", "key": "bwa mem"}, "view": {"outdir": "alignment"}},
-              references={"Homo_sapiens": {"refpath": "/refs/hs.fa", "gtfpath": "/refs/hs.gtf"}})
+def _ctx(steps=("wget", "fastqc_pre", "trim", "fastqc", "bwa-align", "view", "sort", "index", "mpileup")):
+    from pipemaker.config import Workflow
+
+    wf = Workflow.default()
+    return Context(steps=list(steps), pipeline=wf.pipeline, memory="30G", walltime="1-20:00:00", scheduler="slurm",
+                   exp_dir="/w/output/E", references={"Homo_sapiens": {"refpath": "/refs/hs.fa", "gtfpath": "/refs/hs.gtf"}})
+
+
+CTX = _ctx()
 
 
 @pytest.mark.parametrize("kwargs,cause,rerun_opts", [
@@ -33,13 +37,23 @@ CTX = Context(steps=["wget", "trim", "bwa-align", "view"], memory="30G", walltim
      {"free_form_hint": "module load bwa"}),
     (dict(errors=["gzip: /w/output/E/fastq/x_1.fastq.gz: unexpected end of file"], step="trim"), "corrupt",
      {"from_step": "wget", "clean": True}),
+    (dict(errors=["gzip: /w/output/E/post_trim/x_1_val_1.fq.gz: invalid compressed data--crc error"]), "corrupt",
+     {"from_step": "trim", "clean": True}),                        # not fastqc, which writes no data
+    (dict(errors=["[E::bgzf_read_block] EOF marker is absent. The input /w/output/E/alignment/x.sorted.bam is probably truncated"],
+          step="mpileup"), "damaged input from 'sort'", {"from_step": "sort", "clean": True}),   # not index (.bai)
+    (dict(errors=["md5sum: /w/output/E/fastq/x_1.fastq.gz: FAILED", "md5sum: WARNING: 1 computed checksum did NOT match"],
+          step="wget"), "failed checksum", {"from_step": "wget", "clean": True}),
     (dict(errors=["[E::bwa_idx_load_from_disk] fail to locate the index files"]), "BWA index", {}),
     (dict(errors=["[main_samview] fail to read the header from \"/w/output/E/alignment/x.sam\"."], step="view"),
      "empty or damaged input", {"from_step": "bwa-align", "clean": True}),
     (dict(errors=["[E::hts_open_format] fail to open file '/refs/hs.fa'", "/refs/hs.fa: No such file or directory"]),
      "reference file", {}),
     (dict(errors=["ls: cannot access '/w/output/E/post_trim/x_trimmed.fq.gz': No such file or directory"]),
-     "which step 'trim' should have produced", {"from_step": "trim"}),
+     "which step 'trim' should have produced", {"from_step": "trim"}),       # not fastqc (same folder)
+    (dict(errors=["[main_samview] fail to open \"/w/output/E/alignment/x.sam\": No such file or directory"], step="view"),
+     "which step 'bwa-align' should have produced", {"from_step": "bwa-align"}),   # not index (same folder, later)
+    (dict(errors=["gzip: /w/output/E/fastq/x_1.fastq.gz: No such file or directory"], step="trim"),
+     "which step 'wget' should have produced", {"from_step": "wget"}),        # not fastqc_pre
     (dict(errors=["wget: unable to resolve host address 'ftp.sra.ebi.ac.uk'"], step="wget"), "no network access", {}),
     (dict(errors=["write error: No space left on device"]), "disk", {}),
     (dict(rc=139), "segmentation fault", {"memory": "60G"}),
@@ -160,3 +174,10 @@ def test_monitor_rerun_shortcut(tmp_path, capfd):
     assert "3 job(s) to rerun" in capfd.readouterr().out
     assert states(ws)["s_a_0"] == mon.FAILED  # still failing: the tool is still missing
     assert main(["-w", str(ws.root), "rerun", "--dry-run"]) == 0
+
+
+def test_corrupt_input_from_outside_the_build_gets_no_automatic_resume_point():
+    ctx = _ctx(steps=("trim", "fastqc", "bwa-align"))            # built with --steps, no download step
+    (sug, *_) = diagnose(job(["gzip: /w/output/E/fastq/x_1.fastq.gz: unexpected end of file"], step="trim"), ctx)
+    assert "not produced by any step of this build" in sug.advice[0]
+    assert merged_rerun_options([sug]) == {}

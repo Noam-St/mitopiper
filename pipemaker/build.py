@@ -13,12 +13,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import __version__
+from . import __version__, jobscript
 from .builder import (
     build_experiment_steps,
     build_sample_job,
     job_threads,
-    render_steps,
+    StepCommands,
     selected_steps,
 )
 from .config import Workflow, Workspace
@@ -146,51 +146,9 @@ def job_resources(workflow: Workflow) -> JobResources:
     )
 
 
-TRACKED_SHELLS = ("bash", "zsh", "ksh")
-
-
-def tracks_status(workflow: Workflow) -> bool:
-    return str(workflow.general("environment", "bash") or "bash") in TRACKED_SHELLS
-
-
-def status_tracking(exp_dir: str, job_name: str) -> str:
-    """Shell snippet that keeps ``status/<job>.status`` up to date for ``pipemaker monitor``.
-
-    The status file holds one line ``STATE STEP START UPDATED RC`` and is
-    rewritten when a step starts and when the job exits (via an EXIT trap, so
-    failures are caught with their exit code).  ``status/<job>.steps`` keeps
-    the start time of every step.
-    """
-    return _STATUS_SNIPPET.replace("@STATUS@", f"{exp_dir}/status/{job_name}")
-
-
-_STATUS_SNIPPET = r"""PM_STATUS="@STATUS@.status"; PM_STEPS="@STATUS@.steps"; PM_STEP="-"; PM_START=$(date +%s)
-mkdir -p "$(dirname "$PM_STATUS")"; : > "$PM_STEPS"
-pm_step() {
-    PM_STEP="$1"
-    echo "RUNNING $1 $PM_START $(date +%s) -" > "$PM_STATUS"
-    echo "$1 $(date +%s)" >> "$PM_STEPS"
-    echo "[pipemaker] step $1 started $(date '+%F %T')"
-}
-pm_exit() {
-    pm_rc=$?
-    if [ "$pm_rc" -eq 0 ]; then pm_state=DONE; else pm_state=FAILED; fi
-    echo "$pm_state $PM_STEP $PM_START $(date +%s) $pm_rc" > "$PM_STATUS"
-}
-trap pm_exit EXIT
-echo "RUNNING - $PM_START $PM_START -" > "$PM_STATUS"
-"""
-
-
-def _preamble(workflow: Workflow, exp_dir: str = "", job_name: str = "") -> str:
-    text = status_tracking(exp_dir, job_name) if job_name and tracks_status(workflow) else ""
-    free_form = str(workflow.general("free_form", "") or "")
-    if free_form:
-        text += free_form if free_form.endswith("\n") else free_form + "\n"
-    shell = str(workflow.general("environment", "bash") or "bash")
-    if str(workflow.general("fail_fast", True)).lower() in ("true", "1", "yes") and shell in ("bash", "zsh", "ksh"):
-        text += "set -eo pipefail\n"
-    return text
+def _preamble(workflow: Workflow, exp_dir: str = "", job_name: str = "", depends_on: Optional[list] = None) -> str:
+    """Kept for backwards compatibility; see :func:`jobscript.preamble`."""
+    return jobscript.preamble(workflow, exp_dir, job_name, depends_on)
 
 
 def _write_script(path: Path, content: str) -> None:
@@ -290,25 +248,29 @@ def build_experiment(
     write_sample_table(samples, exp_dir / "samples.tsv")
 
     # Script names equal job names, so logs and status files can be matched to them.
-    track = tracks_status(workflow)
     jobs.directory = exp
-    if prep_lines:
-        name = f"prep_{exp_dir.name}"
-        path = scripts_dir / f"{name}.sh"
-        body = ("pm_step prepare_references\n" if track else "") + "\n".join(prep_lines) + "\n"
-        _write_script(path, header(scheduler, name, exp, resources) + _preamble(workflow, exp, name) + body)
+    prep_name = f"prep_{exp_dir.name}" if prep_lines else None
+    if prep_name:
+        path = scripts_dir / f"{prep_name}.sh"
+        steps_ = [StepCommands("prepare_references", "Index the automatically downloaded references", prep_lines)]
+        _write_script(path, header(scheduler, prep_name, exp, resources) + jobscript.preamble(workflow, exp, prep_name)
+                      + jobscript.body(steps_, exp_dir.name, workflow))
         jobs.prepare = str(path)
-    for job in sample_jobs:
+    # A build of experiment-level steps only (e.g. --steps multiqc) has no sample jobs to run.
+    runnable = [job for job in sample_jobs if job.steps]
+    for job in runnable:
         path = scripts_dir / f"{job.job_name}.sh"
-        content = header(scheduler, job.job_name, exp, resources) + _preamble(workflow, exp, job.job_name)
-        content += f'echo "Current organism: {job.sample.organism}"\n\n' + render_steps(job.steps, job.sample.name, track)
+        content = header(scheduler, job.job_name, exp, resources)
+        content += jobscript.preamble(workflow, exp, job.job_name, [prep_name] if prep_name else None)
+        content += f'echo "Current organism: {job.sample.organism}"\n\n' + jobscript.body(job.steps, job.sample.name, workflow)
         _write_script(path, content)
         jobs.samples.append(str(path))
     if experiment_steps:
         name = f"e_{exp_dir.name}"
         path = scripts_dir / f"{name}.sh"
-        content = header(scheduler, name, exp, resources) + _preamble(workflow, exp, name)
-        _write_script(path, content + render_steps(experiment_steps, exp_dir.name, track))
+        content = header(scheduler, name, exp, resources)
+        content += jobscript.preamble(workflow, exp, name, [j.job_name for j in runnable])
+        _write_script(path, content + jobscript.body(experiment_steps, exp_dir.name, workflow))
         jobs.experiment = str(path)
 
     write_manifest(exp_dir, workflow, options, samples, refs, plan)
@@ -338,6 +300,7 @@ def write_manifest(exp_dir: Path, workflow: Workflow, options: BuildOptions, sam
         "scheduler": options.scheduler,
         "steps": plan["steps"],
         "reference_override": options.reference,
+        "status_tracking": jobscript.tracks_status(workflow),
         "references": {org: ref.to_dict() for org, ref in refs.items()},
         "samples": [{"name": s.name, "runs": s.run_accessions, "organism": s.organism} for s in samples],
         "workflow": workflow.as_dict(),

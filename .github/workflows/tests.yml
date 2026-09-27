@@ -15,5 +15,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - run: sudo apt-get install -y tcsh csh   # the csh/tcsh job-script tests run real jobs
       - run: pip install ".[test]"
       - run: pytest -q

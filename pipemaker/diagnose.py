@@ -54,25 +54,72 @@ class Context:
                    walltime=gs("walltime"), scheduler=manifest.get("scheduler", ""), exp_dir=exp_dir,
                    references=manifest.get("references", {}))
 
+    @property
+    def sample_steps(self) -> list:
+        return [s for s in self.steps if self.pipeline.get(s, {}).get("scope", "sample") == "sample"]
+
     def step_before(self, step: str) -> Optional[str]:
-        sample_steps = [s for s in self.steps if self.pipeline.get(s, {}).get("scope", "sample") == "sample"]
-        if step in sample_steps and sample_steps.index(step) > 0:
-            return sample_steps[sample_steps.index(step) - 1]
+        steps = self.sample_steps
+        if step in steps and steps.index(step) > 0:
+            return steps[steps.index(step) - 1]
         return None
 
     def step_after(self, step: str) -> Optional[str]:
-        sample_steps = [s for s in self.steps if self.pipeline.get(s, {}).get("scope", "sample") == "sample"]
-        if step in sample_steps and sample_steps.index(step) + 1 < len(sample_steps):
-            return sample_steps[sample_steps.index(step) + 1]
+        steps = self.sample_steps
+        if step in steps and steps.index(step) + 1 < len(steps):
+            return steps[steps.index(step) + 1]
         return None
 
-    def producer_of(self, path: str) -> Optional[str]:
-        """Last step before the failure whose output directory contains ``path``."""
-        if not self.exp_dir or not path.startswith(self.exp_dir):
+    def _extensions(self, step: str) -> list:
+        """File extensions a step writes (the download step writes FASTQ files)."""
+        from .builder import output_exts
+
+        exts = [e for e in output_exts(self.pipeline.get(step, {})).values() if e]
+        if step == "wget":
+            exts += [".fastq.gz", ".fq.gz"]
+        return exts
+
+    def _steps_up_to(self, step: Optional[str]) -> list:
+        steps = self.sample_steps
+        return steps[: steps.index(step) + 1] if step in steps else steps
+
+    def producer_of(self, path: str, up_to: Optional[str] = None) -> Optional[str]:
+        """The step that writes ``path``: the last one, up to and including ``up_to``,
+        whose output directory is the file's folder and that writes files with its extension."""
+        if not self.exp_dir or not path.startswith(self.exp_dir.rstrip("/") + "/"):
             return None
-        rel_dir = str(Path(path).parent.relative_to(self.exp_dir)) if Path(path).parent != Path(self.exp_dir) else ""
-        candidates = [s for s in self.steps if str(self.pipeline.get(s, {}).get("outdir", "")).strip("/") == rel_dir]
+        folder = str(Path(path).parent)
+        found = None
+        for step in self._steps_up_to(up_to):
+            outdir = str(self.pipeline.get(step, {}).get("outdir", "") or "").strip("/")
+            step_dir = str(Path(self.exp_dir) / outdir) if outdir else self.exp_dir.rstrip("/")
+            if step_dir == folder and any(path.endswith(ext) for ext in self._extensions(step)):
+                found = step
+        return found
+
+    def last_producer_before(self, step: str) -> Optional[str]:
+        """The last step before ``step`` that writes any file (skips report-only steps such as fastqc)."""
+        candidates = [s for s in self._steps_up_to(step) if s != step and self._extensions(s)]
         return candidates[-1] if candidates else None
+
+    def input_producer(self, step: str, text: str, line_pattern: str) -> tuple:
+        """``(producer, path)`` of the damaged input named in the matching error line.
+
+        With a path that no step of this build writes, the producer is ``None``
+        (the file comes from outside the build).  Without any path, the best
+        guess is the last step before ``step`` that writes files.
+        """
+        paths = []
+        for line in text.splitlines():
+            if re.search(line_pattern, line, re.IGNORECASE):
+                paths += re.findall(r"(/[^\s'\":]+)", line)
+        for path in paths:
+            producer = self.producer_of(path, up_to=step)
+            if producer:
+                return producer, path
+        if paths:
+            return None, paths[0]
+        return self.last_producer_before(step), None
 
 
 # ------------------------------------------------------------ resources
@@ -200,12 +247,17 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
                        ["pipemaker cleanup stdout stderr", f"du -sh {ctx.exp_dir or 'output/*'}/*", "pipemaker rerun"], {}))
 
     # --- inputs --------------------------------------------------------------------
-    if _find(r"unexpected end of file|invalid compressed data|crc error|not in gzip format|"
-             r"md5sum: warning|computed checksum did not match|: FAILED$|premature end|truncated (gzip|file)", text):
-        producer = "wget" if step in ("wget", "fastqc_pre", "trim", "") else (ctx.step_before(step) or step)
-        add(Suggestion("An input file is corrupt or incomplete" + (" (failed checksum)" if "md5" in text.lower() else ""),
-                       [f"Delete the output of '{producer}' and produce it again."],
-                       [f"pipemaker rerun --from {producer} --clean"], {"from_step": producer, "clean": True}))
+    corrupt = (r"unexpected end of file|invalid compressed data|crc error|not in gzip format|"
+               r"md5sum: warning|computed checksum did not match|: FAILED$|premature end|truncated (gzip|file)")
+    if _find(corrupt, text):
+        producer, path = ctx.input_producer(step, text, corrupt)
+        title = "An input file is corrupt or incomplete" + (" (failed checksum)" if "md5" in text.lower() else "")
+        if producer:
+            add(Suggestion(title, [f"Delete the output of '{producer}'" + (f" ({path})" if path else "") + " and produce it again."],
+                           [f"pipemaker rerun --from {producer} --clean"], {"from_step": producer, "clean": True}))
+        else:
+            add(Suggestion(title, [f"{path or 'The file'} is not produced by any step of this build: replace it with a "
+                                   "good copy (e.g. download it again), then rerun."], ["pipemaker rerun"], {}))
     if _find(r"fail to locate the index|bwa_idx_load|\[E::bwa_idx", text):
         fasta = next((r.get("refpath") for r in ctx.references.values() if r.get("refpath")), "REF.fa")
         add(Suggestion("The BWA index of the reference is missing",
@@ -219,10 +271,12 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
         add(Suggestion("STAR cannot find a generated genome in --genomeDir",
                        ["Run STAR --runMode genomeGenerate for the reference (automatic for references downloaded "
                         "with 'refs fetch-mt'), or point genomeDir to an existing index."], ["pipemaker rerun"], {}))
-    if _find(r"fail to read the header|EOF marker is absent|is not a (sam|bam)|file truncated", text):
-        prev = ctx.step_before(step)
-        add(Suggestion(f"'{step or 'The step'}' got an empty or damaged input from the previous step",
-                       [f"The previous step{' (' + prev + ')' if prev else ''} probably failed silently or was "
+    damaged = r"fail to read the header|EOF marker is absent|is not a (sam|bam)|file truncated"
+    if _find(damaged, text):
+        prev, _ = ctx.input_producer(step, text, damaged)
+        prev = prev if prev != step else None
+        add(Suggestion(f"'{step or 'The step'}' got an empty or damaged input" + (f" from '{prev}'" if prev else ""),
+                       [f"The step that wrote it{' (' + prev + ')' if prev else ''} probably failed silently or was "
                         "interrupted. Produce its output again."],
                        [f"pipemaker rerun --from {prev} --clean" if prev else "pipemaker rerun --from-start"],
                        {"from_step": prev, "clean": True} if prev else {"from_start": True}))
@@ -231,7 +285,7 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
     if missing:
         path = missing.group(1)
         refs = {v for r in ctx.references.values() for v in r.values() if isinstance(v, str) and v}
-        producer = ctx.producer_of(path)
+        producer = ctx.producer_of(path, up_to=step)
         if any(path.startswith(r) or r.startswith(path) for r in refs):
             add(Suggestion(f"A reference file does not exist on the compute nodes: {path}",
                            ["Check the path (and that it is on a shared file system), then fix it."],

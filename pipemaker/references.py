@@ -308,26 +308,36 @@ def fetch_mt_reference(
     return ReferenceSet(refpath=str(fasta), gtfpath=str(gff), source="ncbi_mt", accession=accession)
 
 
+def _unless_exists(path: str, command: str, csh: bool) -> str:
+    """Run ``command`` only if ``path`` is missing or empty, in the job's shell syntax."""
+    if csh:
+        return f'if ( ! -e "{path}" || -z "{path}" ) {command}'
+    return f'if [ ! -s "{path}" ]; then {command}; fi'
+
+
 def index_commands(ref: ReferenceSet, workflow) -> list:
     """Shell commands that index an automatically downloaded reference.
 
     Only indices required by the active steps are built, and every command is
-    guarded so it is skipped when the index already exists.
+    guarded so it is skipped when the index already exists.  The syntax
+    follows the job shell (``environment``): POSIX shells or csh/tcsh.
     """
     fasta = ref.refpath
     if not fasta:
         return []
+    shell = str(workflow.general("environment", "bash") or "bash").strip()
+    csh = shell in ("csh", "tcsh")
     fasta_dir = str(Path(fasta).parent)
     active = workflow.active_order()
     pipeline = workflow.pipeline
     keys = {s: pipeline[s].get("key", "") for s in active}
     commands = []
     if any(k.startswith("samtools") for k in keys.values()) or "bwa-align" in active:
-        commands.append(f'if [ ! -s "{fasta}.fai" ]; then samtools faidx "{fasta}"; fi')
+        commands.append(_unless_exists(f"{fasta}.fai", f'samtools faidx "{fasta}"', csh))
     if "bwa-align" in active:
         step = pipeline["bwa-align"]
         bwa = step.get("path") or step.get("key", "bwa").split(" ")[0]
-        commands.append(f'if [ ! -s "{fasta}.bwt" ]; then {bwa} index "{fasta}"; fi')
+        commands.append(_unless_exists(f"{fasta}.bwt", f'{bwa} index "{fasta}"', csh))
     if "STAR-alignment" in active:
         step = pipeline["STAR-alignment"]
         star = step.get("path") or step.get("key", "STAR")
@@ -335,8 +345,8 @@ def index_commands(ref: ReferenceSet, workflow) -> list:
             nbases = sa_index_nbases(validate_fasta(fasta))
         except RefError:
             nbases = 14
-        commands.append(
-            f'if [ ! -s "{fasta_dir}/SA" ]; then {star} --runMode genomeGenerate --genomeDir "{fasta_dir}" '
-            f'--runThreadN 4 --genomeFastaFiles "{fasta}" --genomeSAindexNbases {nbases}; fi'
-        )
+        commands.append(_unless_exists(
+            f"{fasta_dir}/SA",
+            f'{star} --runMode genomeGenerate --genomeDir "{fasta_dir}" --runThreadN 4 '
+            f'--genomeFastaFiles "{fasta}" --genomeSAindexNbases {nbases}', csh))
     return commands

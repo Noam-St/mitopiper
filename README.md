@@ -434,7 +434,9 @@ are grouped and concatenated.
 
 `master.sh` submits the reference job first, makes every sample job wait for it, and makes the
 experiment-level job wait for every sample job. It uses `-hold_jid` on SGE,
-`--dependency=afterok` on SLURM, and `-w done()` on LSF. Every file of a sample is named
+`--dependency=afterok` on SLURM, and `-w done()` on LSF. SGE's `-hold_jid` releases a job even
+when its dependency failed, so every dependent job also checks at start-up that its dependencies
+finished successfully. If one didn't, the job marks itself `SKIPPED` and does nothing. Every file of a sample is named
 `<sample_accession>_<index>_<organism initials>`, e.g. `SAMN01234567_3_DR_1.fastq.gz`.
 
 ## Monitoring
@@ -463,15 +465,18 @@ How it knows:
   `DONE`, or `FAILED` with the exit code and the step that failed. Jobs that are queued, or were
   killed before they could report (time or memory limit, `scancel`/`qdel`), come from the scheduler
   (`sacct`/`squeue`, `qstat`, `bjobs`). Jobs that `master.sh` has not reached yet show as pending.
-  With the `local` scheduler, jobs whose dependency failed are `SKIPPED`.
+  Jobs whose dependency failed are `SKIPPED` (on every scheduler).
 * **Errors.** Each job's stderr is scanned for error messages (`error`, `exception`, `command not
   found`, `No such file or directory`, `Segmentation fault`, `out of memory`, `killed`, time
   limits, …). Only new output is read on each refresh. Errors are counted even for jobs that exited
   with 0, so warnings aren't lost. Add patterns with `--pattern REGEX`, and silence noisy lines with
   `--ignore REGEX`.
 
-Status tracking needs a bash, zsh or ksh `environment` (the default). With other shells, only the
-scheduler state and the stderr scan are available.
+Status tracking works with every POSIX shell (bash, the default; sh, dash, zsh, ksh) and with csh and
+tcsh. Under csh/tcsh, which have no exit traps, each command's exit status is checked, so `fail_fast`
+applies there too. With any other shell, only the scheduler state and the stderr scan are available.
+Jobs that have left the scheduler are then shown as `ENDED` (outcome unknown), and `rerun` does not
+resubmit them unless you name them with `-j`.
 
 ## Rerunning failed samples
 

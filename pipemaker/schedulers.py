@@ -122,9 +122,17 @@ _SUBMIT_FUNCTIONS = {
         fi
     done
     echo "[pipemaker] running $script" >&2
+    local start rc=0 status_file="$logdir/status/$name.status"
+    start=$(date +%s)
     # A failing job must not stop the other (independent) jobs from running.
-    SHELL_BIN "$script" > "$logdir/stdout/$name.out" 2> "$logdir/stderr/$name.err" \
-        || echo "[pipemaker] $script failed (see $logdir/stderr/$name.err)" >&2
+    SHELL_BIN "$script" > "$logdir/stdout/$name.out" 2> "$logdir/stderr/$name.err" || rc=$?
+    [ "$rc" -eq 0 ] || echo "[pipemaker] $script failed (see $logdir/stderr/$name.err)" >&2
+    # Record the outcome when the job could not (shell without status tracking, or killed).
+    if [ ! -s "$status_file" ] || [ "$(cut -d' ' -f1 "$status_file")" = RUNNING ]; then
+        mkdir -p "$logdir/status"
+        if [ "$rc" -eq 0 ]; then state=DONE; else state=FAILED; fi
+        echo "$state - $start $(date +%s) $rc" > "$status_file"
+    fi
     echo "$name"
 }""",
 }

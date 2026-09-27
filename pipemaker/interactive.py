@@ -455,7 +455,8 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input, session_fa
             print(f"Error: {exc}\n")
             continue
         results.append(result)
-        print(f"{len(result.jobs.samples)} job script(s) written to {result.directory / 'scripts'}\n")
+        count = len(result.jobs.samples) + bool(result.jobs.experiment) + bool(result.jobs.prepare)
+        print(f"{count} job script(s) written to {result.directory / 'scripts'}\n")
 
     if not results:
         print("Nothing was generated.")

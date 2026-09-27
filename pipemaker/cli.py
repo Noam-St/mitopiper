@@ -187,10 +187,11 @@ def cmd_build(ws: Workspace, args) -> int:
             print(f"[dry-run] {result.name}: {len(result.plan['samples'])} sample(s), steps: {' -> '.join(result.plan['steps'])}")
             print(f"[dry-run] plan written to {result.directory / 'plan.json'}")
         else:
-            print(f"{result.name}: {len(result.jobs.samples)} job script(s) in {result.directory / 'scripts'}")
+            count = len(result.jobs.samples) + bool(result.jobs.experiment) + bool(result.jobs.prepare)
+            print(f"{result.name}: {count} job script(s) in {result.directory / 'scripts'}")
     if args.dry_run:
         return 0
-    if not any(r.jobs.samples for r in results):
+    if not any(r.jobs.samples or r.jobs.experiment for r in results):
         log.error("No job scripts were generated")
         return 1
     master = write_master(ws, scheduler, results, shell=str(workflow.general("environment", "bash")))

@@ -24,8 +24,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from .build import BuildError, _preamble, _write_script, find_experiment_metadata, job_resources, tracks_status
-from .builder import _join, build_experiment_steps, build_sample_job, output_paths, render_steps, step_scope
+from . import jobscript
+from .build import BuildError, _write_script, find_experiment_metadata, job_resources
+from .builder import StepCommands, _join, build_experiment_steps, build_sample_job, output_paths, step_scope
 from .config import Workflow, Workspace
 from .diagnose import Context, diagnose, merged_rerun_options
 from .metadata import load_samples
@@ -138,14 +139,19 @@ def plan(workspace: Workspace, experiments: Optional[list] = None, options: Opti
                     start = sample_steps[0] if sample_steps else ""
                 elif options.from_step:
                     start = options.from_step
-                elif auto.get("from_step"):
-                    start = auto["from_step"]
+                    if start not in sample_steps:
+                        raise BuildError(f"{job.name}: step '{start}' is not part of this build ({', '.join(sample_steps)})")
                 else:
-                    start = job.step if job.step in sample_steps else (sample_steps[0] if sample_steps else "")
-                if start and start not in sample_steps:
-                    raise BuildError(f"{job.name}: step '{start}' is not part of this build ({', '.join(sample_steps)})")
+                    failed_at = job.step if job.step in sample_steps else (sample_steps[0] if sample_steps else "")
+                    start = failed_at
+                    suggested = auto.get("from_step")
+                    # An automatic fix may only move the resume point *back*, to a step of this build.
+                    if suggested in sample_steps and (not failed_at or sample_steps.index(suggested) <= sample_steps.index(failed_at)):
+                        start = suggested
+                    elif suggested:
+                        log.info("%s: ignoring suggested resume step '%s' (not before the failed step in this build)", job.name, suggested)
                 item.start_step = start
-                item.clean = options.clean or bool(auto.get("clean"))
+                item.clean = options.clean or (bool(auto.get("clean")) and start == auto.get("from_step", start))
             item.overrides = {k: auto[k] for k in ("memory", "walltime") if auto.get(k)}
             for key in ("memory", "walltime", "threads", "queue"):
                 if getattr(options, key) not in (None, ""):
@@ -182,12 +188,13 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
         jobs = ExperimentJobs(name=exp, prepare=None, samples=[], experiment=None, directory=exp_s)
         scripts = exp_dir / "scripts"
 
+        prep_cmds = lambda wf: [c for ref in refs.values() if ref.needs_indexing for c in index_commands(ref, wf)]  # noqa: E731
+        prep_name = f"prep_{exp}" if prep_cmds(base) else None
         for item in (i for i in items if i.experiment == exp):
             wf = _apply_overrides(base, item.overrides, options.free_form)
-            track = tracks_status(wf)
             res = job_resources(wf)
             path = scripts / f"{item.name}.sh"
-            content = header(scheduler, item.name, exp_s, res) + _preamble(wf, exp_s, item.name)
+            content = header(scheduler, item.name, exp_s, res)
             if item.kind == "sample":
                 sample = by_job.get(item.name)
                 if sample is None or sample.organism not in refs:
@@ -195,18 +202,21 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
                 sample_steps = [s for s in steps if step_scope(wf, s) == "sample"]
                 todo = sample_steps[sample_steps.index(item.start_step):] if item.start_step else sample_steps
                 job = build_sample_job(sample, wf, exp_s, refs[sample.organism], todo)
+                content += jobscript.preamble(wf, exp_s, item.name, [prep_name] if prep_name else None)
                 content += f'echo "Current organism: {sample.organism}"\n'
                 content += f'echo "[pipemaker] rerun starting at step {item.start_step or todo[0]}"\n\n'
-                if item.clean and item.start_step:
-                    content += "\n".join(_clean_lines(sample, wf, exp_s, item.start_step)) + "\n"
-                content += render_steps(job.steps, sample.name, track)
+                clean = _clean_lines(sample, wf, exp_s, item.start_step) if item.clean and item.start_step else []
+                content += jobscript.body(job.steps, sample.name, wf, before=clean)
                 jobs.samples.append(str(path))
             elif item.kind == "experiment":
-                content += render_steps(build_experiment_steps(samples, wf, exp_s, steps), exp, track)
+                sample_deps = [n for n in by_job if (scripts / f"{n}.sh").exists()]
+                content += jobscript.preamble(wf, exp_s, item.name, sample_deps)
+                content += jobscript.body(build_experiment_steps(samples, wf, exp_s, steps), exp, wf)
                 jobs.experiment = str(path)
             else:
-                prep = [c for ref in refs.values() if ref.needs_indexing for c in index_commands(ref, wf)]
-                content += ("pm_step prepare_references\n" if track else "") + "\n".join(prep) + "\n"
+                content += jobscript.preamble(wf, exp_s, item.name)
+                prep = [StepCommands("prepare_references", "Index the automatically downloaded references", prep_cmds(wf))]
+                content += jobscript.body(prep, exp, wf)
                 jobs.prepare = str(path)
             _write_script(path, content)
             item.script = str(path)
