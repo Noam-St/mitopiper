@@ -2,19 +2,20 @@
 
 ## 2.0.0 (unreleased)
 
-The single `maker.py` script was refactored into the installable `pipemaker` package.
+The single `maker.py` script was refactored into the installable `mitopiper` package.
 
 ### Added
-- Nuclear genomes from NCBI Genome: `pipemaker refs fetch-genome ORGANISM [--accession GCF_…] [--nuclear-of SET]`, and an interactive option when an organism has no reference. pipemaker finds the reference assembly through the NCBI Datasets API and warns about its size before asking for confirmation. If none is found, it reports an error and (interactively) lets you enter a path instead. The download itself, verified against NCBI's MD5 sums, and the indexing run in the reference job on the cluster.
-- Tool check. Every build gets a `check_<exp>.sh` job that runs first and stops the pipeline if a tool the prep, sample or experiment jobs call cannot be found (e.g. cutadapt behind trim_galore). The same check runs locally before launching. Interactive mode offers to let you fix it yourself, to install into the current environment (conda/mamba from bioconda + conda-forge, or pip), or to add a set-up line to every job and regenerate the scripts. `pipemaker build` halts unless `--auto-fix` (install) or `--no-check` is given, and `pipemaker check [--auto-fix]` runs the check on its own. The monitor, diagnosis and rerun understand the check job.
-- Interactive mode chains build → launch → monitor → diagnose → rerun. After the scripts are written it offers to launch them, then opens an interactive monitor session (live table plus the commands `j`, `e`, `r`, `o`, `i`, `q`). The rerun options pre-fill the diagnosed fix. On start-up it offers to monitor the last build. Also available as `pipemaker monitor -i`.
-- `pipemaker rerun` / `python monitor.py --rerun`: resubmit failed, killed or skipped jobs, resuming at the step that failed. It supports per-rerun resource overrides, `--free-form` setup lines, `--from`/`--from-start`/`--clean`, and `--auto-fix`. Stuck dependants are cancelled, and reruns are logged in the manifests.
+- The package and command are named `mitopiper` (development builds were called `pipemaker`; their workspaces and manifests are still read).
+- Nuclear genomes from NCBI Genome: `mitopiper refs fetch-genome ORGANISM [--accession GCF_…] [--nuclear-of SET]`, and an interactive option when an organism has no reference. mitopiper finds the reference assembly through the NCBI Datasets API and warns about its size before asking for confirmation. If none is found, it reports an error and (interactively) lets you enter a path instead. The download itself, verified against NCBI's MD5 sums, and the indexing run in the reference job on the cluster.
+- Tool check. Every build gets a `check_<exp>.sh` job that runs first and stops the pipeline if a tool the prep, sample or experiment jobs call cannot be found (e.g. cutadapt behind trim_galore). The same check runs locally before launching. Interactive mode offers to let you fix it yourself, to install into the current environment (conda/mamba from bioconda + conda-forge, or pip), or to add a set-up line to every job and regenerate the scripts. `mitopiper build` halts unless `--auto-fix` (install) or `--no-check` is given, and `mitopiper check [--auto-fix]` runs the check on its own. The monitor, diagnosis and rerun understand the check job.
+- Interactive mode chains build → launch → monitor → diagnose → rerun. After the scripts are written it offers to launch them, then opens an interactive monitor session (live table plus the commands `j`, `e`, `r`, `o`, `i`, `q`). The rerun options pre-fill the diagnosed fix. On start-up it offers to monitor the last build. Also available as `mitopiper monitor -i`.
+- `mitopiper rerun` / `python monitor.py --rerun`: resubmit failed, killed or skipped jobs, resuming at the step that failed. It supports per-rerun resource overrides, `--free-form` setup lines, `--from`/`--from-start`/`--clean`, and `--auto-fix`. Stuck dependants are cancelled, and reruns are logged in the manifests.
 - Failure diagnosis: the monitor explains each failed job (out of memory, time limit, missing tool/reference/index/input, corrupt files, download and disk problems, …) and suggests fixes with ready-to-run commands.
 - The `local` scheduler honours dependencies. Jobs whose dependency failed are marked `SKIPPED`.
-- `pipemaker monitor` / `python monitor.py`: a live view (`--watch`) of submitted jobs with state, current step, elapsed time and error lines from each job's stderr. `--errors` and `--job` show the failed step and its errors, `--json` gives machine readable output. It detects jobs killed by the scheduler (time/memory limits) through `sacct`/`qstat`/`bjobs`. Job scripts now report their progress to `status/<job>.status`, and `master.sh` records job ids in `jobs.tsv`.
+- `mitopiper monitor` / `python monitor.py`: a live view (`--watch`) of submitted jobs with state, current step, elapsed time and error lines from each job's stderr. `--errors` and `--job` show the failed step and its errors, `--json` gives machine readable output. It detects jobs killed by the scheduler (time/memory limits) through `sacct`/`qstat`/`bjobs`. Job scripts now report their progress to `status/<job>.status`, and `master.sh` records job ids in `jobs.tsv`.
 - A step can produce several output files. `output_ext` accepts named outputs (`{"bam": ..., "log": ...}` or `bam=.bam;log=.log`), referenced as `output_<step>:<name>`, `output_<step>:all`, or `outputs_<step>:<name>` in experiment-level steps. The default STAR step exposes its BAM, log and splice-junction outputs.
 - Project/study/sample accessions (e.g. `PRJEB12345`, `PRJNA67890`, `SRP012345`) can be given instead of a metadata file. The run table is fetched from the ENA Portal API (`build`, the interactive prompt, and `fetch-metadata`).
-- `pipemaker` command with the sub-commands `build`, `presets`, `refs`, `make-tsv`, `cleanup` and `init`, for scripted, non-interactive builds. The interactive menus are still the default.
+- `mitopiper` command with the sub-commands `build`, `presets`, `refs`, `make-tsv`, `cleanup` and `init`, for scripted, non-interactive builds. The interactive menus are still the default.
 - SRA metadata support (`SraRunInfo.csv`, SRA Run Selector tables). FASTQ URLs are derived from ENA's mirror.
 - Rows without a `fastq_ftp` link are skipped with a warning instead of breaking the build.
 - Paired runs listed with an extra unpaired file use only the `_1`/`_2` mates.
@@ -24,7 +25,7 @@ The single `maker.py` script was refactored into the installable `pipemaker` pac
 - Experiment-level steps (`"scope": "experiment"`), run after all sample jobs finish, e.g. the new `multiqc` step.
 - Job dependencies in `master.sh` for SGE, SLURM and LSF, plus a `local` scheduler for workstations and testing.
 - `--dry-run` writes `plan.json` with every resolved variable and command. `--steps`/`--skip` pick steps for a single build.
-- Provenance manifest (`pipemaker_manifest.json`) for every build.
+- Provenance manifest (`mitopiper_manifest.json`) for every build.
 - `make-tsv` symlinks local FASTQ files instead of copying and renaming them, and groups Illumina lanes.
 - General settings `account`, `walltime`, `parallel_env`, `fail_fast`, `verify_md5`, `download_delay`. `qsub_threads` accepts `auto`.
 - Test suite and CI.

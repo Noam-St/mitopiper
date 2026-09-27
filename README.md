@@ -1,8 +1,8 @@
-# pipemaker
+# mitopiper
 
 **Build, launch and babysit sequencing pipelines on an HPC cluster, straight from ENA/SRA metadata.**
 
-pipemaker takes a set of samples and a configurable workflow (download → QC → trimming → alignment
+mitopiper takes a set of samples and a configurable workflow (download → QC → trimming → alignment
 → post-processing …). It writes one job script per biological sample for **SGE (qsub)**, **SLURM
 (sbatch)** or **LSF (bsub)**, submits them with the right dependencies, follows them while they run,
 explains the failures, and reruns failed samples from the step where they stopped. It was built to
@@ -26,7 +26,7 @@ mitochondrial reference genome from NCBI.
   sections. Both produce the same scripts.
 * **Lightweight.** Pure Python with one small dependency (`tabulate`).
 
-> pipemaker is the packaged successor of the `maker.py` script in this repository. Existing
+> mitopiper is the packaged successor of the `maker.py` script in this repository. Existing
 > workspaces (`config/`, `output/`) keep working, and `python maker.py` still starts the
 > interactive mode.
 
@@ -52,24 +52,24 @@ mitochondrial reference genome from NCBI.
 
 ## Installation
 
-Install pipemaker on the cluster's **login node**, where jobs are submitted from:
+Install mitopiper on the cluster's **login node**, where jobs are submitted from:
 
 ```bash
 git clone https://github.com/Noam-St/Semi-automatic_csh_files_for_qsub.git
 cd Semi-automatic_csh_files_for_qsub
 pip install .                  # inside an active conda/virtual environment
-pipemaker --version
+mitopiper --version
 ```
 
-Without a conda/virtual environment, use `pip install --user .` instead. That puts the `pipemaker`
-command in `~/.local/bin`. If `pipemaker` is then "command not found", add that folder to your
+Without a conda/virtual environment, use `pip install --user .` instead. That puts the `mitopiper`
+command in `~/.local/bin`. If `mitopiper` is then "command not found", add that folder to your
 `PATH` once:
 
 ```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
 ```
 
-`python -m pipemaker` always works as a drop-in replacement for `pipemaker`, whatever your `PATH`.
+`python -m mitopiper` always works as a drop-in replacement for `mitopiper`, whatever your `PATH`.
 
 <details>
 <summary>Running from the cloned folder without installing</summary>
@@ -77,8 +77,8 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
 ```bash
 pip install --user tabulate
 python maker.py                 # interactive mode
-python -m pipemaker --help      # command-line mode (same as `pipemaker ...`)
-python monitor.py -i            # monitor (same as `pipemaker monitor -i`)
+python -m mitopiper --help      # command-line mode (same as `mitopiper ...`)
+python monitor.py -i            # monitor (same as `mitopiper monitor -i`)
 ```
 Run these from inside the cloned folder, and use `-w /path/to/workspace` to work elsewhere.
 </details>
@@ -93,13 +93,13 @@ Requirements:
 
 ### Before you start
 
-* **Workspace.** A workspace is just a directory. pipemaker keeps its configuration (`config/`), the
+* **Workspace.** A workspace is just a directory. mitopiper keeps its configuration (`config/`), the
   generated scripts and results (`output/`) and downloaded references (`references/`) there. Create
-  one per project and run pipemaker from inside it (or point to it with `-w DIR`).
+  one per project and run mitopiper from inside it (or point to it with `-w DIR`).
 * **Your samples.** Have one of these ready: a project accession such as `PRJNA123456`, a metadata
   table you downloaded from ENA or SRA, or a folder of FASTQ files (see [Inputs](#inputs)).
 * **A reference per organism.** This can be an existing genome (FASTA, plus a GTF/GFF for counting),
-  already indexed for your aligner. Or pipemaker can download the mitochondrial genome from NCBI
+  already indexed for your aligner. Or mitopiper can download the mitochondrial genome from NCBI
   and index it for you.
 * **Your scheduler.** Know which one your cluster uses (`sbatch` → SLURM, `qsub` → SGE, `bsub` → LSF),
   and your queue/partition name and account, if your cluster needs them.
@@ -112,11 +112,11 @@ Both tracks below process the same example: two zebrafish RNA-seq samples on a S
 
 Best for a first run, for exploring a dataset, and for anyone who prefers menus to flags.
 
-**1. Start pipemaker in a new workspace**
+**1. Start mitopiper in a new workspace**
 
 ```bash
 mkdir zebrafish_liver && cd zebrafish_liver
-pipemaker                       # or: python /path/to/Semi-automatic_csh_files_for_qsub/maker.py
+mitopiper                       # or: python /path/to/Semi-automatic_csh_files_for_qsub/maker.py
 ```
 
 **2. Answer the questions.** Every question shows numbered options. Type a number (or text) and
@@ -176,7 +176,7 @@ Full path to the reference FASTA (pre-indexed for your aligner)
 ```
 
 **3. Check the tools, then launch.** The scripts are written to `output/PRJNA123456/scripts/`.
-pipemaker then checks that every tool the jobs will call (trim_galore, cutadapt, fastqc, bwa,
+mitopiper then checks that every tool the jobs will call (trim_galore, cutadapt, fastqc, bwa,
 samtools, …) can be found in the current environment, after your `free_form` set-up lines. If some
 are missing, it stops and asks:
 
@@ -186,7 +186,7 @@ are missing, it stops and asks:
   cutadapt         used by: trim (via trim_galore)
 How do you want to continue?
   0	I will install / load them myself (then check again)
-  1	let pipemaker try to install them into the current environment
+  1	let mitopiper try to install them into the current environment
   2	add a set-up line to every job (e.g. 'module load ...') and regenerate the scripts
   3	launch anyway (the check job stops the pipeline on the cluster if they are really missing)
   4	stop here (the scripts are kept)
@@ -194,7 +194,7 @@ How do you want to continue?
 
 On a cluster with environment modules, option 2 is usually the right fix. Option 1 installs into the
 active conda environment (from bioconda and conda-forge), or uses pip for Python tools. It shows the
-exact commands before running them. Once everything is found, pipemaker offers to submit the jobs:
+exact commands before running them. Once everything is found, mitopiper offers to submit the jobs:
 
 ```
 All scripts are ready: 2 sample job(s), submitted by /home/you/zebrafish_liver/master.sh.
@@ -206,7 +206,7 @@ Launch the jobs now and follow them in the monitor? (Y/n)
 command and press Enter:
 
 ```
-pipemaker monitor - 14:02:11 - refreshing every 15s
+mitopiper monitor - 14:02:11 - refreshing every 15s
 
 == PRJNA123456: 2 job(s) - 1 running, 1 failed
 JOB               ID  STATE          STEP       ELAPSED   ERR  LAST ERROR
@@ -225,12 +225,12 @@ Commands: Enter refresh | j NAME details | e errors | r rerun failed | o rerun w
 | `i SEC` | change the refresh interval |
 | `q` | leave the monitor (submitted jobs keep running) |
 
-**5. Fix and rerun.** When every job has finished, pipemaker summarises and suggests fixes:
+**5. Fix and rerun.** When every job has finished, mitopiper summarises and suggests fixes:
 
 ```
 All jobs have finished; 1 need attention.
 1 job(s) failed:
-  s_SAMN02_1: 'fastqc' is not installed or not on the PATH of the compute nodes  ->  pipemaker rerun --free-form 'module load fastqc'
+  s_SAMN02_1: 'fastqc' is not installed or not on the PATH of the compute nodes  ->  mitopiper rerun --free-form 'module load fastqc'
 Some failures need a change in the job environment: choose 'o' to rerun with the suggested setup line (e.g. a module load).
 r rerun with automatic fixes | o rerun with options | e errors | j NAME details | q quit
 > o
@@ -247,12 +247,12 @@ The failed sample restarts at `fastqc`: the download and trimming are not repeat
 continues until everything is done. To make a fix permanent for future runs, add it to your
 preset (e.g. `free_form`).
 
-**6. Come back later.** You can log out; the jobs keep running. When you next start `pipemaker` in
+**6. Come back later.** You can log out; the jobs keep running. When you next start `mitopiper` in
 the workspace, it offers to *monitor / rerun the jobs of the last build*. Or open the monitor
 directly:
 
 ```bash
-pipemaker monitor -i
+mitopiper monitor -i
 ```
 
 Results are in `output/PRJNA123456/` (one folder per step). See [Outputs](#outputs).
@@ -268,25 +268,25 @@ methods section of a paper. Each step is one command.
 
 ```bash
 mkdir zebrafish_liver && cd zebrafish_liver
-pipemaker init
+mitopiper init
 ```
 
 **2. Register the reference** (once per organism; it is shared by every experiment in the workspace)
 
 ```bash
-pipemaker refs add "Danio rerio" --fasta /shared/refs/GRCz11/GRCz11.fa --gtf /shared/refs/GRCz11/genes.gtf
+mitopiper refs add "Danio rerio" --fasta /shared/refs/GRCz11/GRCz11.fa --gtf /shared/refs/GRCz11/genes.gtf
 # or: download and index the mitochondrial genome from NCBI
-pipemaker refs fetch-mt "Danio rerio"
-pipemaker refs list
+mitopiper refs fetch-mt "Danio rerio"
+mitopiper refs list
 ```
 
 **3. Adapt the workflow to your cluster** (once). Save a preset from the default one, then edit its
 `general_settings.json`:
 
 ```bash
-pipemaker presets save zebrafish --from default
+mitopiper presets save zebrafish --from default
 $EDITOR config/zebrafish/general_settings.json   # qsub_queue, qsub_memory, walltime, account, free_form
-pipemaker presets show zebrafish                 # check the steps and settings
+mitopiper presets show zebrafish                 # check the steps and settings
 ```
 
 To switch steps on or off, edit `pipeline.json` (`"switch": true`) and `run_order.json`. You can also
@@ -296,7 +296,7 @@ use the interactive configuration menu once and save it as a preset. See
 **4. Preview (dry run)**
 
 ```bash
-pipemaker build PRJNA123456 -p zebrafish -s slurm --dry-run
+mitopiper build PRJNA123456 -p zebrafish -s slurm --dry-run
 ```
 This downloads the run table to `metadata/PRJNA123456.tsv`, resolves every sample, path and command,
 and writes them to `output/PRJNA123456/plan.json` without creating any script. Check the samples
@@ -305,43 +305,43 @@ and steps. Narrow the build with `--samples 0-3`, `--steps wget,trim,fastqc` or 
 **5. Build and submit**
 
 ```bash
-pipemaker build PRJNA123456 -p zebrafish -s slurm
+mitopiper build PRJNA123456 -p zebrafish -s slurm
 bash master.sh
 ```
 After writing the scripts, `build` checks that every tool the jobs call can be found here. If some
 are missing, it stops with a list and exit code 1. Add `--auto-fix` to have it try to install them
 into the active conda environment (or with pip) and check again. Use `--no-check` when the scripts
-are generated on a different machine from the one the jobs run on. `pipemaker check [--auto-fix]`
+are generated on a different machine from the one the jobs run on. `mitopiper check [--auto-fix]`
 runs the same check at any time.
 
 **6. Monitor**
 
 ```bash
-pipemaker monitor --watch        # live table until all jobs finish (Ctrl-C to stop watching)
-pipemaker monitor --errors       # every failed job: failed step, error lines, suggested fix
-pipemaker monitor --job s_SAMN02_1
-pipemaker monitor -i             # the interactive monitor from track A
+mitopiper monitor --watch        # live table until all jobs finish (Ctrl-C to stop watching)
+mitopiper monitor --errors       # every failed job: failed step, error lines, suggested fix
+mitopiper monitor --job s_SAMN02_1
+mitopiper monitor -i             # the interactive monitor from track A
 ```
-`pipemaker monitor` exits with code 1 if any job failed, so it can gate the next step of a script.
+`mitopiper monitor` exits with code 1 if any job failed, so it can gate the next step of a script.
 
 **7. Rerun failed samples**
 
 ```bash
-pipemaker rerun --dry-run                                  # what would be rerun, and why
-pipemaker rerun --auto-fix --submit                        # more memory/time, clean corrupt inputs, resubmit
-pipemaker rerun --free-form 'module load fastqc' --submit  # fixes that need your input
-pipemaker rerun -j s_SAMN02_1 --from trim --clean --memory 64G --submit
+mitopiper rerun --dry-run                                  # what would be rerun, and why
+mitopiper rerun --auto-fix --submit                        # more memory/time, clean corrupt inputs, resubmit
+mitopiper rerun --free-form 'module load fastqc' --submit  # fixes that need your input
+mitopiper rerun -j s_SAMN02_1 --from trim --clean --memory 64G --submit
 ```
 Every job resumes at its failed step unless you say otherwise (see
 [Rerunning failed samples](#rerunning-failed-samples)).
 
-**For a paper**: the whole analysis is a short, versionable script. Record the pipemaker version,
-and archive `config/zebrafish/` together with `output/*/pipemaker_manifest.json`:
+**For a paper**: the whole analysis is a short, versionable script. Record the mitopiper version,
+and archive `config/zebrafish/` together with `output/*/mitopiper_manifest.json`:
 
 ```bash
-pipemaker --version
-pipemaker refs add "Danio rerio" --fasta /shared/refs/GRCz11/GRCz11.fa --gtf /shared/refs/GRCz11/genes.gtf
-pipemaker build PRJNA123456 PRJNA654321 -p zebrafish -s slurm
+mitopiper --version
+mitopiper refs add "Danio rerio" --fasta /shared/refs/GRCz11/GRCz11.fa --gtf /shared/refs/GRCz11/genes.gtf
+mitopiper build PRJNA123456 PRJNA654321 -p zebrafish -s slurm
 bash master.sh
 ```
 
@@ -351,15 +351,15 @@ bash master.sh
 
 | | Interactive | Command line |
 | --- | --- | --- |
-| Start with | `pipemaker` / `python maker.py` | `pipemaker build …` |
+| Start with | `mitopiper` / `python maker.py` | `mitopiper build …` |
 | Configuration | menus | preset JSON files (or menus once, then saved) |
-| Launching and monitoring | offered automatically, one continuous session | `bash master.sh`, `pipemaker monitor` |
-| Reruns | `r` / `o` in the monitor | `pipemaker rerun …` |
+| Launching and monitoring | offered automatically, one continuous session | `bash master.sh`, `mitopiper monitor` |
+| Reruns | `r` / `o` in the monitor | `mitopiper rerun …` |
 | Best for | first runs, exploring, occasional use | reproducibility, many datasets, automation |
 
 You can mix them freely. Both use the same workspace, presets and references, and produce the same
 scripts. For example, configure a preset in the menus, then build with it from a script, or build on
-the command line and use `pipemaker monitor -i` to handle failures.
+the command line and use `mitopiper monitor -i` to handle failures.
 
 ---
 
@@ -367,17 +367,17 @@ the command line and use `pipemaker monitor -i` to handle failures.
 
 | Command | Purpose |
 | --- | --- |
-| `pipemaker` / `pipemaker interactive` | Interactive mode (build → launch → monitor → rerun) |
-| `pipemaker init` | Create the workspace skeleton and the `default` preset |
-| `pipemaker build META… [options]` | Generate job scripts; `META` is a table, a previous experiment, or an accession |
-| `pipemaker fetch-metadata ACCESSION` | Only download the ENA run table of an accession |
-| `pipemaker presets list \| show NAME \| save NAME` | Inspect and save workflow presets |
-| `pipemaker refs list \| add \| use \| remove \| fetch-mt \| fetch-genome` | Manage reference genomes (mtDNA or whole nuclear genome from NCBI) |
-| `pipemaker make-tsv FOLDER --org NAME` | Build a metadata table for local FASTQ files |
-| `pipemaker monitor [EXP…] [options]` | Follow submitted jobs and their errors |
-| `pipemaker rerun [options]` | Resubmit failed jobs, resuming at the failed step |
-| `pipemaker check [EXP…] [--auto-fix]` | Check that every tool the jobs call can be found here (and try to install missing ones) |
-| `pipemaker cleanup [FOLDERS…]` | Remove logs and generated scripts |
+| `mitopiper` / `mitopiper interactive` | Interactive mode (build → launch → monitor → rerun) |
+| `mitopiper init` | Create the workspace skeleton and the `default` preset |
+| `mitopiper build META… [options]` | Generate job scripts; `META` is a table, a previous experiment, or an accession |
+| `mitopiper fetch-metadata ACCESSION` | Only download the ENA run table of an accession |
+| `mitopiper presets list \| show NAME \| save NAME` | Inspect and save workflow presets |
+| `mitopiper refs list \| add \| use \| remove \| fetch-mt \| fetch-genome` | Manage reference genomes (mtDNA or whole nuclear genome from NCBI) |
+| `mitopiper make-tsv FOLDER --org NAME` | Build a metadata table for local FASTQ files |
+| `mitopiper monitor [EXP…] [options]` | Follow submitted jobs and their errors |
+| `mitopiper rerun [options]` | Resubmit failed jobs, resuming at the failed step |
+| `mitopiper check [EXP…] [--auto-fix]` | Check that every tool the jobs call can be found here (and try to install missing ones) |
+| `mitopiper cleanup [FOLDERS…]` | Remove logs and generated scripts |
 
 Global options: `-w/--workdir DIR` (workspace, default: current directory) and `-v` (more logging).
 From the cloned folder, `python maker.py`, `python monitor.py`, `python cleanup.py` and
@@ -406,7 +406,7 @@ From the cloned folder, `python maker.py`, `python monitor.py`, `python cleanup.
 Instead of a file, pass any accession that ENA can resolve to sequencing runs. This covers projects
 (`PRJEB…`, `PRJNA…`, `PRJDB…`), studies (`ERP…`/`SRP…`/`DRP…`), samples (`SAM…`, `ERS…`/`SRS…`),
 experiments (`ERX…`/`SRX…`) and single runs. NCBI and DDBJ data are mirrored by ENA, so the same
-call covers all three archives. pipemaker downloads the read-run report from the ENA Portal API to
+call covers all three archives. mitopiper downloads the read-run report from the ENA Portal API to
 `metadata/<ACCESSION>.tsv` and names the experiment after the accession. Later builds reuse that
 copy. Pass `--refresh` to download it again, for example when new runs were added.
 
@@ -429,8 +429,8 @@ used are `Run`, `BioSample`/`Sample`, `ScientificName`/`Organism`, `LibraryLayou
 
 ### Local FASTQ files
 ```bash
-pipemaker make-tsv /data/run42 --org "Homo sapiens" -l RNA-Seq     # writes run42.tsv
-pipemaker build run42.tsv --skip fastqc_pre
+mitopiper make-tsv /data/run42 --org "Homo sapiens" -l RNA-Seq     # writes run42.tsv
+mitopiper build run42.tsv --skip fastqc_pre
 ```
 The `wget` step symlinks `.gz` files (or gzips plain FASTQ) into the experiment instead of
 downloading them. Illumina lane files of the same sample (`S1_L001_R1_001…`, `S1_L002_R1_001…`)
@@ -441,7 +441,7 @@ are grouped and concatenated.
 ```
 <workspace>/
 ├── master.sh                     submits every job of the last build (log: master.log)
-├── rerun.sh                      written by `pipemaker rerun` (log: rerun.log)
+├── rerun.sh                      written by `mitopiper rerun` (log: rerun.log)
 ├── metadata/<ACCESSION>.tsv      run tables fetched from ENA
 └── output/<experiment>/
     ├── metadata.tsv              copy of your metadata (your file is never modified)
@@ -455,7 +455,7 @@ are grouped and concatenated.
     ├── status/                   live state of every job (read by the monitor)
     ├── fastq/ post_trim/ alignment/ pileup/ …   step output directories
     ├── stdout/ stderr/           scheduler logs, one file per job
-    ├── pipemaker_manifest.json   provenance of the latest build (+ manifests/ history, reruns)
+    ├── mitopiper_manifest.json   provenance of the latest build (+ manifests/ history, reruns)
     └── plan.json                 written by --dry-run
 ```
 
@@ -483,13 +483,13 @@ s_SAMEA4_3     81237  RUNNING        trim          3:55
 
 | Command | Shows |
 | --- | --- |
-| `pipemaker monitor` | one snapshot of the last build's experiments (or name them: `monitor EXP1 EXP2`) |
-| `pipemaker monitor --watch [S]` | live view, refreshed every *S* seconds (default 30) until every job has finished |
-| `pipemaker monitor -i` | interactive monitor with commands to inspect, diagnose and rerun (see track A, step 4) |
-| `pipemaker monitor --errors` | every failed job, and every job with errors in its stderr: step timeline, failed step, error lines, end of stderr, suggested fix |
-| `pipemaker monitor --job NAME` | the same details for one job (by name or scheduler id) |
-| `pipemaker monitor --rerun` | shortcut for `pipemaker rerun --auto-fix --submit` |
-| `pipemaker monitor --json` | machine readable output |
+| `mitopiper monitor` | one snapshot of the last build's experiments (or name them: `monitor EXP1 EXP2`) |
+| `mitopiper monitor --watch [S]` | live view, refreshed every *S* seconds (default 30) until every job has finished |
+| `mitopiper monitor -i` | interactive monitor with commands to inspect, diagnose and rerun (see track A, step 4) |
+| `mitopiper monitor --errors` | every failed job, and every job with errors in its stderr: step timeline, failed step, error lines, end of stderr, suggested fix |
+| `mitopiper monitor --job NAME` | the same details for one job (by name or scheduler id) |
+| `mitopiper monitor --rerun` | shortcut for `mitopiper rerun --auto-fix --submit` |
+| `mitopiper monitor --json` | machine readable output |
 
 How it knows:
 * **Job state.** Each job script keeps `status/<job>.status` up to date: the current step, then
@@ -511,7 +511,7 @@ resubmit them unless you name them with `-j`.
 
 ## Rerunning failed samples
 
-`pipemaker rerun` regenerates the scripts of only the failed, killed or skipped jobs. Each one
+`mitopiper rerun` regenerates the scripts of only the failed, killed or skipped jobs. Each one
 **resumes at the step that failed**: steps that already succeeded (for example the download) are
 not repeated. It writes `rerun.sh`, which submits them with the same dependencies as `master.sh`:
 
@@ -615,22 +615,22 @@ sample). Example: enable the bundled `multiqc` step.
 Each organism can hold several named reference sets, and one of them is *active*:
 
 ```bash
-pipemaker refs fetch-mt "Mus musculus"                       # set "mt" (NCBI RefSeq mitogenome)
-pipemaker refs add "Mus musculus" --name GRCm39 --fasta /refs/GRCm39.fa --gtf /refs/GRCm39.gtf
-pipemaker refs use "Mus musculus" GRCm39                     # switch the active set
-pipemaker build exp.tsv --reference mt                       # or override for one build
-pipemaker refs list
+mitopiper refs fetch-mt "Mus musculus"                       # set "mt" (NCBI RefSeq mitogenome)
+mitopiper refs add "Mus musculus" --name GRCm39 --fasta /refs/GRCm39.fa --gtf /refs/GRCm39.gtf
+mitopiper refs use "Mus musculus" GRCm39                     # switch the active set
+mitopiper build exp.tsv --reference mt                       # or override for one build
+mitopiper refs list
 ```
 
 ### Downloading the nuclear genome (not recommended)
 
 ```bash
-pipemaker refs fetch-genome "Danio rerio"                  # new reference set "genome"
-pipemaker refs fetch-genome "Danio rerio" --nuclear-of mt  # or: the nuclear FASTA (_fasta_nuc) of the "mt" set
-pipemaker refs fetch-genome "Homo sapiens" --accession GCF_000001405.40 --yes
+mitopiper refs fetch-genome "Danio rerio"                  # new reference set "genome"
+mitopiper refs fetch-genome "Danio rerio" --nuclear-of mt  # or: the nuclear FASTA (_fasta_nuc) of the "mt" set
+mitopiper refs fetch-genome "Homo sapiens" --accession GCF_000001405.40 --yes
 ```
 
-pipemaker looks the organism up in the **NCBI Genome** database (NCBI Datasets API). It picks the
+mitopiper looks the organism up in the **NCBI Genome** database (NCBI Datasets API). It picks the
 RefSeq *reference genome* if there is one, otherwise the best RefSeq and then GenBank assembly. It
 then prints a warning with the genome size and asks for confirmation (or `--yes`). Whole genomes are
 large: gigabytes to download, hours to index, and a lot of memory for STAR. If your cluster has a
@@ -657,25 +657,25 @@ policy.
 
 | Problem | What to do |
 | --- | --- |
-| `pipemaker: command not found` right after installing | pip put it in a folder that isn't on your `PATH`, usually `~/.local/bin` after `pip install --user`. Add that folder to `PATH` (see [Installation](#installation)), install inside a conda environment, or use `python -m pipemaker`. |
-| The tool check reports missing tools | Add `module load …` / `conda activate …` to `free_form` (interactive option 2 does it for you), or install them with `pipemaker check --auto-fix`. If the tools exist only on the compute nodes, build with `--no-check`: the check job verifies them there. |
-| `Submitting failed … sbatch: command not found` | Run pipemaker on the cluster's login node, and pick the scheduler your cluster uses. |
-| Jobs fail with `command not found` | Add `module load …` / `conda activate …` to the `free_form` general setting (or use `pipemaker rerun --free-form …` once). |
-| Downloads fail on compute nodes | Many clusters have no internet on compute nodes. Download on the login node first: `pipemaker build EXP --steps wget -s local && bash master.sh`, then build or rerun the remaining steps. |
-| `Could not reach ENA` / `Request to NCBI failed` | The machine running pipemaker cannot reach ENA/NCBI. Download the metadata table in a browser and pass the file instead, and register references with `refs add`. |
-| Jobs killed for memory or time | `pipemaker rerun --auto-fix --submit` doubles the limit for those jobs. Raise `qsub_memory` / `walltime` in the preset for next time. |
-| Too many harmless "errors" counted | Some tools write progress to stderr; hide those lines with `pipemaker monitor --ignore 'REGEX'`. |
-| Something else | `pipemaker monitor --job NAME` shows the step, the error lines and the end of stderr for one job. Add `-v` to any command for more logging. |
+| `mitopiper: command not found` right after installing | pip put it in a folder that isn't on your `PATH`, usually `~/.local/bin` after `pip install --user`. Add that folder to `PATH` (see [Installation](#installation)), install inside a conda environment, or use `python -m mitopiper`. |
+| The tool check reports missing tools | Add `module load …` / `conda activate …` to `free_form` (interactive option 2 does it for you), or install them with `mitopiper check --auto-fix`. If the tools exist only on the compute nodes, build with `--no-check`: the check job verifies them there. |
+| `Submitting failed … sbatch: command not found` | Run mitopiper on the cluster's login node, and pick the scheduler your cluster uses. |
+| Jobs fail with `command not found` | Add `module load …` / `conda activate …` to the `free_form` general setting (or use `mitopiper rerun --free-form …` once). |
+| Downloads fail on compute nodes | Many clusters have no internet on compute nodes. Download on the login node first: `mitopiper build EXP --steps wget -s local && bash master.sh`, then build or rerun the remaining steps. |
+| `Could not reach ENA` / `Request to NCBI failed` | The machine running mitopiper cannot reach ENA/NCBI. Download the metadata table in a browser and pass the file instead, and register references with `refs add`. |
+| Jobs killed for memory or time | `mitopiper rerun --auto-fix --submit` doubles the limit for those jobs. Raise `qsub_memory` / `walltime` in the preset for next time. |
+| Too many harmless "errors" counted | Some tools write progress to stderr; hide those lines with `mitopiper monitor --ignore 'REGEX'`. |
+| Something else | `mitopiper monitor --job NAME` shows the step, the error lines and the end of stderr for one job. Add `-v` to any command for more logging. |
 
 ## Upgrading from `maker.py`
 
 ### Updating an existing copy of the `Refactoring` tree
 
 Your presets (`config/`), experiments (`output/`) and references (`src/mtDNA_ref/`) live inside the
-cloned folder but are not tracked by git, so switching branches does not touch them. pipemaker reads
+cloned folder but are not tracked by git, so switching branches does not touch them. mitopiper reads
 them in place.
 
-**1. Back up your configuration.** On the first run, pipemaker adds new settings to your presets
+**1. Back up your configuration.** On the first run, mitopiper adds new settings to your presets
 and converts `config/global/refpaths.json` to the multi-reference format. Your values are kept,
 but the *old* `maker.py` cannot read the converted file, so keep a copy in case you want to go
 back:
@@ -711,14 +711,14 @@ pip install .            # inside your conda/virtual environment
 it was:
 
 ```bash
-pipemaker presets list        # your presets, e.g. default, myrnaseq, last_used
-pipemaker refs list           # your references (each old entry becomes a reference set named "default")
-pipemaker                     # interactive mode; old experiments appear under "Previous experiments"
+mitopiper presets list        # your presets, e.g. default, myrnaseq, last_used
+mitopiper refs list           # your references (each old entry becomes a reference set named "default")
+mitopiper                     # interactive mode; old experiments appear under "Previous experiments"
 ```
 
-Old experiments can be rebuilt as they are: `pipemaker build PRJ1 -p myrnaseq --dry-run`. Their
+Old experiments can be rebuilt as they are: `mitopiper build PRJ1 -p myrnaseq --dry-run`. Their
 sample-level TSVs from `maker.py` are read directly. Leftover `master.csh` and `output/*/run*.csh`
-files from `maker.py` are not used any more; `pipemaker cleanup` removes them, and asks before
+files from `maker.py` are not used any more; `mitopiper cleanup` removes them, and asks before
 emptying the `stdout`/`stderr` folders.
 
 **Going back to the old version**
@@ -734,13 +734,18 @@ the data over:
 
 ```bash
 cp -r /path/to/old_copy/config /path/to/old_copy/config_backup    # backup first, as above
-pipemaker -w /path/to/old_copy                                    # use the old folder as the workspace
-# or copy config/, output/ and src/ from the old folder into a new workspace directory and run pipemaker there
+mitopiper -w /path/to/old_copy                                    # use the old folder as the workspace
+# or copy config/, output/ and src/ from the old folder into a new workspace directory and run mitopiper there
 ```
+
+**Coming from a development build called `pipemaker`?** The tool was renamed to `mitopiper`. Run
+`pip uninstall pipemaker` and then `pip install .`, and use `mitopiper` wherever you typed
+`pipemaker`. Workspaces built with it keep working: their `pipemaker_manifest.json` files are still
+read.
 
 ### What changes
 
-* Run pipemaker in your existing directory. Presets gain the new settings automatically, and
+* Run mitopiper in your existing directory. Presets gain the new settings automatically, and
   `config/global/refpaths.json` is converted to the multi-reference format. Your values are never
   overwritten.
 * `python maker.py`, `python cleanup.py …` and `python make_tsv.py …` still work as wrappers.
@@ -766,7 +771,7 @@ pytest
 
 ## Citation
 
-If you use pipemaker in your research, please cite it. See [CITATION.cff](CITATION.cff).
+If you use mitopiper in your research, please cite it. See [CITATION.cff](CITATION.cff).
 
 ## License
 

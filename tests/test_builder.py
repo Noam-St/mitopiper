@@ -1,4 +1,4 @@
-from pipemaker.builder import (
+from mitopiper.builder import (
     build_experiment_steps,
     build_sample_job,
     guess_threads,
@@ -6,9 +6,9 @@ from pipemaker.builder import (
     render_structure,
     selected_steps,
 )
-from pipemaker.config import Workflow
-from pipemaker.metadata import Run, Sample
-from pipemaker.references import ReferenceSet
+from mitopiper.config import Workflow
+from mitopiper.metadata import Run, Sample
+from mitopiper.references import ReferenceSet
 
 REF = ReferenceSet(refpath="/refs/chrM.fa", gtfpath="/refs/chrM.gff3")
 EXP = "/data/output/EXP"
@@ -130,7 +130,7 @@ def test_guess_threads():
 
 
 def test_output_ext_forms():
-    from pipemaker.builder import output_exts
+    from mitopiper.builder import output_exts
 
     assert output_exts({"output_ext": ".bam"}) == {"0": ".bam"}
     assert output_exts({"output_ext": ""}) == {"0": ""}
@@ -164,7 +164,7 @@ def test_multiple_outputs_are_referencable():
 
 
 def test_output_all_and_embedded():
-    from pipemaker.builder import step_io, substitute
+    from mitopiper.builder import step_io, substitute
 
     wf = Workflow.default()
     wf.pipeline["index"]["output_ext"] = ".bai;.csi"

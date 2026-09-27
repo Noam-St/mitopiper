@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pipemaker"
+name = "mitopiper"
 dynamic = ["version"]
 description = "Generate HPC (SGE/SLURM/LSF) job scripts for sequencing-data pipelines from ENA/SRA metadata"
 readme = "README.md"
@@ -26,16 +26,16 @@ classifiers = [
 test = ["pytest>=7"]
 
 [project.scripts]
-pipemaker = "pipemaker.cli:main"
+mitopiper = "mitopiper.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/Noam-St/Semi-automatic_csh_files_for_qsub"
 
 [tool.setuptools]
-packages = ["pipemaker"]
+packages = ["mitopiper"]
 
 [tool.setuptools.dynamic]
-version = { attr = "pipemaker.__version__" }
+version = { attr = "mitopiper.__version__" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

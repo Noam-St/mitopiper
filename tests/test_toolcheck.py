@@ -5,14 +5,14 @@ import subprocess
 
 import pytest
 
-from pipemaker import monitor as mon
-from pipemaker import toolcheck
-from pipemaker.cli import main
-from pipemaker.config import Workflow, Workspace
-from pipemaker.diagnose import Context, diagnose
-from pipemaker.local_samples import make_tsv
-from pipemaker.references import ReferenceRegistry, ReferenceSet
-from pipemaker.rerun import RerunOptions, rerun
+from mitopiper import monitor as mon
+from mitopiper import toolcheck
+from mitopiper.cli import main
+from mitopiper.config import Workflow, Workspace
+from mitopiper.diagnose import Context, diagnose
+from mitopiper.local_samples import make_tsv
+from mitopiper.references import ReferenceRegistry, ReferenceSet
+from mitopiper.rerun import RerunOptions, rerun
 
 SHELLS = [s for s in ("sh", "tcsh") if shutil.which(s)]
 
@@ -149,7 +149,7 @@ def test_tool_check_can_be_switched_off(tmp_path):
 
 
 def test_interactive_preflight_adds_a_setup_line_and_rebuilds(tmp_path):
-    from pipemaker.interactive import run_interactive
+    from mitopiper.interactive import run_interactive
 
     ws = workspace(tmp_path)
     fake_tool(tmp_path / "bin", "mytool")

@@ -1,4 +1,4 @@
-"""Remove temporary files left behind by pipemaker builds."""
+"""Remove temporary files left behind by mitopiper builds."""
 
 from __future__ import annotations
 

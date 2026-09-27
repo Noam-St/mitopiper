@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from pipemaker.config import Workspace
-from pipemaker.references import ReferenceRegistry, ReferenceSet
+from mitopiper.config import Workspace
+from mitopiper.references import ReferenceRegistry, ReferenceSet
 
 DATA = Path(__file__).parent / "data"
 

@@ -1,9 +1,9 @@
 import json
 import subprocess
 
-from pipemaker.cli import main
-from pipemaker.config import Workspace
-from pipemaker.references import ReferenceSet
+from mitopiper.cli import main
+from mitopiper.config import Workspace
+from mitopiper.references import ReferenceSet
 
 
 def run(ws, *args):
@@ -21,7 +21,7 @@ def test_build_writes_scripts_master_and_manifest(registered, data_dir):
     assert "set -eo pipefail" in text
     assert (exp / "metadata.tsv").exists()
     assert (data_dir / "ena_runs.tsv").exists()  # the user's file is never moved
-    manifest = json.loads((exp / "pipemaker_manifest.json").read_text())
+    manifest = json.loads((exp / "mitopiper_manifest.json").read_text())
     assert manifest["scheduler"] == "slurm" and len(manifest["samples"]) == 2
     master = (ws.root / "master.sh").read_text()
     assert "sbatch --parsable" in master
@@ -47,7 +47,7 @@ def test_missing_reference_is_reported(workspace, data_dir):
 
 def test_reference_override(registered, data_dir):
     ws = registered
-    from pipemaker.references import ReferenceRegistry
+    from mitopiper.references import ReferenceRegistry
 
     ReferenceRegistry(ws).add("Danio_rerio", ReferenceSet(refpath="/refs/dr/GRCz11.fa"), "GRCz11", activate=False)
     assert run(ws, "build", "--no-check", str(data_dir / "ena_runs.tsv"), "--reference", "GRCz11", "--samples", "0") == 0
@@ -90,3 +90,15 @@ def test_end_of_input_exits_cleanly(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))  # Ctrl-D / piped input ran out
     assert main(["-w", str(tmp_path / "ws")]) == 130
     assert "Aborted." in capsys.readouterr().out
+
+
+def test_builds_made_before_the_rename_are_still_read(registered, data_dir):
+    from mitopiper import monitor
+    from mitopiper.build import load_manifest
+
+    ws = registered
+    assert run(ws, "build", "--no-check", str(data_dir / "ena_runs.tsv"), "-s", "slurm") == 0
+    exp = ws.output_dir / "ena_runs"
+    (exp / "mitopiper_manifest.json").rename(exp / "pipemaker_manifest.json")
+    assert load_manifest(exp)["scheduler"] == "slurm"
+    assert monitor.experiment_scheduler(exp) == "slurm"

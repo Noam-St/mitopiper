@@ -54,7 +54,7 @@ PROBLEM_STATES = (FAILED, KILLED, SKIPPED, UNKNOWN)
 
 
 def launch(script: Path, log: Path) -> subprocess.Popen:
-    """Run a submit script in the background (it survives leaving pipemaker)."""
+    """Run a submit script in the background (it survives leaving mitopiper)."""
     handle = open(log, "w", encoding="utf-8")
     return subprocess.Popen(["bash", str(script)], stdout=handle, stderr=subprocess.STDOUT,
                             cwd=str(script.parent), start_new_session=True)
@@ -132,7 +132,7 @@ class MonitorSession:
         text = "\n".join("   " + l for l in lines)
         hint = ""
         if any("command not found" in l for l in lines):
-            hint = ("\nThe scheduler's submit command is not available here: run pipemaker on a login node of the "
+            hint = ("\nThe scheduler's submit command is not available here: run mitopiper on a login node of the "
                     "cluster, or rebuild with the scheduler your cluster uses (sge/slurm/lsf).")
         return f"Submitting failed (exit code {self.process.returncode}); end of {self.process_log}:\n{text}{hint}\n"
 
@@ -142,7 +142,7 @@ class MonitorSession:
         screen = "\033[H\033[J" if self.color else ""
         state = " - submitting jobs..." if self.submitting() else ""
         body = render_table(self.statuses, self.color, width)
-        self.out.write(f"{screen}pipemaker monitor - {stamp} - refreshing every {self.interval:g}s{state}\n\n{body}")
+        self.out.write(f"{screen}mitopiper monitor - {stamp} - refreshing every {self.interval:g}s{state}\n\n{body}")
         problem = self.launch_problem()
         if problem:
             self.out.write("\n" + problem)
@@ -308,5 +308,5 @@ class MonitorSession:
         self.write(f"\nLeaving the monitor ({counts}).")
         if not done:
             self.write("Submitted jobs keep running.")
-        self.write("Come back any time with: pipemaker monitor -i   (or start pipemaker and choose 'monitor')")
+        self.write("Come back any time with: mitopiper monitor -i   (or start mitopiper and choose 'monitor')")
         return 1 if any(s.state in PROBLEM_STATES for s in self.statuses) else 0

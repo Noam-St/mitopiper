@@ -1,4 +1,4 @@
-from pipemaker.local_samples import scan_fastq_folder
+from mitopiper.local_samples import scan_fastq_folder
 
 
 def touch(folder, *names):

@@ -2,10 +2,10 @@ import io
 import json
 import subprocess
 
-from pipemaker import monitor as mon
-from pipemaker.cli import main
-from pipemaker.config import Workspace
-from pipemaker.references import ReferenceRegistry, ReferenceSet
+from mitopiper import monitor as mon
+from mitopiper.cli import main
+from mitopiper.config import Workspace
+from mitopiper.references import ReferenceRegistry, ReferenceSet
 
 
 def local_build(tmp_path, fail=True):
@@ -60,7 +60,7 @@ def make_exp(ws, name="E", scheduler="slurm"):
     (exp / "status").mkdir(parents=True)
     (exp / "stderr").mkdir()
     (exp / "scripts").mkdir()
-    (exp / "pipemaker_manifest.json").write_text(json.dumps({"scheduler": scheduler}))
+    (exp / "mitopiper_manifest.json").write_text(json.dumps({"scheduler": scheduler}))
     rows = ["job_id\tjob_name\tscript\tsubmitted\tkind",
             "11\ts_a_0\t/s/a.sh\t100\tsample", "12\ts_b_1\t/s/b.sh\t100\tsample",
             "13\ts_c_2\t/s/c.sh\t100\tsample", "14\ts_d_3\t/s/d.sh\t100\tsample"]

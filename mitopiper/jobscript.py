@@ -2,7 +2,7 @@
 
 Every job script reports its progress to ``<exp>/status/<job>.status`` (one
 line ``STATE STEP START UPDATED RC``) and ``<exp>/status/<job>.steps`` for
-``pipemaker monitor``, checks that the jobs it depends on finished
+``mitopiper monitor``, checks that the jobs it depends on finished
 successfully, and stops at the first failing command when ``fail_fast`` is on.
 
 Two shell families are supported:
@@ -60,7 +60,7 @@ pm_step() {
     PM_STEP="$1"
     echo "RUNNING $1 $PM_START $(date +%s) -" > "$PM_STATUS"
     echo "$1 $(date +%s)" >> "$PM_STEPS"
-    echo "[pipemaker] step $1 started $(date '+%F %T')"
+    echo "[mitopiper] step $1 started $(date '+%F %T')"
 }
 pm_exit() {
     pm_rc=$?
@@ -76,7 +76,7 @@ _POSIX_GUARD = r"""# Run only if the jobs this one depends on finished successfu
 for pm_dep in @DEPS@; do
     pm_state=$(cut -d' ' -f1 "@STATUSDIR@/$pm_dep.status" 2>/dev/null || true)
     if [ "$pm_state" != DONE ]; then
-        echo "[pipemaker] skipped: $pm_dep did not finish successfully" >&2
+        echo "[mitopiper] skipped: $pm_dep did not finish successfully" >&2
         trap - EXIT
         echo "SKIPPED $pm_dep $PM_START $(date +%s) -" > "$PM_STATUS"
         exit 0
@@ -99,7 +99,7 @@ foreach pm_dep (@DEPS@)
     set pm_state = "missing"
     if ( -e "@STATUSDIR@/$pm_dep.status" ) set pm_state = `cut -d' ' -f1 "@STATUSDIR@/$pm_dep.status"`
     if ( "$pm_state" != "DONE" ) then
-        echo "[pipemaker] skipped: $pm_dep did not finish successfully"
+        echo "[mitopiper] skipped: $pm_dep did not finish successfully"
         echo "SKIPPED $pm_dep $PM_START `date +%s` -" > "$PM_STATUS"
         exit 0
     endif
@@ -112,7 +112,7 @@ def _csh_step(step: str) -> list:
         f'set PM_STEP = "{step}"',
         f'echo "RUNNING {step} $PM_START `date +%s` -" > "$PM_STATUS"',
         f'echo "{step} `date +%s`" >> "$PM_STEPS"',
-        f'echo "[pipemaker] step {step} started `date \'+%F %T\'`"',
+        f'echo "[mitopiper] step {step} started `date \'+%F %T\'`"',
     ]
 
 

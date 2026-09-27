@@ -1,6 +1,6 @@
 import pytest
 
-from pipemaker.schedulers import ExperimentJobs, JobResources, header, master_script, normalise
+from mitopiper.schedulers import ExperimentJobs, JobResources, header, master_script, normalise
 
 
 def test_normalise_aliases():
@@ -51,7 +51,7 @@ def test_master_script_submits_the_tool_check_first():
 
 
 def test_stage_helpers():
-    from pipemaker.schedulers import JobResources, check_resources, job_name, kind_of, stage_dependencies
+    from mitopiper.schedulers import JobResources, check_resources, job_name, kind_of, stage_dependencies
 
     assert [kind_of(job_name(k, "E")) for k in ("check", "prepare", "experiment")] == ["check", "prepare", "experiment"]
     assert kind_of("s_SAMN1_0") == "sample"

@@ -11,7 +11,7 @@ Supported inputs
   derived from the run accession using ENA's public FASTQ mirror layout.
 * **Sample-level tables** written by older versions of ``maker.py`` in which
   ``run_accession``/``fastq_ftp`` hold Python list literals.
-* **Local tables** created by ``pipemaker make-tsv`` where ``fastq_ftp`` holds
+* **Local tables** created by ``mitopiper make-tsv`` where ``fastq_ftp`` holds
   absolute paths to FASTQ files.
 
 Runs are grouped by ``sample_accession`` so that every biological sample is

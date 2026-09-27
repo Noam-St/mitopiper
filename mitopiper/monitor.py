@@ -9,7 +9,7 @@ Sources of truth, combined per job:
   jobs killed before they could report (time limit, out of memory, ``scancel``)
 * ``<exp>/stderr/``             – scanned for error messages
 
-Run ``pipemaker monitor`` (or ``python monitor.py``) after ``bash master.sh``.
+Run ``mitopiper monitor`` (or ``python monitor.py``) after ``bash master.sh``.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-from .config import Workspace
+from .config import Workspace, manifest_path
 from .schedulers import kind_of
 
 # Job states, in display order.
@@ -307,7 +307,7 @@ def tail(path: Optional[Path], lines: int = 20) -> list:
 # ------------------------------------------------------------- collect
 def experiment_scheduler(exp_dir: Path, default: str = "") -> str:
     try:
-        return json.loads((exp_dir / "pipemaker_manifest.json").read_text(encoding="utf-8")).get("scheduler", default)
+        return json.loads(manifest_path(exp_dir).read_text(encoding="utf-8")).get("scheduler", default)
     except (OSError, ValueError):
         return default
 
@@ -315,7 +315,7 @@ def experiment_scheduler(exp_dir: Path, default: str = "") -> str:
 def experiment_tracks_status(exp_dir: Path) -> bool:
     """Whether the jobs of this build write status files (recorded in the manifest)."""
     try:
-        manifest = json.loads((exp_dir / "pipemaker_manifest.json").read_text(encoding="utf-8"))
+        manifest = json.loads(manifest_path(exp_dir).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return True
     if "status_tracking" in manifest:
@@ -494,7 +494,7 @@ def _contexts(workspace: Workspace, experiments: list) -> dict:
     for exp in experiments:
         exp_dir = workspace.experiment_dir(exp)
         try:
-            manifest = json.loads((exp_dir / "pipemaker_manifest.json").read_text(encoding="utf-8"))
+            manifest = json.loads(manifest_path(exp_dir).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             manifest = None
         contexts[exp] = Context.from_manifest(manifest, str(exp_dir))
@@ -518,10 +518,10 @@ def rerun_hint(failed: list, contexts: dict, shortcuts: bool = True) -> str:
         return "\n".join(out) + "\n"
     out.append("")
     out.append("Shortcuts:")
-    out.append("  pipemaker monitor --rerun        rerun failed jobs from the failed step, applying the automatic fixes")
+    out.append("  mitopiper monitor --rerun        rerun failed jobs from the failed step, applying the automatic fixes")
     flags = " ".join(f"--{k} {v}" for k, v in auto.items())
-    out.append(f"  pipemaker rerun {flags + ' ' if flags else ''}--dry-run   preview; drop --dry-run to write rerun.sh")
-    out.append("  pipemaker monitor --errors       full diagnosis of every failed job")
+    out.append(f"  mitopiper rerun {flags + ' ' if flags else ''}--dry-run   preview; drop --dry-run to write rerun.sh")
+    out.append("  mitopiper monitor --errors       full diagnosis of every failed job")
     return "\n".join(out) + "\n"
 
 
@@ -583,7 +583,7 @@ def monitor(
         if watch and not as_json:
             stamp = _dt.datetime.now().strftime("%H:%M:%S")
             stream.write("\033[H\033[J" if color else "")
-            stream.write(f"pipemaker monitor - {stamp} - refreshing every {watch:g}s (Ctrl-C to quit)\n\n{text}\n")
+            stream.write(f"mitopiper monitor - {stamp} - refreshing every {watch:g}s (Ctrl-C to quit)\n\n{text}\n")
         else:
             stream.write(text + ("\n" if not text.endswith("\n") else ""))
         stream.flush()

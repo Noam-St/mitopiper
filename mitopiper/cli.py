@@ -1,12 +1,12 @@
 """Command line interface.
 
-Run ``pipemaker`` without arguments for the interactive menus, or use the
+Run ``mitopiper`` without arguments for the interactive menus, or use the
 sub-commands for scripted, reproducible builds::
 
-    pipemaker build PRJNA12345.tsv --preset rnaseq --scheduler slurm --samples all
-    pipemaker build PRJEB12345 --scheduler slurm     # metadata fetched from ENA
-    pipemaker build PRJNA12345.tsv --dry-run --steps wget,trim,fastqc
-    pipemaker refs fetch-mt Danio_rerio
+    mitopiper build PRJNA12345.tsv --preset rnaseq --scheduler slurm --samples all
+    mitopiper build PRJEB12345 --scheduler slurm     # metadata fetched from ENA
+    mitopiper build PRJNA12345.tsv --dry-run --steps wget,trim,fastqc
+    mitopiper refs fetch-mt Danio_rerio
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from .references import ReferenceRegistry, RefError, ReferenceSet, fetch_mt_refe
 from .schedulers import SCHEDULERS, normalise
 from .ui import table
 
-log = logging.getLogger("pipemaker")
+log = logging.getLogger("mitopiper")
 
 
 def _csv_list(value: Optional[str]) -> Optional[list]:
@@ -37,7 +37,7 @@ def _csv_list(value: Optional[str]) -> Optional[list]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="pipemaker", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(prog="mitopiper", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("-w", "--workdir", default=".", help="workspace directory (default: current directory)")
     parser.add_argument("-v", "--verbose", action="count", default=0, help="more logging (-vv for debug)")
@@ -195,7 +195,7 @@ def cmd_build(ws: Workspace, args) -> int:
         result = build_experiment(ws, workflow, metadata, selection, options, resolver, name=args.name, samples=samples)
         if result.skipped_organisms:
             log.error(
-                "No reference for: %s. Register one with 'pipemaker refs add' or rerun with --fetch-mt.",
+                "No reference for: %s. Register one with 'mitopiper refs add' or rerun with --fetch-mt.",
                 ", ".join(result.skipped_organisms),
             )
         results.append(result)
@@ -281,7 +281,7 @@ def cmd_refs(ws: Workspace, args) -> int:
             ref, genome = fetch_genome_reference(ws, organism, args.accession)
         except RefError as exc:
             raise RefError(f"{exc}. Register an existing genome instead: "
-                           f"pipemaker refs add {organism} --fasta /path/genome.fa --gtf /path/genes.gtf") from exc
+                           f"mitopiper refs add {organism} --fasta /path/genome.fa --gtf /path/genes.gtf") from exc
         print(genome.warning())
         if not args.yes:
             if not sys.stdin.isatty():
@@ -333,7 +333,7 @@ def cmd_check(ws: Workspace, args) -> int:
 
     experiments = args.experiments or default_experiments(ws)
     if not experiments:
-        print("No builds found. Run 'pipemaker build' first.")
+        print("No builds found. Run 'mitopiper build' first.")
         return 1
     # Experiments that share a job environment (shell + set-up lines) are checked in one go.
     groups: dict = {}
@@ -392,7 +392,7 @@ def cmd_make_tsv(ws: Workspace, args) -> int:
     from .local_samples import make_tsv
 
     out = make_tsv(args.folder, args.org, Path(args.output) if args.output else None, args.lib_strat, args.ignore_paired, args.force_paired)
-    print(f"Metadata written to {out}\nNext: pipemaker build {out} --steps <steps> (the wget step links local files)")
+    print(f"Metadata written to {out}\nNext: mitopiper build {out} --steps <steps> (the wget step links local files)")
     return 0
 
 

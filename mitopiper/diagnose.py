@@ -4,7 +4,7 @@
 that failed and the job's stderr, and returns :class:`Suggestion` objects with
 a short cause, advice, ready-to-run commands and - for fixes that are safe to
 apply automatically (more memory, more time, re-downloading corrupt input,
-resuming from an earlier step) - the ``pipemaker rerun`` options that apply
+resuming from an earlier step) - the ``mitopiper rerun`` options that apply
 them (used by ``rerun --auto-fix``).
 """
 
@@ -23,7 +23,7 @@ class Suggestion:
     cause: str
     advice: list = field(default_factory=list)
     commands: list = field(default_factory=list)
-    #: Options for ``pipemaker rerun`` that apply this fix automatically.
+    #: Options for ``mitopiper rerun`` that apply this fix automatically.
     rerun: dict = field(default_factory=dict)
 
 
@@ -184,7 +184,7 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
 
     if job.state == SKIPPED:
         return [Suggestion("Not run because a job it depends on failed",
-                           ["It is rerun automatically together with the failed job."], ["pipemaker rerun"], {})]
+                           ["It is rerun automatically together with the failed job."], ["mitopiper rerun"], {})]
 
     # --- killed by the scheduler -------------------------------------------------
     if sched == "OUT_OF_MEMORY" or _find(r"out of memory|oom[- ]kill|cannot allocate memory|std::bad_alloc|"
@@ -195,24 +195,24 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
             "The job ran out of memory" + (f" in step '{step}'" if step else ""),
             [f"It was using the job memory limit ({ctx.memory or 'default'}). Give it more memory, or lower the "
              f"memory/threads options of '{step or 'the step'}' (e.g. samtools sort -m, STAR --limitBAMsortRAM)."],
-            [f"pipemaker rerun --memory {new}"],
+            [f"mitopiper rerun --memory {new}"],
             {"memory": new}))
     if sched in ("TIMEOUT", "DEADLINE") or _find(r"due to time limit|time limit|TERM_RUNLIMIT|h_rt", text):
         new = double_walltime(ctx.walltime)
         advice = [f"The job exceeded its run-time limit ({ctx.walltime or 'scheduler default'})."]
         if ctx.scheduler in ("sge", "lsf"):
-            advice.append("pipemaker only sets the time limit on SLURM; on SGE/LSF add it to 'free_form' or ask "
+            advice.append("mitopiper only sets the time limit on SLURM; on SGE/LSF add it to 'free_form' or ask "
                           "for a longer queue with --queue.")
         add(Suggestion("The job hit its time limit" + (f" in step '{step}'" if step else ""), advice,
-                       [f"pipemaker rerun --walltime {new}"], {"walltime": new}))
+                       [f"mitopiper rerun --walltime {new}"], {"walltime": new}))
     if sched.startswith("CANCELLED") and not found:
         add(Suggestion("The job was cancelled (scancel/qdel/bkill or an administrator)",
-                       ["If that was not intentional, just run it again."], ["pipemaker rerun"], {}))
+                       ["If that was not intentional, just run it again."], ["mitopiper rerun"], {}))
     if "E" in sched and ctx.scheduler == "sge":
         add(Suggestion("SGE put the job in an error state (Eqw)",
                        [f"'qstat -j {job.job_id}' shows the reason, usually an unwritable log directory or a "
                         "missing shell. Fix it, then 'qmod -cj JOBID' to release, or 'qdel' and rerun."],
-                       [f"qstat -j {job.job_id}", "pipemaker rerun"], {}))
+                       [f"qstat -j {job.job_id}", "mitopiper rerun"], {}))
 
     # --- environment -------------------------------------------------------------
     listed = re.findall(r"^MISSING (\S+)", text, re.MULTILINE)  # written by the tool check job
@@ -221,10 +221,10 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
         add(Suggestion(
             f"The tool check found {len(tools)} missing tool(s): {', '.join(tools)}",
             ["Nothing else was run. Make the tools available to the jobs (e.g. 'module load ...' or "
-             "'conda activate ENV' in the general setting 'free_form'), or let pipemaker try to install them "
+             "'conda activate ENV' in the general setting 'free_form'), or let mitopiper try to install them "
              "into the current environment, then rerun."],
-            ["pipemaker check --auto-fix", "pipemaker rerun --submit"] +
-            [f"pipemaker rerun --free-form 'module load {' '.join(tools)}' --submit"],
+            ["mitopiper check --auto-fix", "mitopiper rerun --submit"] +
+            [f"mitopiper rerun --free-form 'module load {' '.join(tools)}' --submit"],
             {"free_form_hint": f"module load {' '.join(tools)}"}))
         return found
     missing_tool = _find(r"(?:line \d+: )?([\w.+\-]+): command not found", text)
@@ -234,29 +234,29 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
             f"'{name}' is not installed or not on the PATH of the compute nodes",
             [f"Load it in every job via the general setting 'free_form' (e.g. 'module load {name}' or "
              "'conda activate ENV'), or set the absolute path in the step's 'path' field "
-             "(pipemaker -> configuration -> modify a pipeline step).",
+             "(mitopiper -> configuration -> modify a pipeline step).",
              "One-off fix for the rerun only: pass the line with --free-form."],
-            [f"pipemaker rerun --free-form 'module load {name}'"], {"free_form_hint": f"module load {name}"}))
+            [f"mitopiper rerun --free-form 'module load {name}'"], {"free_form_hint": f"module load {name}"}))
     module = _find(r"ModuleNotFoundError: No module named '([\w.]+)'", text)
     if module:
         add(Suggestion(f"Python package '{module.group(1)}' is missing in the job's environment",
                        ["Activate the environment that has it in 'free_form' (conda activate ENV)."],
-                       ["pipemaker rerun --free-form 'conda activate ENV'"], {"free_form_hint": "conda activate ENV"}))
+                       ["mitopiper rerun --free-form 'conda activate ENV'"], {"free_form_hint": "conda activate ENV"}))
     if _find(r"could not detect version of cutadapt|cutadapt.*not found", text):
         add(Suggestion("trim_galore cannot find cutadapt",
                        ["Load or install cutadapt (and pigz) in the environment used by the jobs."],
-                       ["pipemaker rerun --free-form 'module load cutadapt'"], {"free_form_hint": "module load cutadapt"}))
+                       ["mitopiper rerun --free-form 'module load cutadapt'"], {"free_form_hint": "module load cutadapt"}))
     if rc == 126 or _find(r"permission denied", text):
         path = _find(r"(/[^\s:'\"]+)[:'\"]?\s*:?\s*permission denied", text)
         add(Suggestion("Permission denied" + (f" on {path.group(1)}" if path else ""),
                        ["Check that the executable is executable (chmod +x) and that the output directories "
                         "are writable by your user on the compute nodes."],
-                       ([f"ls -l {path.group(1)}"] if path else []) + ["pipemaker rerun"], {}))
+                       ([f"ls -l {path.group(1)}"] if path else []) + ["mitopiper rerun"], {}))
     if _find(r"no space left on device|disk quota exceeded", text):
         add(Suggestion("The disk or your quota is full",
                        ["Free space (intermediate SAM files are large), remove old logs, or move the workspace "
                         "to a scratch file system."],
-                       ["pipemaker cleanup stdout stderr", f"du -sh {ctx.exp_dir or 'output/*'}/*", "pipemaker rerun"], {}))
+                       ["mitopiper cleanup stdout stderr", f"du -sh {ctx.exp_dir or 'output/*'}/*", "mitopiper rerun"], {}))
 
     # --- inputs --------------------------------------------------------------------
     corrupt = (r"unexpected end of file|invalid compressed data|crc error|not in gzip format|"
@@ -266,23 +266,23 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
         title = "An input file is corrupt or incomplete" + (" (failed checksum)" if "md5" in text.lower() else "")
         if producer:
             add(Suggestion(title, [f"Delete the output of '{producer}'" + (f" ({path})" if path else "") + " and produce it again."],
-                           [f"pipemaker rerun --from {producer} --clean"], {"from_step": producer, "clean": True}))
+                           [f"mitopiper rerun --from {producer} --clean"], {"from_step": producer, "clean": True}))
         else:
             add(Suggestion(title, [f"{path or 'The file'} is not produced by any step of this build: replace it with a "
-                                   "good copy (e.g. download it again), then rerun."], ["pipemaker rerun"], {}))
+                                   "good copy (e.g. download it again), then rerun."], ["mitopiper rerun"], {}))
     if _find(r"fail to locate the index|bwa_idx_load|\[E::bwa_idx", text):
         fasta = next((r.get("refpath") for r in ctx.references.values() if r.get("refpath")), "REF.fa")
         add(Suggestion("The BWA index of the reference is missing",
                        ["Index the reference once (it is shared by every sample), then rerun."],
-                       [f"bwa index {fasta}", "pipemaker rerun"], {}))
+                       [f"bwa index {fasta}", "mitopiper rerun"], {}))
     if _find(r"fai_load|could not (load|build) fai|faidx", text):
         fasta = next((r.get("refpath") for r in ctx.references.values() if r.get("refpath")), "REF.fa")
         add(Suggestion("The FASTA index (.fai) of the reference is missing or unwritable",
-                       [], [f"samtools faidx {fasta}", "pipemaker rerun"], {}))
+                       [], [f"samtools faidx {fasta}", "mitopiper rerun"], {}))
     if _find(r"EXITING because of FATAL ERROR.*genome|could not open genome file|genomeParameters", text):
         add(Suggestion("STAR cannot find a generated genome in --genomeDir",
                        ["Run STAR --runMode genomeGenerate for the reference (automatic for references downloaded "
-                        "with 'refs fetch-mt'), or point genomeDir to an existing index."], ["pipemaker rerun"], {}))
+                        "with 'refs fetch-mt'), or point genomeDir to an existing index."], ["mitopiper rerun"], {}))
     damaged = r"fail to read the header|EOF marker is absent|is not a (sam|bam)|file truncated"
     if _find(damaged, text):
         prev, _ = ctx.input_producer(step, text, damaged)
@@ -290,7 +290,7 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
         add(Suggestion(f"'{step or 'The step'}' got an empty or damaged input" + (f" from '{prev}'" if prev else ""),
                        [f"The step that wrote it{' (' + prev + ')' if prev else ''} probably failed silently or was "
                         "interrupted. Produce its output again."],
-                       [f"pipemaker rerun --from {prev} --clean" if prev else "pipemaker rerun --from-start"],
+                       [f"mitopiper rerun --from {prev} --clean" if prev else "mitopiper rerun --from-start"],
                        {"from_step": prev, "clean": True} if prev else {"from_start": True}))
     missing = _find(r"(?:cannot access|can't open|cannot open|could not open|failed to open|no such file)[^/\n]*"
                     r"(/[^\s'\":]+)", text) or _find(r"(/[^\s'\":]+)['\"]?:? no such file or directory", text)
@@ -301,47 +301,47 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
         if any(path.startswith(r) or r.startswith(path) for r in refs):
             add(Suggestion(f"A reference file does not exist on the compute nodes: {path}",
                            ["Check the path (and that it is on a shared file system), then fix it."],
-                           ["pipemaker refs list", "pipemaker refs add ORGANISM --fasta ... --gtf ... --name NAME",
-                            "pipemaker rerun"], {}))
+                           ["mitopiper refs list", "mitopiper refs add ORGANISM --fasta ... --gtf ... --name NAME",
+                            "mitopiper rerun"], {}))
         elif producer and producer != step:
             add(Suggestion(f"'{step}' needs {path}, which step '{producer}' should have produced",
                            [f"'{producer}' failed or wrote its output under another name (check its output_ext/"
                             f"outdir and the input_ext/inputdir of '{step}')."],
-                           [f"pipemaker rerun --from {producer}"], {"from_step": producer}))
+                           [f"mitopiper rerun --from {producer}"], {"from_step": producer}))
         else:
             add(Suggestion(f"File not found: {path}",
-                           ["Check that the path exists and is visible from the compute nodes."], ["pipemaker rerun"], {}))
+                           ["Check that the path exists and is visible from the compute nodes."], ["mitopiper rerun"], {}))
 
     # --- downloads ---------------------------------------------------------------
     if _find(r"ERROR 404|No such file .*ftp|550 .*no such file", text):
         add(Suggestion("The FASTQ file is not available at the download URL (404)",
                        ["For SRA runs the ENA mirror may not have the files; download ENA's own run table instead "
-                        "(pipemaker build PRJ... fetches it), or check the run on the ENA browser."],
-                       ["pipemaker fetch-metadata PROJECT_ACCESSION"], {}))
+                        "(mitopiper build PRJ... fetches it), or check the run on the ENA browser."],
+                       ["mitopiper fetch-metadata PROJECT_ACCESSION"], {}))
     elif _find(r"unable to resolve host|name or service not known|temporary failure in name resolution|"
                r"network is unreachable|connection timed out|connection refused|unable to establish", text):
         add(Suggestion("The download failed: no network access from the compute node, or ENA was unreachable",
                        ["Many clusters have no internet on compute nodes. Download on the login node first, then "
                         "rerun the remaining steps:",
                         "Otherwise wait and rerun; increase 'download_delay' if ENA throttles you."],
-                       ["pipemaker build EXPERIMENT --steps wget --scheduler local && bash master.sh",
-                        f"pipemaker rerun --from {ctx.step_after('wget') or 'NEXT_STEP'}"], {}))
+                       ["mitopiper build EXPERIMENT --steps wget --scheduler local && bash master.sh",
+                        f"mitopiper rerun --from {ctx.step_after('wget') or 'NEXT_STEP'}"], {}))
 
     # --- tools -------------------------------------------------------------------
     if rc == 139 or _find(r"segmentation fault|core dumped", text):
         add(Suggestion(f"'{step or tool}' crashed (segmentation fault)",
                        ["Usually caused by too little memory or a damaged input file."],
-                       [f"pipemaker rerun --memory {double_memory(ctx.memory)}"], {"memory": double_memory(ctx.memory)}))
+                       [f"mitopiper rerun --memory {double_memory(ctx.memory)}"], {"memory": double_memory(ctx.memory)}))
     if step.startswith("htseq") and _find(r"error|attribute|feature", text):
         add(Suggestion("htseq-count could not use the annotation",
                        ["The feature type (-t) and id attribute (-i) must exist in the GTF/GFF3. NCBI GFF3 files "
                         "use '-t gene -i ID' or '-i Name'; Ensembl GTFs use '-t exon -i gene_id'."],
-                       ["pipemaker -> configuration -> change pipeline step settings -> htseq-count"], {}))
+                       ["mitopiper -> configuration -> change pipeline step settings -> htseq-count"], {}))
 
     if not found and job.state in (FAILED, KILLED, UNKNOWN):
         add(Suggestion(f"Unrecognised failure in step '{step or '?'}'" + (f" (exit code {rc})" if rc not in (None, 0) else ""),
                        ["Read the end of the job's stderr for the tool's own message."],
-                       [f"pipemaker monitor --job {job.name}"], {}))
+                       [f"mitopiper monitor --job {job.name}"], {}))
     return found
 
 

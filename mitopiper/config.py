@@ -1,6 +1,6 @@
 """Workspace and preset (workflow) configuration handling.
 
-A *workspace* is the directory pipemaker operates in (the current directory by
+A *workspace* is the directory mitopiper operates in (the current directory by
 default).  Its layout is::
 
     <workspace>/
@@ -36,6 +36,18 @@ log = logging.getLogger(__name__)
 
 RESERVED_PRESETS = ("current", "global")
 INTERNAL_PRESETS = ("default", "current", "global", "last_used")
+
+
+MANIFEST = "mitopiper_manifest.json"
+LEGACY_MANIFEST = "pipemaker_manifest.json"  # written by development versions before the rename
+
+
+def manifest_path(exp_dir) -> Path:
+    """Provenance manifest of a build (the pre-rename file name is still read)."""
+    exp_dir = Path(exp_dir)
+    current = exp_dir / MANIFEST
+    legacy = exp_dir / LEGACY_MANIFEST
+    return legacy if not current.exists() and legacy.exists() else current
 
 
 class ConfigError(Exception):

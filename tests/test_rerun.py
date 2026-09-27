@@ -3,12 +3,12 @@ import subprocess
 
 import pytest
 
-from pipemaker import monitor as mon
-from pipemaker.cli import main
-from pipemaker.config import Workspace
-from pipemaker.diagnose import Context, diagnose, double_memory, double_walltime, merged_rerun_options
-from pipemaker.references import ReferenceRegistry, ReferenceSet
-from pipemaker.rerun import RerunOptions, plan, rerun, write
+from mitopiper import monitor as mon
+from mitopiper.cli import main
+from mitopiper.config import Workspace
+from mitopiper.diagnose import Context, diagnose, double_memory, double_walltime, merged_rerun_options
+from mitopiper.references import ReferenceRegistry, ReferenceSet
+from mitopiper.rerun import RerunOptions, plan, rerun, write
 
 
 # ------------------------------------------------------------------ diagnosis
@@ -18,7 +18,7 @@ def job(errors=(), rc=None, sched="", step="bwa-align", state=mon.FAILED):
 
 
 def _ctx(steps=("wget", "fastqc_pre", "trim", "fastqc", "bwa-align", "view", "sort", "index", "mpileup")):
-    from pipemaker.config import Workflow
+    from mitopiper.config import Workflow
 
     wf = Workflow.default()
     return Context(steps=list(steps), pipeline=wf.pipeline, memory="30G", walltime="1-20:00:00", scheduler="slurm",
@@ -146,8 +146,8 @@ def test_auto_fix_applies_per_job_suggestions_and_cancels_stuck_jobs(tmp_path):
     (exp / "jobs.tsv").write_text(rows)
     (exp / "status" / "s_a_0.status").write_text("RUNNING count 1 2 -\n")
     (exp / "status" / "e_demo.status").unlink()
-    manifest = (exp / "pipemaker_manifest.json").read_text().replace('"scheduler": "local"', '"scheduler": "slurm"')
-    (exp / "pipemaker_manifest.json").write_text(manifest)
+    manifest = (exp / "mitopiper_manifest.json").read_text().replace('"scheduler": "local"', '"scheduler": "slurm"')
+    (exp / "mitopiper_manifest.json").write_text(manifest)
     query = lambda s, ids: {"11": (mon.KILLED, "OUT_OF_MEMORY"), "12": (mon.FAILED, "FAILED"), "13": (mon.PENDING, "PENDING")}  # noqa: E731
     items = {i.name: i for i in plan(ws, options=RerunOptions(auto_fix=True), query=query)}
     assert items["s_a_0"].overrides == {"memory": "60G"}
@@ -163,10 +163,10 @@ def test_monitor_shows_diagnosis_and_shortcuts(tmp_path):
     out = io.StringIO()
     assert mon.monitor(ws, stream=out, color=False) == 1
     text = out.getvalue()
-    assert "'mytool' is not installed" in text and "pipemaker monitor --rerun" in text
+    assert "'mytool' is not installed" in text and "mitopiper monitor --rerun" in text
     out = io.StringIO()
     mon.monitor(ws, errors_only=True, stream=out, color=False)
-    assert "suggested fix:" in out.getvalue() and "$ pipemaker rerun --free-form 'module load mytool'" in out.getvalue()
+    assert "suggested fix:" in out.getvalue() and "$ mitopiper rerun --free-form 'module load mytool'" in out.getvalue()
 
 
 def test_monitor_rerun_shortcut(tmp_path, capfd):

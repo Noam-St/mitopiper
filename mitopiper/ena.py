@@ -58,7 +58,7 @@ def _get(url: str, timeout: int = 120, retries: int = 3) -> str:
     last_error = None
     for attempt in range(1, retries + 1):
         try:
-            request = urllib.request.Request(url, headers={"User-Agent": "pipemaker"})
+            request = urllib.request.Request(url, headers={"User-Agent": "mitopiper"})
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 return response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:

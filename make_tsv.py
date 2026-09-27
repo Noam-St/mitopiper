@@ -1,11 +1,11 @@
-"""Backwards-compatible wrapper for ``pipemaker make-tsv``.
+"""Backwards-compatible wrapper for ``mitopiper make-tsv``.
 
 usage: python make_tsv.py --org "Homo sapiens" -s /path/to/fastq_folder [-l RNA-Seq]
 """
 
 import sys
 
-from pipemaker.cli import main
+from mitopiper.cli import main
 
 if __name__ == "__main__":
     argv = sys.argv[1:]

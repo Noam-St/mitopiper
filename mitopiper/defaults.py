@@ -1,6 +1,6 @@
 """Built-in default workflow.
 
-These values seed the ``default`` preset the first time pipemaker is run in a
+These values seed the ``default`` preset the first time mitopiper is run in a
 workspace, and are merged (without overwriting user values) into every preset
 on start-up so that presets created with older versions gain new keys.
 

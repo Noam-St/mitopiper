@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from pipemaker.config import ConfigError
-from pipemaker.references import (
+from mitopiper.config import ConfigError
+from mitopiper.references import (
     ReferenceRegistry,
     RefError,
     ReferenceSet,
@@ -119,8 +119,8 @@ def test_index_commands_follow_active_steps(workspace, tmp_path):
 
 
 def test_large_fasta_is_read_once_per_file_version(tmp_path, monkeypatch):
-    from pipemaker import references
-    from pipemaker.config import Workflow
+    from mitopiper import references
+    from mitopiper.config import Workflow
 
     fasta = tmp_path / "g.fa"
     fasta.write_text(">g\n" + "A" * 16569 + "\n")

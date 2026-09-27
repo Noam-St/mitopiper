@@ -49,7 +49,7 @@ EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 DATASETS = "https://api.ncbi.nlm.nih.gov/datasets/v2"
 GENOMES_FTP = "https://ftp.ncbi.nlm.nih.gov/genomes/all"
 SVIEWER = "https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi"
-TOOL_NAME = "pipemaker"
+TOOL_NAME = "mitopiper"
 
 
 class RefError(Exception):
@@ -79,7 +79,7 @@ class ReferenceSet:
 
     @property
     def needs_indexing(self) -> bool:
-        """References downloaded by pipemaker are downloaded (if needed) and indexed by the reference job."""
+        """References downloaded by mitopiper are downloaded (if needed) and indexed by the reference job."""
         return self.source in ("ncbi_mt", "ncbi_genome") or bool(self.downloads)
 
 
@@ -507,7 +507,7 @@ def _fasta_index_commands(fasta: str, workflow, csh: bool, star: bool) -> list:
 
 
 def index_commands(ref: ReferenceSet, workflow, csh: Optional[bool] = None) -> list:
-    """Shell commands that download (if needed) and index a reference pipemaker manages.
+    """Shell commands that download (if needed) and index a reference mitopiper manages.
 
     Only indices required by the active steps are built, and every command is
     guarded so it is skipped when the index already exists.  The syntax

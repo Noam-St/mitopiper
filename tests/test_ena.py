@@ -1,9 +1,9 @@
 import pytest
 
-from pipemaker import ena
-from pipemaker.build import resolve_metadata_source
-from pipemaker.cli import main
-from pipemaker.metadata import MetadataError
+from mitopiper import ena
+from mitopiper.build import resolve_metadata_source
+from mitopiper.cli import main
+from mitopiper.metadata import MetadataError
 
 
 @pytest.fixture
@@ -61,8 +61,8 @@ def test_fetch_metadata_command(workspace, fake_ena, tmp_path):
 
 
 def test_interactive_accepts_accession(tmp_path, fake_ena):
-    from pipemaker.config import Workspace
-    from pipemaker.interactive import run_interactive
+    from mitopiper.config import Workspace
+    from mitopiper.interactive import run_interactive
 
     answers = iter(["1", "PRJEB1", "0", "n", "0", "", "1", "/refs/dr.fa", "", "", "", "3", "n"])
     ws = Workspace(tmp_path / "ws")

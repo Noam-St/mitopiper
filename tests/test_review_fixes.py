@@ -6,12 +6,12 @@ import subprocess
 
 import pytest
 
-from pipemaker import monitor as mon
-from pipemaker.cli import main
-from pipemaker.config import Workspace
-from pipemaker.local_samples import make_tsv
-from pipemaker.references import ReferenceRegistry, ReferenceSet, index_commands
-from pipemaker.rerun import RerunOptions, plan
+from mitopiper import monitor as mon
+from mitopiper.cli import main
+from mitopiper.config import Workspace
+from mitopiper.local_samples import make_tsv
+from mitopiper.references import ReferenceRegistry, ReferenceSet, index_commands
+from mitopiper.rerun import RerunOptions, plan
 
 SHELLS = [s for s in ("bash", "sh", "tcsh", "csh") if shutil.which(s)]
 
@@ -118,7 +118,7 @@ def test_dependants_skip_themselves_when_a_dependency_failed(tmp_path, shell):
 def fake_exp(ws, tracked=True, status="RUNNING count 1 2 -"):
     exp = ws.experiment_dir("E")
     (exp / "status").mkdir(parents=True)
-    (exp / "pipemaker_manifest.json").write_text(json.dumps({"scheduler": "sge", "status_tracking": tracked}))
+    (exp / "mitopiper_manifest.json").write_text(json.dumps({"scheduler": "sge", "status_tracking": tracked}))
     (exp / "jobs.tsv").write_text("job_id\tjob_name\tscript\tsubmitted\tkind\n11\ts_a_0\t/a.sh\t1\tsample\n")
     if status:
         (exp / "status" / "s_a_0.status").write_text(status + "\n")
@@ -172,8 +172,8 @@ def test_build_with_only_an_experiment_level_step(tmp_path, capsys):
 
 
 def test_a_suggested_resume_step_outside_the_build_does_not_block_the_rerun(tmp_path, monkeypatch):
-    from pipemaker import rerun as rerun_mod
-    from pipemaker.diagnose import Suggestion
+    from mitopiper import rerun as rerun_mod
+    from mitopiper.diagnose import Suggestion
 
     ws = workspace_with(tmp_path)
     build_and_run(ws, tmp_path)
@@ -186,9 +186,9 @@ def test_a_suggested_resume_step_outside_the_build_does_not_block_the_rerun(tmp_
 
 # --- second review --------------------------------------------------------------------
 def _run_job(tmp_path, shell, lines, fail_fast=True, name="j"):
-    from pipemaker import jobscript
-    from pipemaker.builder import StepCommands
-    from pipemaker.config import Workflow
+    from mitopiper import jobscript
+    from mitopiper.builder import StepCommands
+    from mitopiper.config import Workflow
 
     wf = Workflow.default()
     wf.set_general("environment", shell)
@@ -219,9 +219,9 @@ def test_without_fail_fast_the_last_command_decides_like_bash(tmp_path, shell):
 
 @pytest.mark.parametrize("shell", SHELLS)
 def test_clean_before_a_rerun_from_the_download_works_when_nothing_matches(tmp_path, shell):
-    from pipemaker.config import Workflow
-    from pipemaker.metadata import Run, Sample
-    from pipemaker.rerun import _clean_lines
+    from mitopiper.config import Workflow
+    from mitopiper.metadata import Run, Sample
+    from mitopiper.rerun import _clean_lines
 
     sample = Sample(0, "S1", "Homo_sapiens", [Run("r", ["ftp/x.fastq.gz"])])
     (tmp_path / "fastq").mkdir()
@@ -234,7 +234,7 @@ def test_clean_before_a_rerun_from_the_download_works_when_nothing_matches(tmp_p
 
 
 def test_rerun_jobs_only_wait_for_jobs_that_are_rerun(tmp_path):
-    from pipemaker.rerun import write
+    from mitopiper.rerun import write
 
     ws = workspace_with(tmp_path, "sh")
     fasta = tmp_path / "mt.fa"
@@ -269,7 +269,7 @@ def test_job_errors_watch_keeps_watching_a_running_job(tmp_path, monkeypatch):
 
 
 def test_local_runner_replaces_the_status_of_an_earlier_run(tmp_path):
-    from pipemaker.schedulers import _SUBMIT_FUNCTIONS
+    from mitopiper.schedulers import _SUBMIT_FUNCTIONS
 
     exp = tmp_path / "exp"
     for d in ("scripts", "status", "stdout", "stderr"):

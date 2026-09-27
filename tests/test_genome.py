@@ -5,12 +5,12 @@ import shutil
 
 import pytest
 
-from pipemaker import monitor as mon
-from pipemaker import references as refs_mod
-from pipemaker.cli import main
-from pipemaker.config import Workflow, Workspace
-from pipemaker.local_samples import make_tsv
-from pipemaker.references import (
+from mitopiper import monitor as mon
+from mitopiper import references as refs_mod
+from mitopiper.cli import main
+from mitopiper.config import Workflow, Workspace
+from mitopiper.local_samples import make_tsv
+from mitopiper.references import (
     GenomeInfo, ReferenceRegistry, ReferenceSet, RefError, attach_nuclear, fetch_genome_reference, find_genome,
     index_commands,
 )
@@ -142,11 +142,11 @@ def test_cli_fetch_genome(tmp_path, monkeypatch, capsys, caplog):
     assert ReferenceRegistry(ws).get("Danio_rerio", "mt").nuc_refpath.endswith("_genomic.fna")
     monkeypatch.setattr(refs_mod.NCBIClient, "genome_reports", lambda self, *a, **k: [])
     assert main(["-w", str(ws.root), "refs", "fetch-genome", "Nonexistus fakeus", "--yes"]) == 2
-    assert "pipemaker refs add Nonexistus_fakeus --fasta" in caplog.text
+    assert "mitopiper refs add Nonexistus_fakeus --fasta" in caplog.text
 
 
 def test_interactive_genome_not_found_offers_a_manual_path(tmp_path, monkeypatch):
-    from pipemaker.interactive import interactive_resolver
+    from mitopiper.interactive import interactive_resolver
 
     ws = Workspace(tmp_path / "ws")
     ws.initialise()
@@ -157,7 +157,7 @@ def test_interactive_genome_not_found_offers_a_manual_path(tmp_path, monkeypatch
 
 
 def test_interactive_genome_download_is_confirmed_after_the_warning(tmp_path, monkeypatch, capsys):
-    from pipemaker.interactive import interactive_resolver
+    from mitopiper.interactive import interactive_resolver
 
     ws = Workspace(tmp_path / "ws")
     ws.initialise()

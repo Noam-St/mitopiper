@@ -447,7 +447,7 @@ def preflight(workspace: Workspace, results: list, input_fn: Callable, rebuild: 
             "How do you want to continue?",
             [
                 "I will install / load them myself (then check again)",
-                "let pipemaker try to install them into the current environment",
+                "let mitopiper try to install them into the current environment",
                 "add a set-up line to every job (e.g. 'module load ...') and regenerate the scripts",
                 "launch anyway (the check job stops the pipeline on the cluster if they are really missing)",
                 "stop here (the scripts are kept)",
@@ -503,7 +503,7 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input, session_fa
     session (replaceable for testing).
     """
     workspace.initialise()
-    banner("Welcome to pipemaker - job script generator for sequencing pipelines")
+    banner("Welcome to mitopiper - job script generator for sequencing pipelines")
 
     previous = _last_build(workspace)
     if previous:
@@ -573,7 +573,7 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input, session_fa
     workspace.copy_preset("current", "last_used")
     if not proceed:
         print("Stopped before launching; the scripts are kept. Fix the environment and run 'bash master.sh', "
-              "or start pipemaker again.")
+              "or start mitopiper again.")
         return 1
     total = sum(len(r.jobs.samples) for r in results)
     print(f"\nAll scripts are ready: {total} sample job(s), submitted by {master}.")
@@ -582,7 +582,7 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input, session_fa
     else:
         print("IMPORTANT: every sample is submitted at once - make sure your cluster allows that many jobs!")
     if not yes_no("Launch the jobs now and follow them in the monitor?", True, input_fn):
-        print(f"Submit later with 'bash {master}', then follow the jobs with 'pipemaker monitor -i'.")
+        print(f"Submit later with 'bash {master}', then follow the jobs with 'mitopiper monitor -i'.")
         return 0
     session = session_factory(workspace, [r.name for r in results if r.jobs.samples or r.jobs.experiment], input_fn)
     session.start(master, "master.log")

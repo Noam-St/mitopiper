@@ -2,12 +2,12 @@
 
 usage: python monitor.py [--watch [SECONDS]] [--errors] [--job NAME] [experiment ...]
 
-Equivalent to ``pipemaker monitor``; see ``python monitor.py --help``.
+Equivalent to ``mitopiper monitor``; see ``python monitor.py --help``.
 """
 
 import sys
 
-from pipemaker.cli import main
+from mitopiper.cli import main
 
 if __name__ == "__main__":
     sys.exit(main(["monitor"] + sys.argv[1:]))

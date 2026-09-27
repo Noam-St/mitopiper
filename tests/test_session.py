@@ -1,11 +1,11 @@
 import io
 import time
 
-from pipemaker import monitor as mon
-from pipemaker.config import Workspace
-from pipemaker.interactive import run_interactive
-from pipemaker.references import ReferenceRegistry, ReferenceSet
-from pipemaker.session import MonitorSession
+from mitopiper import monitor as mon
+from mitopiper.config import Workspace
+from mitopiper.interactive import run_interactive
+from mitopiper.references import ReferenceRegistry, ReferenceSet
+from mitopiper.session import MonitorSession
 
 
 def setup_ws(tmp_path):
@@ -22,7 +22,7 @@ def setup_ws(tmp_path):
     fq.mkdir()
     for s in ("a", "b"):
         (fq / f"{s}.fastq").write_text("@r\nACGT\n+\nIIII\n")
-    from pipemaker.local_samples import make_tsv
+    from mitopiper.local_samples import make_tsv
 
     make_tsv(fq, "Homo sapiens", tmp_path / "demo.tsv")
     ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath="/x.fa"))
@@ -85,7 +85,7 @@ def test_start_menu_offers_monitoring_the_last_build(tmp_path):
     second = scripted(["1", "e", "", "q"], [])
     assert run_interactive(ws, second, session_factory=factory) == 1
     text = out.getvalue()
-    assert "suggested fix:" in text and "Leaving the monitor" in text and "pipemaker monitor -i" in text
+    assert "suggested fix:" in text and "Leaving the monitor" in text and "mitopiper monitor -i" in text
 
 
 def test_session_commands_while_jobs_run(tmp_path):
@@ -137,7 +137,7 @@ def test_rerun_options_offer_the_diagnosed_setup_line(tmp_path):
 
 
 def test_monitor_interactive_flag(tmp_path):
-    from pipemaker.cli import main
+    from mitopiper.cli import main
 
     ws = setup_ws(tmp_path)
     (ws.experiment_dir("E") / "status").mkdir(parents=True)

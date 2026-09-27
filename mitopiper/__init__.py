@@ -1,6 +1,6 @@
-"""pipemaker: generate HPC job scripts for sequencing-data pipelines.
+"""mitopiper: generate HPC job scripts for sequencing-data pipelines.
 
-pipemaker turns a sample metadata table (ENA or SRA) and a configurable
+mitopiper turns a sample metadata table (ENA or SRA) and a configurable
 workflow into one job script per sample for SGE, SLURM or LSF, plus a master
 script that submits them with the right dependencies.
 """

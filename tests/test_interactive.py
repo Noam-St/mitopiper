@@ -1,5 +1,5 @@
-from pipemaker.config import Workspace
-from pipemaker.interactive import Menus, key_fixer, run_interactive
+from mitopiper.config import Workspace
+from mitopiper.interactive import Menus, key_fixer, run_interactive
 
 
 def scripted(answers):

@@ -1,6 +1,6 @@
 import pytest
 
-from pipemaker.metadata import (
+from mitopiper.metadata import (
     MetadataError,
     ena_fastq_urls,
     load_samples,

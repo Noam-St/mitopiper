@@ -21,7 +21,7 @@ from .builder import (
     StepCommands,
     selected_steps,
 )
-from .config import Workflow, Workspace
+from .config import MANIFEST, Workflow, Workspace, manifest_path
 from .metadata import load_samples, write_sample_table
 from .references import ReferenceRegistry, ReferenceSet, index_commands
 from .schedulers import (
@@ -149,15 +149,12 @@ def job_resources(workflow: Workflow) -> JobResources:
     )
 
 
-MANIFEST = "pipemaker_manifest.json"
-
-
 def load_manifest(exp_dir: Path) -> dict:
     """The provenance manifest of a build (raises :class:`BuildError` when missing or unreadable)."""
     try:
-        return json.loads((exp_dir / MANIFEST).read_text(encoding="utf-8"))
+        return json.loads(manifest_path(exp_dir).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        raise BuildError(f"{exp_dir.name} has no readable {MANIFEST}; rebuild it with 'pipemaker build'") from exc
+        raise BuildError(f"{exp_dir.name} has no readable {MANIFEST}; rebuild it with 'mitopiper build'") from exc
 
 
 def _write_script(path: Path, content: str) -> None:
@@ -321,7 +318,7 @@ def write_manifest(exp_dir: Path, workflow: Workflow, options: BuildOptions, sam
     """Record everything needed to reproduce this build."""
     now = _dt.datetime.now().astimezone()
     manifest = {
-        "pipemaker_version": __version__,
+        "mitopiper_version": __version__,
         "created": now.isoformat(timespec="seconds"),
         "command_line": sys.argv,
         "python": platform.python_version(),

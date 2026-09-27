@@ -7,7 +7,7 @@ experiment-level steps and the reference preparation job.  This module
   depend on, e.g. cutadapt for trim_galore),
 * writes ``check_<exp>.sh``, the first job of every build: it runs in the job
   environment on the cluster and stops the pipeline when a tool is missing,
-* runs the same check here and now (``pipemaker check``, and before
+* runs the same check here and now (``mitopiper check``, and before
   launching from the interactive mode), with the job's ``free_form`` set-up
   lines applied, and
 * can try to install missing tools into the active environment (conda/mamba
@@ -141,8 +141,8 @@ def lookup_script(tools: dict) -> str:
     for tool, steps in tools.items():
         quoted = shlex.quote(tool)
         lines.append(f'command -v {quoted} >/dev/null 2>&1 || {{ echo "MISSING {tool} (used by: {", ".join(steps)})" >&2; m="$m {tool}"; }}')
-    lines.append('if [ -n "$m" ]; then echo "[pipemaker] not found:$m - load or install them (general setting free_form), then rerun" >&2; exit 1; fi')
-    lines.append(f'echo "[pipemaker] all {len(tools)} tools found"')
+    lines.append('if [ -n "$m" ]; then echo "[mitopiper] not found:$m - load or install them (general setting free_form), then rerun" >&2; exit 1; fi')
+    lines.append(f'echo "[mitopiper] all {len(tools)} tools found"')
     return "; ".join(lines)
 
 
