@@ -145,8 +145,8 @@ def body(steps: list, label: str, workflow: Workflow, before: Optional[list] = N
     clean-up of a rerun).
     """
     fam = family(shell_of(workflow))
-    check = fam == "csh" and fail_fast(workflow)
-    out = []
+    csh_fail_fast = fam == "csh" and fail_fast(workflow)
+    out = ["set pm_rc = 0"] if fam == "csh" else []
     for i, step in enumerate(steps):
         if fam == "posix":
             out.append(f"pm_step {step.step}")
@@ -156,10 +156,20 @@ def body(steps: list, label: str, workflow: Workflow, before: Optional[list] = N
         lines = list(before or []) + list(step.lines) if i == 0 else list(step.lines)
         for line in lines:
             out.append(line)
-            if check and line.strip() and not line.lstrip().startswith("echo "):
-                out += _CSH_CHECK
+            if fam == "csh" and line.strip():
+                # Every command is checked - including pipelines that start with echo,
+                # such as the checksum test `echo "<md5>  <file>" | md5sum -c -`.
+                out += _CSH_CHECK if csh_fail_fast else ["set pm_rc = $status"]
     if fam == "csh":
-        out.append('echo "DONE $PM_STEP $PM_START `date +%s` 0" > "$PM_STATUS"')
+        # Like the EXIT trap of POSIX shells, report the exit status of the last command.
+        out += [
+            "if ( $pm_rc == 0 ) then",
+            '    echo "DONE $PM_STEP $PM_START `date +%s` 0" > "$PM_STATUS"',
+            "else",
+            '    echo "FAILED $PM_STEP $PM_START `date +%s` $pm_rc" > "$PM_STATUS"',
+            "endif",
+            "exit $pm_rc",
+        ]
     return "\n".join(out) + ("\n" if out else "")
 
 

@@ -182,3 +182,101 @@ def test_a_suggested_resume_step_outside_the_build_does_not_block_the_rerun(tmp_
     assert items["s_s1_0"].start_step == "boom" and not items["s_s1_0"].clean   # falls back to the failed step
     with pytest.raises(Exception, match="not part of this build"):
         plan(ws, ["exp"], RerunOptions(from_step="STAR-alignment"))           # an explicit --from still errors
+
+
+# --- second review --------------------------------------------------------------------
+def _run_job(tmp_path, shell, lines, fail_fast=True, name="j"):
+    from pipemaker import jobscript
+    from pipemaker.builder import StepCommands
+    from pipemaker.config import Workflow
+
+    wf = Workflow.default()
+    wf.set_general("environment", shell)
+    wf.set_general("fail_fast", fail_fast)
+    script = tmp_path / f"{name}.sh"
+    script.write_text(jobscript.preamble(wf, str(tmp_path), name) + jobscript.body([StepCommands("s", "d", lines)], "x", wf))
+    result = subprocess.run([shell, str(script)], capture_output=True, text=True, cwd=tmp_path)
+    return result, (tmp_path / "status" / f"{name}.status").read_text().split()
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_failed_checksum_stops_the_job(tmp_path, shell):
+    target = tmp_path / "x.fastq.gz"
+    target.write_text("corrupt")
+    result, status = _run_job(tmp_path, shell, [f'echo "0123456789abcdef0123456789abcdef  {target}" | md5sum -c -',
+                                                f"touch {tmp_path}/continued"])
+    assert status[0] == "FAILED" and result.returncode != 0
+    assert not (tmp_path / "continued").exists()
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_without_fail_fast_the_last_command_decides_like_bash(tmp_path, shell):
+    _, status = _run_job(tmp_path, shell, ["false", "true"], fail_fast=False, name="a")
+    assert status[0] == "DONE"
+    _, status = _run_job(tmp_path, shell, ["true", "false"], fail_fast=False, name="b")
+    assert status[0] == "FAILED" and status[-1] == "1"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_clean_before_a_rerun_from_the_download_works_when_nothing_matches(tmp_path, shell):
+    from pipemaker.config import Workflow
+    from pipemaker.metadata import Run, Sample
+    from pipemaker.rerun import _clean_lines
+
+    sample = Sample(0, "S1", "Homo_sapiens", [Run("r", ["ftp/x.fastq.gz"])])
+    (tmp_path / "fastq").mkdir()
+    (tmp_path / "fastq" / "S1_0_HS.fastq.gz").write_text("old")
+    (tmp_path / "fastq" / "S1_0_HS.part3.fastq.gz").write_text("old part")
+    lines = _clean_lines(sample, Workflow.default(), str(tmp_path), "wget")
+    result, status = _run_job(tmp_path, shell, lines + [f"touch {tmp_path}/continued"])
+    assert status[0] == "DONE", result.stderr
+    assert (tmp_path / "continued").exists() and not list((tmp_path / "fastq").iterdir())
+
+
+def test_rerun_jobs_only_wait_for_jobs_that_are_rerun(tmp_path):
+    from pipemaker.rerun import write
+
+    ws = workspace_with(tmp_path, "sh")
+    fasta = tmp_path / "mt.fa"
+    fasta.write_text(">MT\nACGT\n")
+    ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath=str(fasta), source="ncbi_mt"))
+    wf = ws.load_workflow("t")
+    wf.run_order = ["wget", "boom", "index", "multiqc"]   # samtools -> the reference needs a .fai -> prep job
+    ws.write_workflow(wf, "t")
+    assert main(["-w", str(ws.root), "build", str(tmp_path / "exp.tsv"), "-s", "sge", "-p", "t"]) == 0
+    exp = ws.output_dir / "exp"
+    assert "pm_dep" in (exp / "scripts" / "s_s1_0.sh").read_text()        # the build does wait for prep_exp
+    # An older build: no status files at all. Rerun only the sample and the experiment job.
+    shutil.rmtree(exp / "status", ignore_errors=True)
+    (exp / "jobs.tsv").write_text("job_id\tjob_name\tscript\tsubmitted\tkind\n1\tprep_exp\t/p\t1\tprepare\n"
+                                  "2\ts_s1_0\t/s\t1\tsample\n3\te_exp\t/e\t1\texperiment\n")
+    items = plan(ws, ["exp"], RerunOptions(jobs=["s_s1_0"]), query=lambda s, i: {})
+    assert {i.name for i in items} == {"s_s1_0", "e_exp"}
+    write(ws, items)
+    assert "pm_dep" not in (exp / "scripts" / "s_s1_0.sh").read_text()    # prep is not rerun: nothing to wait for
+    assert "for pm_dep in s_s1_0; do" in (exp / "scripts" / "e_exp.sh").read_text()
+
+
+def test_job_errors_watch_keeps_watching_a_running_job(tmp_path, monkeypatch):
+    ws = Workspace(tmp_path / "ws")
+    fake_exp(ws)
+    sleeps = []
+    monkeypatch.setattr(mon.time, "sleep", lambda s: (sleeps.append(s), (_ for _ in ()).throw(KeyboardInterrupt))[1])
+    out = io.StringIO()
+    mon.monitor(ws, ["E"], watch=5, job="s_a_0", errors_only=True, stream=out, color=False,
+                query=lambda s, i: {"11": (mon.RUNNING, "r")})
+    assert sleeps == [5] and "All jobs have finished" not in out.getvalue()
+
+
+def test_local_runner_replaces_the_status_of_an_earlier_run(tmp_path):
+    from pipemaker.schedulers import _SUBMIT_FUNCTIONS
+
+    exp = tmp_path / "exp"
+    for d in ("scripts", "status", "stdout", "stderr"):
+        (exp / d).mkdir(parents=True)
+    script = exp / "scripts" / "j.sh"
+    script.write_text("exit 0\n")                                   # a job that cannot report its status
+    (exp / "status" / "j.status").write_text("FAILED boom 1 2 1\n")   # left over from the previous run
+    submit = _SUBMIT_FUNCTIONS["local"].replace("SHELL_BIN", "/bin/sh")
+    subprocess.run(["bash", "-c", f"{submit}\nsubmit {script}"], check=True, capture_output=True)
+    assert (exp / "status" / "j.status").read_text().startswith("DONE")

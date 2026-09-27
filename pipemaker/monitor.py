@@ -587,7 +587,8 @@ def monitor(
             stream.write(text + ("\n" if not text.endswith("\n") else ""))
         stream.flush()
         # Decide on *all* jobs: with --errors the list shown may be empty while jobs still run.
-        all_final = all(s.state in FINAL_STATES for s in (statuses if job else everything))
+        scope = [s for s in everything if s.name == job or s.job_id == job] if job else everything
+        all_final = all(s.state in FINAL_STATES for s in scope)
         if not watch or all_final:
             if watch and all_final:
                 stream.write("All jobs have finished.\n")

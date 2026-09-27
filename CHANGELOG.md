@@ -41,6 +41,11 @@ The single `maker.py` script was refactored into the installable `pipemaker` pac
 - pandas and Biopython are no longer needed.
 
 ### Fixed
+- csh/tcsh jobs check every command, including pipelines starting with `echo` such as the MD5 check, so a corrupt download stops the job. With `fail_fast` off they report the exit status of the last command, like bash, instead of always `DONE`.
+- `rerun --clean` from the download step works under csh/tcsh: file patterns are removed with `find` instead of an unmatched `rm` glob ("No match").
+- Rerun jobs only wait for jobs resubmitted by the same rerun. Reruns of builds made without status files (older versions, csh/sh/dash) no longer skip themselves.
+- `monitor --job NAME --errors --watch` keeps watching while the job runs.
+- The local scheduler always records the outcome of the current run, even for shells without status tracking.
 - Diagnosis: a missing or corrupt file is traced to the step that writes that file, matched by folder *and* extension and never later than the failed step. Before, a `view` failure on a missing `.sam` suggested resuming at `index`, and a corrupt trimmed FASTQ pointed to `fastqc`. A corrupt file that no step of the build produces gets no automatic resume point.
 - `rerun --auto-fix` / `monitor --rerun` ignore a suggested resume step that is not before the failed step of that build, instead of aborting the whole rerun.
 - csh/tcsh jobs report their status (exit status checked after each command) and honour `fail_fast`. Automatic reference indexing uses csh syntax under csh/tcsh. The `local` scheduler records the exit code of jobs that cannot report it themselves.

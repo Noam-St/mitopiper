@@ -102,7 +102,16 @@ def _clean_lines(sample, workflow: Workflow, exp: str, step: str) -> list:
         paths = [_join(outdir, f"{s}.fastq.gz") for s in stems] + [_join(outdir, f"{s}.part*.fastq.gz") for s in stems]
     if not paths:
         return []
-    return [f"echo 'Removing previous output of {step}'", "rm -f " + " ".join(paths)]
+    exact = [p for p in paths if "*" not in p]
+    patterns = [p for p in paths if "*" in p]
+    lines = [f"echo 'Removing previous output of {step}'"]
+    if exact:
+        lines.append("rm -f " + " ".join(f'"{p}"' for p in exact))
+    # Patterns go through find: an unmatched glob is an error in csh/tcsh ("No match").
+    for pattern in patterns:
+        folder, name = pattern.rsplit("/", 1)
+        lines.append(f"find \"{folder}\" -maxdepth 1 -name '{name}' -exec rm -f {{}} +")
+    return lines
 
 
 def plan(workspace: Workspace, experiments: Optional[list] = None, options: Optional[RerunOptions] = None,
@@ -189,7 +198,10 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
         scripts = exp_dir / "scripts"
 
         prep_cmds = lambda wf: [c for ref in refs.values() if ref.needs_indexing for c in index_commands(ref, wf)]  # noqa: E731
-        prep_name = f"prep_{exp}" if prep_cmds(base) else None
+        # Rerun jobs only wait for jobs that this rerun resubmits: the others are not run again, and
+        # builds made by older versions may have no status files to check.
+        rerun_names = {i.name for i in items if i.experiment == exp}
+        prep_name = f"prep_{exp}" if f"prep_{exp}" in rerun_names else None
         for item in (i for i in items if i.experiment == exp):
             wf = _apply_overrides(base, item.overrides, options.free_form)
             res = job_resources(wf)
@@ -209,7 +221,7 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
                 content += jobscript.body(job.steps, sample.name, wf, before=clean)
                 jobs.samples.append(str(path))
             elif item.kind == "experiment":
-                sample_deps = [n for n in by_job if (scripts / f"{n}.sh").exists()]
+                sample_deps = [n for n in by_job if n in rerun_names]
                 content += jobscript.preamble(wf, exp_s, item.name, sample_deps)
                 content += jobscript.body(build_experiment_steps(samples, wf, exp_s, steps), exp, wf)
                 jobs.experiment = str(path)

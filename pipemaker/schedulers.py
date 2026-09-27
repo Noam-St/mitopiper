@@ -124,6 +124,7 @@ _SUBMIT_FUNCTIONS = {
     echo "[pipemaker] running $script" >&2
     local start rc=0 status_file="$logdir/status/$name.status"
     start=$(date +%s)
+    rm -f "$status_file"   # a fresh run: never keep the outcome of an earlier run
     # A failing job must not stop the other (independent) jobs from running.
     SHELL_BIN "$script" > "$logdir/stdout/$name.out" 2> "$logdir/stderr/$name.err" || rc=$?
     [ "$rc" -eq 0 ] || echo "[pipemaker] $script failed (see $logdir/stderr/$name.err)" >&2
