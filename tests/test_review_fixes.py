@@ -36,7 +36,7 @@ def workspace_with(tmp_path, shell="bash", fail=True, experiment_step=True, step
 
 
 def build_and_run(ws, tmp_path, scheduler="local"):
-    assert main(["-w", str(ws.root), "build", str(tmp_path / "exp.tsv"), "-s", scheduler, "-p", "t"]) == 0
+    assert main(["-w", str(ws.root), "build", "--no-check", str(tmp_path / "exp.tsv"), "-s", scheduler, "-p", "t"]) == 0
     if scheduler == "local":
         subprocess.run(["bash", str(ws.root / "master.sh")], check=True, capture_output=True)
 
@@ -166,7 +166,7 @@ def test_error_scanner_restarts_on_a_rewritten_log(tmp_path):
 # --- build / rerun -------------------------------------------------------------------
 def test_build_with_only_an_experiment_level_step(tmp_path, capsys):
     ws = workspace_with(tmp_path)
-    assert main(["-w", str(ws.root), "build", str(tmp_path / "exp.tsv"), "-p", "t", "--steps", "multiqc"]) == 0
+    assert main(["-w", str(ws.root), "build", "--no-check", str(tmp_path / "exp.tsv"), "-p", "t", "--steps", "multiqc"]) == 0
     assert (ws.root / "master.sh").exists()
     assert "1 job script(s)" in capsys.readouterr().out
 
@@ -243,7 +243,7 @@ def test_rerun_jobs_only_wait_for_jobs_that_are_rerun(tmp_path):
     wf = ws.load_workflow("t")
     wf.run_order = ["wget", "boom", "index", "multiqc"]   # samtools -> the reference needs a .fai -> prep job
     ws.write_workflow(wf, "t")
-    assert main(["-w", str(ws.root), "build", str(tmp_path / "exp.tsv"), "-s", "sge", "-p", "t"]) == 0
+    assert main(["-w", str(ws.root), "build", "--no-check", str(tmp_path / "exp.tsv"), "-s", "sge", "-p", "t"]) == 0
     exp = ws.output_dir / "exp"
     assert "pm_dep" in (exp / "scripts" / "s_s1_0.sh").read_text()        # the build does wait for prep_exp
     # An older build: no status files at all. Rerun only the sample and the experiment job.

@@ -12,10 +12,10 @@ def run(ws, *args):
 
 def test_build_writes_scripts_master_and_manifest(registered, data_dir):
     ws = registered
-    assert run(ws, "build", str(data_dir / "ena_runs.tsv"), "-s", "slurm") == 0
+    assert run(ws, "build", "--no-check", str(data_dir / "ena_runs.tsv"), "-s", "slurm") == 0
     exp = ws.output_dir / "ena_runs"
     scripts = sorted(p.name for p in (exp / "scripts").iterdir())
-    assert scripts == ["s_SAMEA1_0.sh", "s_SAMEA3_1.sh"]
+    assert scripts == ["check_ena_runs.sh", "s_SAMEA1_0.sh", "s_SAMEA3_1.sh"]
     text = (exp / "scripts" / "s_SAMEA1_0.sh").read_text()
     assert text.startswith("#!/bin/bash\n#SBATCH")
     assert "set -eo pipefail" in text
@@ -42,7 +42,7 @@ def test_dry_run_writes_plan_only(registered, data_dir):
 
 
 def test_missing_reference_is_reported(workspace, data_dir):
-    assert run(workspace, "build", str(data_dir / "ena_runs.tsv")) == 1
+    assert run(workspace, "build", "--no-check", str(data_dir / "ena_runs.tsv")) == 1
 
 
 def test_reference_override(registered, data_dir):
@@ -50,7 +50,7 @@ def test_reference_override(registered, data_dir):
     from pipemaker.references import ReferenceRegistry
 
     ReferenceRegistry(ws).add("Danio_rerio", ReferenceSet(refpath="/refs/dr/GRCz11.fa"), "GRCz11", activate=False)
-    assert run(ws, "build", str(data_dir / "ena_runs.tsv"), "--reference", "GRCz11", "--samples", "0") == 0
+    assert run(ws, "build", "--no-check", str(data_dir / "ena_runs.tsv"), "--reference", "GRCz11", "--samples", "0") == 0
     text = (ws.output_dir / "ena_runs" / "scripts" / "s_SAMEA1_0.sh").read_text()
     assert "/refs/dr/GRCz11.fa" in text
 
@@ -63,7 +63,7 @@ def test_local_scheduler_runs_jobs(tmp_path, data_dir):
     (fq / "s1_R2.fastq").write_text("@r\nACGT\n+\nIIII\n")
     assert run(ws, "make-tsv", str(fq), "--org", "Homo sapiens", "-o", str(tmp_path / "local.tsv")) == 0
     assert run(ws, "refs", "add", "Homo sapiens", "--fasta", "/x.fa") == 0
-    assert run(ws, "build", str(tmp_path / "local.tsv"), "-s", "local", "--steps", "wget") == 0
+    assert run(ws, "build", "--no-check", str(tmp_path / "local.tsv"), "-s", "local", "--steps", "wget") == 0
     subprocess.run(["bash", str(ws.root / "master.sh")], check=True, capture_output=True)
     out = ws.output_dir / "local" / "fastq"
     assert sorted(p.name for p in out.iterdir()) == ["s1_0_HS_1.fastq.gz", "s1_0_HS_2.fastq.gz"]
@@ -73,7 +73,7 @@ def test_presets_and_cleanup(registered, data_dir, capsys):
     ws = registered
     assert run(ws, "presets", "list") == 0
     assert "default" in capsys.readouterr().out
-    assert run(ws, "build", str(data_dir / "ena_runs.tsv")) == 0
+    assert run(ws, "build", "--no-check", str(data_dir / "ena_runs.tsv")) == 0
     exp = ws.output_dir / "ena_runs"
     (exp / "stdout" / "job.out").write_text("log")
     assert run(ws, "cleanup", "--yes") == 0

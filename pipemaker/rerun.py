@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from . import jobscript
+from . import jobscript, toolcheck
 from .build import BuildError, _write_script, find_experiment_metadata, job_resources
 from .builder import StepCommands, _join, build_experiment_steps, build_sample_job, output_paths, step_scope
 from .config import Workflow, Workspace
@@ -134,8 +134,10 @@ def plan(workspace: Workspace, experiments: Optional[list] = None, options: Opti
         sample_steps = [s for s in manifest.get("steps", []) if ctx.pipeline.get(s, {}).get("scope", "sample") == "sample"]
         chosen = [j for j in jobs if (j.name in options.jobs or j.job_id in options.jobs)] if options.jobs else \
                  [j for j in jobs if j.state in wanted]
-        prep_failed = any(j.kind == "prepare" for j in chosen)
-        if prep_failed:  # dependants of a failed reference job never ran properly
+        if any(j.kind == "check" for j in chosen):  # nothing after a failed tool check ran properly
+            chosen += [j for j in jobs if j.kind == "prepare" and j.state not in (DONE, RUNNING) and j not in chosen]
+        prep_failed = any(j.kind in ("prepare", "check") for j in chosen)
+        if prep_failed:  # dependants of a failed reference job / tool check never ran properly
             chosen += [j for j in jobs if j.kind == "sample" and j.state != DONE and j not in chosen and j.state != RUNNING]
         if any(j.kind == "sample" for j in chosen):
             chosen += [j for j in jobs if j.kind == "experiment" and j.state not in (DONE, RUNNING) and j not in chosen]
@@ -201,7 +203,9 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
         # Rerun jobs only wait for jobs that this rerun resubmits: the others are not run again, and
         # builds made by older versions may have no status files to check.
         rerun_names = {i.name for i in items if i.experiment == exp}
+        check_name = f"check_{exp}" if f"check_{exp}" in rerun_names else None
         prep_name = f"prep_{exp}" if f"prep_{exp}" in rerun_names else None
+        first = [prep_name or check_name] if (prep_name or check_name) else None
         for item in (i for i in items if i.experiment == exp):
             wf = _apply_overrides(base, item.overrides, options.free_form)
             res = job_resources(wf)
@@ -214,7 +218,7 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
                 sample_steps = [s for s in steps if step_scope(wf, s) == "sample"]
                 todo = sample_steps[sample_steps.index(item.start_step):] if item.start_step else sample_steps
                 job = build_sample_job(sample, wf, exp_s, refs[sample.organism], todo)
-                content += jobscript.preamble(wf, exp_s, item.name, [prep_name] if prep_name else None)
+                content += jobscript.preamble(wf, exp_s, item.name, first)
                 content += f'echo "Current organism: {sample.organism}"\n'
                 content += f'echo "[pipemaker] rerun starting at step {item.start_step or todo[0]}"\n\n'
                 clean = _clean_lines(sample, wf, exp_s, item.start_step) if item.clean and item.start_step else []
@@ -222,11 +226,15 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
                 jobs.samples.append(str(path))
             elif item.kind == "experiment":
                 sample_deps = [n for n in by_job if n in rerun_names]
-                content += jobscript.preamble(wf, exp_s, item.name, sample_deps)
+                content += jobscript.preamble(wf, exp_s, item.name, sample_deps or first)
                 content += jobscript.body(build_experiment_steps(samples, wf, exp_s, steps), exp, wf)
                 jobs.experiment = str(path)
-            else:
+            elif item.kind == "check":
                 content += jobscript.preamble(wf, exp_s, item.name)
+                content += toolcheck.check_job_body(manifest.get("tools", {}), wf)
+                jobs.check = str(path)
+            else:
+                content += jobscript.preamble(wf, exp_s, item.name, [check_name] if check_name else None)
                 prep = [StepCommands("prepare_references", "Index the automatically downloaded references", prep_cmds(wf))]
                 content += jobscript.body(prep, exp, wf)
                 jobs.prepare = str(path)

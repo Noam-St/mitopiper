@@ -32,8 +32,19 @@ def test_no_account_or_queue_when_empty():
 def test_master_script_dependencies(scheduler, needle):
     text = master_script(scheduler, [ExperimentJobs("E", "/e/scripts/prep.sh", ["/e/scripts/a.sh"], "/e/scripts/exp.sh")])
     assert needle in text
-    assert "jid=$(submit /e/scripts/prep.sh)" in text and 'prep+=("$jid")' in text
+    assert 'jid=$(submit /e/scripts/prep.sh ${prep[@]+"${prep[@]}"})' in text and 'prep=("$jid")' in text
     assert 'jid=$(submit /e/scripts/exp.sh ${jobs[@]+"${jobs[@]}"})' in text
     # every submission is recorded for the monitor
     assert "jobs_file=/e/jobs.tsv" in text and "marker=/e/.submitting" in text
     assert 'record "$jid" "$script" sample' in text and "record \"$jid\" /e/scripts/exp.sh experiment" in text
+
+
+def test_master_script_submits_the_tool_check_first():
+    text = master_script("slurm", [ExperimentJobs("E", "/e/scripts/prep.sh", ["/e/scripts/a.sh"], "/e/scripts/e.sh",
+                                                  "/e", check="/e/scripts/check.sh")])
+    order = [text.index(x) for x in ("submit /e/scripts/check.sh", "submit /e/scripts/prep.sh", "for script in", "submit /e/scripts/e.sh")]
+    assert order == sorted(order)
+    assert "record \"$jid\" /e/scripts/check.sh check" in text
+    # without a reference job the samples wait for the check directly
+    text = master_script("slurm", [ExperimentJobs("E", None, ["/e/scripts/a.sh"], None, "/e", check="/e/scripts/check.sh")])
+    assert 'prep=("$jid")' in text and 'submit "$script" ${prep[@]+"${prep[@]}"}' in text

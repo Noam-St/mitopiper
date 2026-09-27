@@ -58,6 +58,14 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--fetch-mt", action="store_true", help="download missing references (mtDNA) from NCBI instead of failing")
     b.add_argument("--dry-run", action="store_true", help="resolve everything and write plan.json, but no scripts")
     b.add_argument("--refresh", action="store_true", help="download the metadata of an accession again even if it was used before")
+    b.add_argument("--auto-fix", action="store_true",
+                   help="if tools the jobs call are missing here, try to install them into the current environment")
+    b.add_argument("--no-check", action="store_true",
+                   help="do not check here that the tools exist (e.g. when generating scripts on another machine)")
+
+    ck = sub.add_parser("check", help="check that every tool the jobs call can be found (optionally install them)")
+    ck.add_argument("experiments", nargs="*", help="experiments (default: those of the last build)")
+    ck.add_argument("--auto-fix", action="store_true", help="try to install missing tools into the current environment")
 
     f = sub.add_parser("fetch-metadata", help="download the ENA run report of a project/study/sample accession")
     f.add_argument("accession", help="e.g. PRJEB12345, PRJNA67890, SRP012345, SAMN01234567")
@@ -187,7 +195,7 @@ def cmd_build(ws: Workspace, args) -> int:
             print(f"[dry-run] {result.name}: {len(result.plan['samples'])} sample(s), steps: {' -> '.join(result.plan['steps'])}")
             print(f"[dry-run] plan written to {result.directory / 'plan.json'}")
         else:
-            count = len(result.jobs.samples) + bool(result.jobs.experiment) + bool(result.jobs.prepare)
+            count = len(result.jobs.samples) + bool(result.jobs.experiment) + bool(result.jobs.prepare) + bool(result.jobs.check)
             print(f"{result.name}: {count} job script(s) in {result.directory / 'scripts'}")
     if args.dry_run:
         return 0
@@ -196,6 +204,18 @@ def cmd_build(ws: Workspace, args) -> int:
         return 1
     master = write_master(ws, scheduler, results, shell=str(workflow.general("environment", "bash")))
     ws.copy_preset("current", "last_used")
+    if not args.no_check:
+        from . import toolcheck
+
+        tools = toolcheck.merge(*[r.tools for r in results])
+        result = toolcheck.run_preflight(tools, workflow, auto_fix=args.auto_fix)
+        if result.checked and result.missing:
+            log.error("Halted: %d tool(s) the jobs call were not found here (%s). Make them available "
+                      "(module load / conda activate in 'free_form'), rerun with --auto-fix to install them, "
+                      "or --no-check if the jobs run in a different environment. The scripts are written; "
+                      "the check job would stop the pipeline on the cluster anyway.",
+                      len(result.missing), ", ".join(result.missing))
+            return 1
     print(f"Submit everything with: bash {master}")
     return 0
 
@@ -272,6 +292,23 @@ def cmd_fetch_metadata(ws: Workspace, args) -> int:
     return 0
 
 
+def cmd_check(ws: Workspace, args) -> int:
+    from . import toolcheck
+    from .monitor import default_experiments
+
+    experiments = args.experiments or default_experiments(ws)
+    if not experiments:
+        print("No builds found. Run 'pipemaker build' first.")
+        return 1
+    status = 0
+    for exp in experiments:
+        tools, workflow = toolcheck.experiment_tools(ws, exp)
+        print(f"== {exp}")
+        result = toolcheck.run_preflight(tools, workflow, auto_fix=args.auto_fix)
+        status |= int(result.checked and bool(result.missing))
+    return status
+
+
 def cmd_rerun(ws: Workspace, args) -> int:
     from .rerun import RerunOptions, rerun
 
@@ -331,6 +368,7 @@ def main(argv: Optional[list] = None) -> int:
         "fetch-metadata": cmd_fetch_metadata,
         "monitor": cmd_monitor,
         "rerun": cmd_rerun,
+        "check": cmd_check,
     }
     try:
         if args.command in (None, "interactive"):

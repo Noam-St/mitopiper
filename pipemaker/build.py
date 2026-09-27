@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import __version__, jobscript
+from . import __version__, jobscript, toolcheck
 from .builder import (
     build_experiment_steps,
     build_sample_job,
@@ -56,6 +56,7 @@ class ExperimentResult:
     skipped_organisms: list
     jobs: ExperimentJobs
     plan: dict = field(default_factory=dict)
+    tools: dict = field(default_factory=dict)   # tool -> steps using it (see toolcheck)
 
 
 def experiment_name(metadata: Path) -> str:
@@ -236,11 +237,13 @@ def build_experiment(
             }
         )
     plan["experiment_steps"] = [{"step": s.step, "commands": s.lines} for s in experiment_steps]
+    tools = pipeline_tools(workflow, sample_jobs, experiment_steps, refs)
+    plan["tools"] = tools
 
     jobs = ExperimentJobs(name=exp_dir.name, prepare=None, samples=[], experiment=None)
     if options.dry_run:
         (exp_dir / "plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
-        return ExperimentResult(exp_dir.name, exp_dir, samples, skipped, jobs, plan)
+        return ExperimentResult(exp_dir.name, exp_dir, samples, skipped, jobs, plan, tools)
 
     for directory in {workflow.pipeline[s].get("outdir", "") for s in steps} | {"stdout", "stderr"}:
         if directory:
@@ -249,19 +252,27 @@ def build_experiment(
 
     # Script names equal job names, so logs and status files can be matched to them.
     jobs.directory = exp
+    check_name = f"check_{exp_dir.name}" if tools and tool_check_enabled(workflow) else None
+    if check_name:
+        path = scripts_dir / f"{check_name}.sh"
+        _write_script(path, header(scheduler, check_name, exp, resources) + jobscript.preamble(workflow, exp, check_name)
+                      + toolcheck.check_job_body(tools, workflow))
+        jobs.check = str(path)
     prep_name = f"prep_{exp_dir.name}" if prep_lines else None
     if prep_name:
         path = scripts_dir / f"{prep_name}.sh"
         steps_ = [StepCommands("prepare_references", "Index the automatically downloaded references", prep_lines)]
-        _write_script(path, header(scheduler, prep_name, exp, resources) + jobscript.preamble(workflow, exp, prep_name)
+        _write_script(path, header(scheduler, prep_name, exp, resources)
+                      + jobscript.preamble(workflow, exp, prep_name, [check_name] if check_name else None)
                       + jobscript.body(steps_, exp_dir.name, workflow))
         jobs.prepare = str(path)
+    first = [prep_name or check_name] if (prep_name or check_name) else None
     # A build of experiment-level steps only (e.g. --steps multiqc) has no sample jobs to run.
     runnable = [job for job in sample_jobs if job.steps]
     for job in runnable:
         path = scripts_dir / f"{job.job_name}.sh"
         content = header(scheduler, job.job_name, exp, resources)
-        content += jobscript.preamble(workflow, exp, job.job_name, [prep_name] if prep_name else None)
+        content += jobscript.preamble(workflow, exp, job.job_name, first)
         content += f'echo "Current organism: {job.sample.organism}"\n\n' + jobscript.body(job.steps, job.sample.name, workflow)
         _write_script(path, content)
         jobs.samples.append(str(path))
@@ -269,12 +280,33 @@ def build_experiment(
         name = f"e_{exp_dir.name}"
         path = scripts_dir / f"{name}.sh"
         content = header(scheduler, name, exp, resources)
-        content += jobscript.preamble(workflow, exp, name, [j.job_name for j in runnable])
+        content += jobscript.preamble(workflow, exp, name, [j.job_name for j in runnable] or first)
         _write_script(path, content + jobscript.body(experiment_steps, exp_dir.name, workflow))
         jobs.experiment = str(path)
 
     write_manifest(exp_dir, workflow, options, samples, refs, plan)
-    return ExperimentResult(exp_dir.name, exp_dir, samples, skipped, jobs, plan)
+    return ExperimentResult(exp_dir.name, exp_dir, samples, skipped, jobs, plan, tools)
+
+
+def tool_check_enabled(workflow: Workflow) -> bool:
+    return str(workflow.general("tool_check", True)).strip().lower() in ("true", "1", "yes")
+
+
+def pipeline_tools(workflow: Workflow, sample_jobs: list, experiment_steps: list, refs: dict) -> dict:
+    """Every executable the jobs of a build call, with the steps that call it."""
+    step_lines: dict = {}
+    for job in sample_jobs:
+        for step in job.steps:
+            step_lines.setdefault(step.step, []).extend(step.lines)
+    for step in experiment_steps:
+        step_lines.setdefault(step.step, []).extend(step.lines)
+    # Reference preparation: read the POSIX form of the commands (same tools in every shell).
+    posix = workflow.copy()
+    posix.set_general("environment", "bash")
+    for ref in refs.values():
+        if ref.needs_indexing:
+            step_lines.setdefault("prepare_references", []).extend(index_commands(ref, posix))
+    return toolcheck.required_tools(step_lines)
 
 
 def write_master(workspace: Workspace, scheduler: str, results: list, shell: str = "bash") -> Path:
@@ -301,6 +333,7 @@ def write_manifest(exp_dir: Path, workflow: Workflow, options: BuildOptions, sam
         "steps": plan["steps"],
         "reference_override": options.reference,
         "status_tracking": jobscript.tracks_status(workflow),
+        "tools": plan.get("tools", {}),
         "references": {org: ref.to_dict() for org, ref in refs.items()},
         "samples": [{"name": s.name, "runs": s.run_accessions, "organism": s.organism} for s in samples],
         "workflow": workflow.as_dict(),

@@ -248,6 +248,7 @@ DEFAULT_MAIN = {
     "fail_fast": [True, "abort a job as soon as one of its commands fails (set -e -o pipefail)"],
     "verify_md5": [True, "verify downloaded FASTQ files against ENA's fastq_md5 column when available"],
     "download_delay": [30, "seconds to wait between consecutive downloads (be kind to ENA)"],
+    "tool_check": [True, "run check_<exp>.sh first: it stops the pipeline if a tool the jobs call cannot be found"],
 }
 
 CONFIG_FILES = ("pipeline", "settings", "run_order", "general_settings")

@@ -87,6 +87,7 @@ def make_ws(tmp_path, fail_cmd="mytool"):
     wf.pipeline["multiqc"]["switch"] = True
     wf.pipeline["multiqc"]["structure"] = "echo summary"
     wf.run_order = ["wget", "count", "multiqc"]
+    wf.set_general("tool_check", False)  # these tests are about failures inside the pipeline
     ws.write_workflow(wf, "demo")
     fq = tmp_path / "fq"
     fq.mkdir()
@@ -94,7 +95,7 @@ def make_ws(tmp_path, fail_cmd="mytool"):
         (fq / f"{s}.fastq").write_text("@r\nACGT\n+\nIIII\n")
     assert main(["-w", str(ws.root), "make-tsv", str(fq), "--org", "Homo sapiens", "-o", str(tmp_path / "demo.tsv")]) == 0
     ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath="/x.fa"))
-    assert main(["-w", str(ws.root), "build", str(tmp_path / "demo.tsv"), "-s", "local", "-p", "demo"]) == 0
+    assert main(["-w", str(ws.root), "build", "--no-check", str(tmp_path / "demo.tsv"), "-s", "local", "-p", "demo"]) == 0
     subprocess.run(["bash", str(ws.root / "master.sh")], check=True, capture_output=True)
     return ws
 

@@ -22,11 +22,12 @@ def test_full_interactive_session(tmp_path, data_dir):
         "",                                 # keep all steps
         "1", "/refs/dr.fa", "", "/refs/dr.gtf", "",   # Danio_rerio: enter paths
         "2",                                # Homo_sapiens: skip
+        "3",                                # tools missing here (no fastqc etc.): launch anyway
         "n",                                # don't launch now
     ]
     assert run_interactive(ws, scripted(answers)) == 0
     scripts = sorted(p.name for p in (ws.output_dir / "ena_runs" / "scripts").iterdir())
-    assert scripts == ["s_SAMEA1_0.sh"]
+    assert scripts == ["check_ena_runs.sh", "s_SAMEA1_0.sh"]
     assert (ws.root / "master.sh").exists()
 
 

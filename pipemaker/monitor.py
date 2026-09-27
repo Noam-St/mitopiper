@@ -355,7 +355,8 @@ def collect(workspace: Workspace, experiments: list, scanner: ErrorScanner,
         scheduler_info = query(experiment_scheduler(exp_dir), [submitted[n].get("job_id", "") for n in submitted])
         for name in names:
             row = submitted.get(name, {})
-            kind = row.get("kind") or ("prepare" if name.startswith("prep_") else "experiment" if name.startswith("e_") else "sample")
+            kind = row.get("kind") or ("check" if name.startswith("check_") else "prepare" if name.startswith("prep_")
+                                       else "experiment" if name.startswith("e_") else "sample")
             job = JobStatus(experiment=exp, name=name, kind=kind, job_id=row.get("job_id", ""), script=row.get("script", ""))
             if row.get("submitted", "").isdigit():
                 job.submitted = int(row["submitted"])

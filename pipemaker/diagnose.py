@@ -215,6 +215,18 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
                        [f"qstat -j {job.job_id}", "pipemaker rerun"], {}))
 
     # --- environment -------------------------------------------------------------
+    listed = re.findall(r"^MISSING (\S+)", text, re.MULTILINE)  # written by the tool check job
+    if listed:
+        tools = list(dict.fromkeys(listed))
+        add(Suggestion(
+            f"The tool check found {len(tools)} missing tool(s): {', '.join(tools)}",
+            ["Nothing else was run. Make the tools available to the jobs (e.g. 'module load ...' or "
+             "'conda activate ENV' in the general setting 'free_form'), or let pipemaker try to install them "
+             "into the current environment, then rerun."],
+            ["pipemaker check --auto-fix", "pipemaker rerun --submit"] +
+            [f"pipemaker rerun --free-form 'module load {' '.join(tools)}' --submit"],
+            {"free_form_hint": f"module load {' '.join(tools)}"}))
+        return found
     missing_tool = _find(r"(?:line \d+: )?([\w.+\-]+): command not found", text)
     if missing_tool or rc == 127:
         name = missing_tool.group(1) if missing_tool else tool or "the tool"

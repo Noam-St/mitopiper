@@ -17,13 +17,14 @@ def local_build(tmp_path, fail=True):
                            "output_ext": "", "inputdir": "", "input_ext": "", "scope": "sample",
                            "structure": "key /definitely/missing/file" if fail else "key /"}
     wf.run_order = ["wget", "boom"]
+    wf.set_general("tool_check", False)  # these tests are about failures inside the pipeline
     ws.write_workflow(wf, "t")
     fq = tmp_path / "fq"
     fq.mkdir()
     (fq / "s1.fastq").write_text("@r\nACGT\n+\nIIII\n")
     assert main(["-w", str(ws.root), "make-tsv", str(fq), "--org", "Homo sapiens", "-o", str(tmp_path / "exp.tsv")]) == 0
     ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath="/x.fa"))
-    assert main(["-w", str(ws.root), "build", str(tmp_path / "exp.tsv"), "-s", "local", "-p", "t"]) == 0
+    assert main(["-w", str(ws.root), "build", "--no-check", str(tmp_path / "exp.tsv"), "-s", "local", "-p", "t"]) == 0
     subprocess.run(["bash", str(ws.root / "master.sh")], check=True, capture_output=True)
     return ws
 

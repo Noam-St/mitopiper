@@ -45,7 +45,7 @@ def test_resolve_downloads_once_then_reuses_experiment(registered, fake_ena):
     ws = registered
     path = resolve_metadata_source(ws, "prjeb1")
     assert path == ws.root / "metadata" / "PRJEB1.tsv"
-    assert main(["-w", str(ws.root), "build", "PRJEB1", "-s", "slurm"]) == 0
+    assert main(["-w", str(ws.root), "build", "--no-check", "PRJEB1", "-s", "slurm"]) == 0
     assert (ws.output_dir / "PRJEB1" / "scripts" / "s_SAMEA1_0.sh").exists()
     assert main(["-w", str(ws.root), "build", "PRJEB1", "--dry-run"]) == 0
     assert len(fake_ena) == 1  # the downloaded report / existing experiment is reused
@@ -64,7 +64,7 @@ def test_interactive_accepts_accession(tmp_path, fake_ena):
     from pipemaker.config import Workspace
     from pipemaker.interactive import run_interactive
 
-    answers = iter(["1", "PRJEB1", "0", "n", "0", "", "1", "/refs/dr.fa", "", "", "", "n"])
+    answers = iter(["1", "PRJEB1", "0", "n", "0", "", "1", "/refs/dr.fa", "", "", "", "3", "n"])
     ws = Workspace(tmp_path / "ws")
     assert run_interactive(ws, lambda prompt="": next(answers)) == 0
     assert (ws.output_dir / "PRJEB1" / "scripts" / "s_SAMEA1_0.sh").exists()

@@ -148,6 +148,7 @@ class ExperimentJobs:
     samples: list
     experiment: Optional[str]
     directory: str = ""
+    check: Optional[str] = None      # tool check, submitted before everything else
 
 
 def master_script(scheduler: str, experiments: list, delay: float = 0.5, shell: str = "bash") -> str:
@@ -176,15 +177,21 @@ def master_script(scheduler: str, experiments: list, delay: float = 0.5, shell: 
     ]
     pause = f"sleep {delay}" if delay and scheduler != "local" else ""
     for exp in experiments:
-        directory = exp.directory or posixpath.dirname(posixpath.dirname((exp.samples or [exp.experiment or exp.prepare])[0]))
+        directory = exp.directory or posixpath.dirname(posixpath.dirname(
+            (exp.samples or [exp.experiment or exp.prepare or exp.check])[0]))
         lines.append(f"# ---- {exp.name}")
         lines.append(f"jobs_file={shlex.quote(posixpath.join(directory, 'jobs.tsv'))}")
         lines.append(f"marker={shlex.quote(posixpath.join(directory, '.submitting'))}")
         lines.append('touch "$marker"')
         lines.append("prep=()")
+        if exp.check:
+            # The tool check runs first; everything else waits for it (via prep).
+            lines.append(f"jid=$(submit {shlex.quote(exp.check)})")
+            lines.append('prep=("$jid")')
+            lines.append(f"record \"$jid\" {shlex.quote(exp.check)} check")
         if exp.prepare:
-            lines.append(f"jid=$(submit {shlex.quote(exp.prepare)})")
-            lines.append('prep+=("$jid")')
+            lines.append(f'jid=$(submit {shlex.quote(exp.prepare)} ${{prep[@]+"${{prep[@]}}"}})')
+            lines.append('prep=("$jid")')
             lines.append(f"record \"$jid\" {shlex.quote(exp.prepare)} prepare")
         lines.append("jobs=()")
         if exp.samples:
@@ -197,6 +204,8 @@ def master_script(scheduler: str, experiments: list, delay: float = 0.5, shell: 
                 lines.append(f"    {pause}")
             lines.append("done")
         if exp.experiment:
+            if not exp.samples:
+                lines.append('jobs=(${prep[@]+"${prep[@]}"})')
             lines.append(f"jid=$(submit {shlex.quote(exp.experiment)} ${{jobs[@]+\"${{jobs[@]}}\"}})")
             lines.append(f"record \"$jid\" {shlex.quote(exp.experiment)} experiment")
         lines.append('rm -f "$marker"')

@@ -16,6 +16,7 @@ def setup_ws(tmp_path):
                             "inputdir": "fastq", "input_ext": ".fastq.gz", "output_ext": ".txt", "scope": "sample",
                             "structure": "key input output_pipe"}
     wf.run_order = ["wget", "count"]
+    wf.set_general("tool_check", False)  # these tests are about failures inside the pipeline
     ws.write_workflow(wf, "demo")
     fq = tmp_path / "fq"
     fq.mkdir()

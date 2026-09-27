@@ -175,8 +175,26 @@ Full path to the reference FASTA (pre-indexed for your aligner)
 ...
 ```
 
-**3. Launch.** The scripts are written to `output/PRJNA123456/scripts/`, and pipemaker offers to
-submit them:
+**3. Check the tools, then launch.** The scripts are written to `output/PRJNA123456/scripts/`.
+pipemaker then checks that every tool the jobs will call (trim_galore, cutadapt, fastqc, bwa,
+samtools, …) can be found in the current environment, after your `free_form` set-up lines. If some
+are missing, it stops and asks:
+
+```
+2 tool(s) used by the pipeline are not available in this environment:
+  fastqc           used by: fastqc, fastqc_pre
+  cutadapt         used by: trim (via trim_galore)
+How do you want to continue?
+  0	I will install / load them myself (then check again)
+  1	let pipemaker try to install them into the current environment
+  2	add a set-up line to every job (e.g. 'module load ...') and regenerate the scripts
+  3	launch anyway (the check job stops the pipeline on the cluster if they are really missing)
+  4	stop here (the scripts are kept)
+```
+
+On a cluster with environment modules, option 2 is usually the right fix. Option 1 installs into the
+active conda environment (from bioconda and conda-forge), or uses pip for Python tools. It shows the
+exact commands before running them. Once everything is found, pipemaker offers to submit the jobs:
 
 ```
 All scripts are ready: 2 sample job(s), submitted by /home/you/zebrafish_liver/master.sh.
@@ -290,6 +308,11 @@ and steps. Narrow the build with `--samples 0-3`, `--steps wget,trim,fastqc` or 
 pipemaker build PRJNA123456 -p zebrafish -s slurm
 bash master.sh
 ```
+After writing the scripts, `build` checks that every tool the jobs call can be found here. If some
+are missing, it stops with a list and exit code 1. Add `--auto-fix` to have it try to install them
+into the active conda environment (or with pip) and check again. Use `--no-check` when the scripts
+are generated on a different machine from the one the jobs run on. `pipemaker check [--auto-fix]`
+runs the same check at any time.
 
 **6. Monitor**
 
@@ -353,6 +376,7 @@ the command line and use `pipemaker monitor -i` to handle failures.
 | `pipemaker make-tsv FOLDER --org NAME` | Build a metadata table for local FASTQ files |
 | `pipemaker monitor [EXP…] [options]` | Follow submitted jobs and their errors |
 | `pipemaker rerun [options]` | Resubmit failed jobs, resuming at the failed step |
+| `pipemaker check [EXP…] [--auto-fix]` | Check that every tool the jobs call can be found here (and try to install missing ones) |
 | `pipemaker cleanup [FOLDERS…]` | Remove logs and generated scripts |
 
 Global options: `-w/--workdir DIR` (workspace, default: current directory) and `-v` (more logging).
@@ -373,6 +397,8 @@ From the cloned folder, `python maker.py`, `python monitor.py`, `python cleanup.
 | `--dry-run` | Resolve everything and write `output/<exp>/plan.json`, but no scripts |
 | `--name NAME` | Experiment name (default: the metadata file name or accession) |
 | `--refresh` | Download an accession's run table again instead of reusing the saved copy |
+| `--auto-fix` | If tools the jobs call are missing here, try to install them into the current environment |
+| `--no-check` | Skip checking the tools here (e.g. scripts generated on a laptop); the check job still runs on the cluster |
 
 ## Inputs
 
@@ -421,6 +447,7 @@ are grouped and concatenated.
     ├── metadata.tsv              copy of your metadata (your file is never modified)
     ├── samples.tsv               resolved sample table (one row per sample)
     ├── scripts/
+    │   ├── check_<exp>.sh        tool check: runs first and stops the pipeline if a tool is missing
     │   ├── prep_<exp>.sh         indexing of auto-downloaded references (if needed)
     │   ├── s_<sample>_<i>.sh     one job per sample
     │   └── e_<exp>.sh            experiment-level steps (e.g. MultiQC), if any
@@ -432,8 +459,12 @@ are grouped and concatenated.
     └── plan.json                 written by --dry-run
 ```
 
-`master.sh` submits the reference job first, makes every sample job wait for it, and makes the
-experiment-level job wait for every sample job. It uses `-hold_jid` on SGE,
+`master.sh` submits the tool check first, then the reference job, which waits for the check. Every
+sample job waits for the reference job (or for the check, if there is no reference job), and the
+experiment-level job waits for every sample job. The check job runs in the real job environment on
+the cluster. If a tool is missing there, it lists it in its stderr (`MISSING <tool> (used by: …)`)
+and fails, so nothing else runs. The monitor shows the missing tools, and `rerun --free-form
+'module load …'` (or `o` in the interactive monitor) resubmits the check and everything after it. It uses `-hold_jid` on SGE,
 `--dependency=afterok` on SLURM, and `-w done()` on LSF. SGE's `-hold_jid` releases a job even
 when its dependency failed, so every dependent job also checks at start-up that its dependencies
 finished successfully. If one didn't, the job marks itself `SKIPPED` and does nothing. Every file of a sample is named
@@ -533,7 +564,7 @@ samtools sort → samtools index → samtools mpileup`. `htseq-count`, `STAR` an
 of the active steps), `qsub_memory`, `walltime` (SLURM), `account` (SLURM `--account` / LSF `-P`),
 `parallel_env` (SGE `-pe`), `environment` (shell), and `free_form` (lines added to every job, e.g.
 `module load samtools`). Also: `fail_fast` (`set -eo pipefail`), `verify_md5`, `download_delay`,
-and `ignore_paired_end`.
+`ignore_paired_end`, and `tool_check` (write and run the `check_<exp>.sh` job).
 
 ### Placeholders
 Setting values and step `structure` templates can refer to per-sample values. The replacement is a
@@ -604,6 +635,7 @@ policy.
 | Problem | What to do |
 | --- | --- |
 | `pipemaker: command not found` right after installing | pip put it in a folder that isn't on your `PATH`, usually `~/.local/bin` after `pip install --user`. Add that folder to `PATH` (see [Installation](#installation)), install inside a conda environment, or use `python -m pipemaker`. |
+| The tool check reports missing tools | Add `module load …` / `conda activate …` to `free_form` (interactive option 2 does it for you), or install them with `pipemaker check --auto-fix`. If the tools exist only on the compute nodes, build with `--no-check`: the check job verifies them there. |
 | `Submitting failed … sbatch: command not found` | Run pipemaker on the cluster's login node, and pick the scheduler your cluster uses. |
 | Jobs fail with `command not found` | Add `module load …` / `conda activate …` to the `free_form` general setting (or use `pipemaker rerun --free-form …` once). |
 | Downloads fail on compute nodes | Many clusters have no internet on compute nodes. Download on the login node first: `pipemaker build EXP --steps wget -s local && bash master.sh`, then build or rerun the remaining steps. |

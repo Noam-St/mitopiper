@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import Callable, Optional
 
+from . import toolcheck
 from .build import (
     BuildError,
     BuildOptions,
@@ -13,6 +14,7 @@ from .build import (
     find_experiment_metadata,
     list_experiments,
     resolve_metadata_source,
+    tool_check_enabled,
     write_master,
 )
 from .builder import PLACEHOLDERS, output_exts, selected_steps
@@ -385,6 +387,62 @@ def _choose_metadata(workspace: Workspace, input_fn: Callable) -> list:
         print(f"'{answer}' is not an existing file, an accession or a valid experiment selection.\n")
 
 
+def preflight(workspace: Workspace, results: list, input_fn: Callable, rebuild: Callable,
+              check: Callable = None, run_install: Callable = None) -> tuple:
+    """Make sure the tools the jobs call exist before launching.
+
+    Returns ``(results, proceed)``; ``results`` changes when a set-up line was
+    added and the scripts were rebuilt.
+    """
+    check = check or toolcheck.check_here
+    run_install = run_install or toolcheck.install
+    while True:
+        workflow = workspace.load_workflow("current")
+        tools = toolcheck.merge(*[r.tools for r in results])
+        result = check(tools, workflow)
+        if result.ok:
+            print(result.describe())
+            return results, True
+        if not result.checked:
+            print(result.describe() + "\nThe check job will verify the tools on the cluster before anything else runs.")
+            return results, True
+        print("\n" + result.describe())
+        idx = choose(
+            "How do you want to continue?",
+            [
+                "I will install / load them myself (then check again)",
+                "let pipemaker try to install them into the current environment",
+                "add a set-up line to every job (e.g. 'module load ...') and regenerate the scripts",
+                "launch anyway (the check job stops the pipeline on the cluster if they are really missing)",
+                "stop here (the scripts are kept)",
+            ],
+            allow_exit=False, input_fn=input_fn,
+        )
+        if idx == 0:
+            input_fn("Install or load the tools in this environment, then press Enter to check again ")
+        elif idx == 1:
+            plan = toolcheck.install_plan(result.missing)
+            print(plan.describe())
+            if not plan.commands:
+                print("Nothing can be installed automatically here; choose another option.")
+                continue
+            if yes_no("Run these commands now?", True, input_fn):
+                failed = run_install(plan)
+                if failed:
+                    print(f"{len(failed)} install command(s) failed; see the output above.")
+                print(toolcheck.ENV_NOTE)
+        elif idx == 2:
+            suggestion = f"module load {' '.join(result.missing)}"
+            line = ask("Set-up line added to every job", suggestion, input_fn)
+            if line:
+                results = rebuild(line)
+                print("The scripts were regenerated with the new set-up line (saved in the current preset).")
+        elif idx == 3:
+            return results, True
+        else:
+            return results, False
+
+
 def _last_build(workspace: Workspace) -> list:
     """Experiments of the last build that were actually launched."""
     import json
@@ -433,6 +491,7 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input, session_fa
 
     resolver = interactive_resolver(workspace, input_fn)
     results = []
+    builds = []  # (metadata, selection, options, samples) to rebuild after a set-up change
     for metadata in metadata_files:
         ignore_paired = bool(workflow.general("ignore_paired_end", False))
         try:
@@ -455,12 +514,31 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input, session_fa
             print(f"Error: {exc}\n")
             continue
         results.append(result)
-        count = len(result.jobs.samples) + bool(result.jobs.experiment) + bool(result.jobs.prepare)
+        builds.append((metadata, selection, options, samples))
+        count = len(result.jobs.samples) + bool(result.jobs.experiment) + bool(result.jobs.prepare) + bool(result.jobs.check)
         print(f"{count} job script(s) written to {result.directory / 'scripts'}\n")
 
     if not results:
         print("Nothing was generated.")
         return 1
+
+    def rebuild(setup_line: str) -> list:
+        """Add a set-up line to every job (saved in the current preset) and regenerate the scripts."""
+        wf = workspace.load_workflow("current")
+        current = str(wf.general("free_form", "") or "")
+        wf.set_general("free_form", (current if current.endswith("\n") or not current else current + "\n") + setup_line + "\n")
+        workspace.write_workflow(wf)
+        return [build_experiment(workspace, wf, m, sel, opt, resolver, samples=smp) for m, sel, opt, smp in builds]
+
+    if tool_check_enabled(workflow):
+        results, proceed = preflight(workspace, results, input_fn, rebuild)
+        if not proceed:
+            print("Stopped before launching; the scripts are kept. Fix the environment and run 'bash master.sh', "
+                  "or start pipemaker again.")
+            write_master(workspace, scheduler, results, shell=str(workflow.general("environment", "bash")))
+            workspace.copy_preset("current", "last_used")
+            return 1
+        workflow = workspace.load_workflow("current")
     master = write_master(workspace, scheduler, results, shell=str(workflow.general("environment", "bash")))
     workspace.copy_preset("current", "last_used")
     total = sum(len(r.jobs.samples) for r in results)
