@@ -46,7 +46,7 @@ mitochondrial reference genome from NCBI.
 - [Workflows (presets)](#workflows-presets)
 - [References](#references)
 - [Troubleshooting](#troubleshooting)
-- [Upgrading from `maker.py`](#upgrading-from-makerpy)
+- [Upgrading from `maker.py`](#upgrading-from-makerpy) (updating an existing clone with its configs)
 
 ---
 
@@ -608,6 +608,77 @@ policy.
 | Something else | `pipemaker monitor --job NAME` shows the step, the error lines and the end of stderr for one job. Add `-v` to any command for more logging. |
 
 ## Upgrading from `maker.py`
+
+### Updating an existing copy of the `Refactoring` tree
+
+Your presets (`config/`), experiments (`output/`) and references (`src/mtDNA_ref/`) live inside the
+cloned folder but are not tracked by git, so switching branches does not touch them. pipemaker reads
+them in place.
+
+**1. Back up your configuration.** On the first run, pipemaker adds new settings to your presets
+and converts `config/global/refpaths.json` to the multi-reference format. Your values are kept,
+but the *old* `maker.py` cannot read the converted file, so keep a copy in case you want to go
+back:
+
+```bash
+cd /path/to/Semi-automatic_csh_files_for_qsub          # your existing clone
+cp -r config config_backup_$(date +%Y%m%d)
+```
+
+**2. Put aside local changes to the code**, if you edited `maker.py` or `consts.py`. Otherwise
+git refuses to switch branches:
+
+```bash
+git status            # " M maker.py" = a local edit; config/ and output/ are not listed (not tracked)
+git stash             # skip if there is nothing to stash
+```
+
+**3. Get the new version**
+
+```bash
+git fetch origin
+git checkout -b claude/rna-seq-pipeline-refactor-2om1jr origin/claude/rna-seq-pipeline-refactor-2om1jr
+# later updates of the same branch:  git pull
+```
+
+**4. Install it** (see [Installation](#installation) about `PATH`):
+
+```bash
+pip install .            # inside your conda/virtual environment
+```
+
+**5. Run it from the same folder.** That folder is your workspace, so everything is found where
+it was:
+
+```bash
+pipemaker presets list        # your presets, e.g. default, myrnaseq, last_used
+pipemaker refs list           # your references (each old entry becomes a reference set named "default")
+pipemaker                     # interactive mode; old experiments appear under "Previous experiments"
+```
+
+Old experiments can be rebuilt as they are: `pipemaker build PRJ1 -p myrnaseq --dry-run`. Their
+sample-level TSVs from `maker.py` are read directly. Leftover `master.csh` and `output/*/run*.csh`
+files from `maker.py` are not used any more; `pipemaker cleanup` removes them, and asks before
+emptying the `stdout`/`stderr` folders.
+
+**Going back to the old version**
+
+```bash
+git checkout Refactoring
+cp config_backup_YYYYMMDD/global/refpaths.json config/global/refpaths.json
+git stash pop            # if you stashed local edits in step 2
+```
+
+**Copy without git (downloaded as a ZIP).** Run the new version against the old folder, or copy
+the data over:
+
+```bash
+cp -r /path/to/old_copy/config /path/to/old_copy/config_backup    # backup first, as above
+pipemaker -w /path/to/old_copy                                    # use the old folder as the workspace
+# or copy config/, output/ and src/ from the old folder into a new workspace directory and run pipemaker there
+```
+
+### What changes
 
 * Run pipemaker in your existing directory. Presets gain the new settings automatically, and
   `config/global/refpaths.json` is converted to the multi-reference format. Your values are never
