@@ -231,3 +231,8 @@ def test_container_failures_are_diagnosed():
                         errors=[mon.ErrorLine(1, "FATAL:   could not open image /images/tools.sif: failed to retrieve path")])
     (sug, *_) = diagnose(job, Context(pipeline={"count": {"container": "/images/tools.sif"}}))
     assert "container of step 'count'" in sug.cause and "/images/tools.sif" in sug.advice[0]
+
+
+def test_numt_parser_install_hint_points_to_its_repository():
+    plan = toolcheck.install_plan(["numt_parser.py"], env={"CONDA_PREFIX": "/env"}, which=lambda m: "/bin/" + m)
+    assert not plan.commands and "github.com/adeflamingh/NuMt_parser" in plan.manual["numt_parser.py"]

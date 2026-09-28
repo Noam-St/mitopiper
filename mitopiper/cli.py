@@ -89,6 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
     ra.add_argument("--fasta", required=True)
     ra.add_argument("--gtf", default="")
     ra.add_argument("--nuc-fasta", default="")
+    ra.add_argument("--numt-fasta", default="", help="NUMT sequences for Numt Parser (default: found in --nuc-fasta)")
     ra.add_argument("--chrominfo", default="")
     ra.add_argument("--name", default="default")
     ra.add_argument("--no-activate", action="store_true")
@@ -267,7 +268,8 @@ def cmd_refs(ws: Workspace, args) -> int:
                 rows.append([org, name, "*" if registry.active_name(org) == name else "", ref.refpath, ref.gtfpath, ref.source, ref.accession])
         print(table(rows, ["Organism", "Name", "Active", "FASTA", "GTF/GFF", "Source", "Accession"]) if rows else "No references registered.")
     elif args.action == "add":
-        ref = ReferenceSet(refpath=args.fasta, gtfpath=args.gtf, nuc_refpath=args.nuc_fasta, chrominfopath=args.chrominfo)
+        ref = ReferenceSet(refpath=args.fasta, gtfpath=args.gtf, nuc_refpath=args.nuc_fasta,
+                           numt_refpath=args.numt_fasta, chrominfopath=args.chrominfo)
         if not Path(args.fasta).exists():
             log.warning("%s does not exist on this machine (fine if it exists on the cluster)", args.fasta)
         registry.add(args.organism.replace(" ", "_"), ref, args.name, activate=not args.no_activate)

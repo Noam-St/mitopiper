@@ -238,6 +238,13 @@ def build_experiment(
                       "or 'mitopiper refs add %s --fasta MT.fa --nuc-fasta GENOME.fa'.", organism, organism, organism)
             skipped.append(organism)
             del refs[organism]
+    if uses_placeholder(workflow, "numt_fasta", steps):
+        for organism in [o for o, ref in refs.items() if not (ref.numt_refpath or ref.nuc_refpath)]:
+            log.error("Skipping samples of %s: this workflow runs Numt Parser, which needs a NUMT reference. Give one "
+                      "with 'mitopiper refs add %s --fasta MT.fa --numt-fasta NUMTS.fa', or a nuclear FASTA to find "
+                      "the NUMTs in ('mitopiper refs fetch-genome %s --nuclear-of NAME').", organism, organism, organism)
+            skipped.append(organism)
+            del refs[organism]
     samples = [s for s in samples if s.organism in refs]
 
     exp = str(exp_dir)

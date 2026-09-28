@@ -79,3 +79,44 @@ def test_mt_commands(tmp_path, capsys):
     assert main(["mt", "combine-pileups", str(tmp_path / "n.p"), str(tmp_path / "r.p"), str(tmp_path / "c.p"),
                  "--reference", str(mt), "--shift", "5", "--window", "3"]) == 0
     assert len((tmp_path / "c.p").read_text().splitlines()) == 20
+
+
+def test_fragments_wrap_around_the_origin(tmp_path):
+    (tmp_path / "mt.fa").write_text(">MT x\nAACCGGTT\n")
+    assert mtdna.fragments(tmp_path / "mt.fa", tmp_path / "f.fa", size=20, step=4) == 2
+    with open(tmp_path / "f.fa") as handle:
+        records = list(mtdna.read_fasta(handle))
+    assert records == [("MT_1", ("AACCGGTT" * 3)[:20]), ("MT_5", ("GGTTAACCGGTTAACCGGTTAA")[:20])]
+
+
+def test_numt_regions_merge_flank_and_ignore_mt_hits():
+    sam = io.StringIO("@SQ\tSN:chr1\tLN:1000\n@SQ\tSN:chrM\tLN:100\n"
+                      "f1\t0\tchr1\t200\t0\t60M\t*\t0\t0\t*\t*\n"
+                      "f2\t256\tchr1\t300\t0\t10S50M\t*\t0\t0\t*\t*\n"   # within merge distance
+                      "f3\t0\tchr1\t950\t0\t60M\t*\t0\t0\t*\t*\n"        # clipped to the contig end
+                      "f4\t0\tchr1\t600\t0\t30M\t*\t0\t0\t*\t*\n"        # too short
+                      "f5\t0\tchrM\t1\t0\t60M\t*\t0\t0\t*\t*\n"
+                      "f6\t4\t*\t0\t0\t*\t*\t0\t0\t*\t*\n")
+    assert mtdna.numt_regions(sam, set()) == ["chr1:100-449", "chr1:850-1000"]
+
+
+def test_numt_reference_without_hits_explains_what_to_do(tmp_path):
+    (tmp_path / "mt.fa").write_text(">MT\nACGT\n")
+    (tmp_path / "hits.sam").write_text("@HD\n")
+    with pytest.raises(ValueError, match="mt-variants preset"):
+        mtdna.numt_reference(tmp_path / "hits.sam", tmp_path / "mt.fa", tmp_path / "r.txt")
+
+
+@pytest.mark.parametrize("keep, pairs, expected", [
+    ("cymt", "all", ["r1"]), ("cymt", "any", ["r1", "r3", "r4"]),
+    ("not-numt", "all", ["r1", "r4"]), ("not-numt", "any", ["r1", "r3", "r4"]),
+])
+def test_numt_read_list(tmp_path, keep, pairs, expected):
+    rows = [("r1", 0, "cymt"), ("r2", 0, "numt"), ("r3", 1, "cymt"), ("r3", 2, "numt"), ("r4", 1, "undetermined"),
+            ("r4", 2, "cymt")]
+    (tmp_path / "t.tsv").write_text("#read_ID\tread_in_pair\tmt_aln_bp\tmt_mismatch\tmt_identity\tnumt_aln_bp\t"
+                                    "numt_mismatch\tnumt_identity\tcandidate\n"
+                                    + "".join(f"{r}\t{p}\t1\t0\t1\t1\t0\t1\t{c}\n" for r, p, c in rows))
+    counts = mtdna.numt_read_list(tmp_path / "t.tsv", tmp_path / "keep.txt", keep, pairs)
+    assert (tmp_path / "keep.txt").read_text().split() == expected
+    assert counts["cymt"] == 3 and counts["kept"] == len(expected)

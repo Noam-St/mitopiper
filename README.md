@@ -571,6 +571,7 @@ prompt; `mitopiper presets show NAME` describes each one:
 | --- | --- | --- |
 | `mt-variants` | mtDNA coverage, heteroplasmy and variants | trim → align to the mtDNA *and* to a rotated copy → pileups (all positions, no depth cap) → merged circular pileup |
 | `mt-variants-numt` | the same, without false heteroplasmy from nuclear mtDNA copies | trim → align to nuclear genome + mtDNA → keep reads mapping to the mtDNA with MAPQ ≥ 20 → pileup → the same rotated alignment of those reads → merged circular pileup |
+| `mt-variants-numtparser` | the same, with NUMT reads removed by [Numt Parser](https://github.com/adeflamingh/NuMt_parser) | trim → align to the mtDNA and to NUMT sequences → Numt Parser classifies each read → keep the reads classified as mtDNA → pileup → rotated alignment of those reads → merged circular pileup |
 | `rnaseq-expression` | gene expression | trim → STAR (splice-aware) → featureCounts → MultiQC |
 
 `bwa mem` is not splice-aware. That is fine for the mtDNA, which has no introns, but use
@@ -717,6 +718,34 @@ kept. These kept reads are also the ones realigned to the rotated mtDNA. The pre
 FASTA in the reference set: `mitopiper refs fetch-genome ORGANISM --nuclear-of mt`, or
 `mitopiper refs add ORGANISM --fasta mt.fa --nuc-fasta genome.fa`.
 
+**NUMTs with Numt Parser.** `mt-variants-numtparser` uses the published classifier
+[Numt Parser](https://github.com/adeflamingh/NuMt_parser) (de Flamingh *et al.* 2023,
+[*J. Hered.* 114:120](https://doi.org/10.1093/jhered/esac065)) instead of a mapping-quality cut-off.
+Each sample is aligned to the mtDNA and, separately, to a NUMT reference. The primary alignments go to
+`numt_parser.py` as SAM, and it labels every read `cymt` (cytoplasmic mtDNA), `numt` or
+`undetermined` by its identity to each reference (table in `numt/<sample>.numt_parser.tsv`).
+`mitopiper mt numt-reads` turns the table into a read list: step `cymt-reads`, `--keep cymt|not-numt`
+and `--pairs all|any` (whether both mates must qualify). `samtools view -N` (samtools ≥ 1.12) then
+keeps those reads for the pileups and the rotated realignment.
+
+The NUMT reference comes from one of two places:
+
+* **Your own FASTA**, e.g. characterized NUMTs of the species:
+  `mitopiper refs add ORGANISM --fasta mt.fa --numt-fasta numts.fa`.
+* **Found in the nuclear genome**, when the reference set has one. This happens once, in the
+  reference job. Overlapping 100 bp fragments of the mtDNA (`mitopiper mt fragments`) are aligned
+  to the genome with `bwa mem -a`. The regions they hit, at least 50 bp long, merged within 200 bp
+  and extended by 100 bp (`mitopiper mt numt-regions`), are extracted with `samtools faidx`
+  into `references/derived/<organism>/<mt>.numts.fa`. If the genome has no NUMT, the job stops and
+  says so; use `mt-variants` for such species.
+
+Numt Parser is not packaged on conda or PyPI. Install it with
+`git clone https://github.com/adeflamingh/NuMt_parser` and put its `bin/` on the `PATH`, or set the
+`numt-parser` step's `path` to `bin/numt_parser.py`. It needs only Python ≥ 3.7, and the tool check
+tells you if it is missing. Numt Parser was designed for DNA reads: it rejects spliced alignments
+(CIGAR `N`), which bwa does not produce. It keeps the alignments in memory, so the step asks for 16G.
+Please cite Numt Parser when you use this preset.
+
 The rotated and the nuclear + mtDNA references are built and indexed once, by the reference job,
 under `references/derived/<organism>/`. The helpers run inside the jobs, so mitopiper must be
 installed in the job environment (the tool check verifies this). They are also available directly:
@@ -726,10 +755,13 @@ mitopiper mt rotate mt.fa mt.rotated.fa --shift 500
 mitopiper mt combine-pileups normal.pileup rotated.pileup merged.pileup --reference mt.fa --shift 500 --window 400
 mitopiper mt combine-references genome.fa mt.fa genome_with_mt.fa
 mitopiper mt contigs mt.fa
+mitopiper mt fragments mt.fa fragments.fa --size 100 --step 20
+mitopiper mt numt-regions fragments_vs_genome.sam mt.fa regions.txt   # then: samtools faidx genome.fa -r regions.txt
+mitopiper mt numt-reads sample.numt_parser.tsv keep.txt --keep cymt --pairs all
 ```
 
 Step placeholders for your own workflows: `_fasta_rotated`, `_fasta_combined`, `_mt_contigs` (the
-mtDNA sequence names, looked up when the job runs), `_mt_shift`, `_mt_window` and `_mt_mapq`.
+mtDNA sequence names, looked up when the job runs), `_mt_shift`, `_mt_window`, `_mt_mapq` and `_numt_fasta` (the NUMT reference).
 
 ## References
 

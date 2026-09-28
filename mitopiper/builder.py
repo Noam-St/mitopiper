@@ -45,6 +45,7 @@ PLACEHOLDERS = (
     "fastq", "fastq_pre", "fastq1", "fastq2", "fastq_dir", "fastq_pre_dir", "fastq_sample_path_no_ext",
     "sample", "org_name", "bam", "sam", "STAR_out", "STAR_final_log", "tsv_dir", "threads",
     "fasta_rotated", "fasta_combined", "mt_contigs", "mt_shift", "mt_window", "mt_mapq",
+    "numt_fasta",
 )
 
 #: Structure shorthands inherited from maker.py (``input`` -> ``command_input``...).
@@ -166,6 +167,7 @@ def sample_variables(sample: Sample, workflow: Workflow, exp_dir: str, ref: Refe
     return {
         "fasta_rotated": derived["rotated"],
         "fasta_combined": derived["combined"],
+        "numt_fasta": derived["numt"],
         # Names of the mtDNA sequences, looked up when the job runs (works in sh and csh).
         "mt_contigs": f"`mitopiper mt contigs {fasta}`" if fasta else "",
         "mt_shift": str(mt_shift(workflow)),
@@ -401,7 +403,7 @@ def build_sample_job(
         else:
             structure = conf.get("structure", "") or "key settings input"
             lines = [render_structure(structure, variables, lookups)]
-        binds = [workspace_of(exp_dir)] + [posixpath.dirname(p) for p in (ref.refpath, ref.nuc_refpath, ref.gtfpath) if p]
+        binds = [workspace_of(exp_dir)] + [posixpath.dirname(p) for p in (ref.refpath, ref.nuc_refpath, ref.numt_refpath, ref.gtfpath) if p]
         job.steps.append(StepCommands(step, conf.get("description", ""), in_environment(conf, lines, workflow, binds)))
     return job
 

@@ -10,7 +10,7 @@ one of which is *active*; a build can override the active set with
         "active": "mt",
         "references": {
           "mt": {"refpath": ".../Homo_sapiens.fasta", "gtfpath": "...",
-                 "nuc_refpath": "", "chrominfopath": "",
+                 "nuc_refpath": "", "numt_refpath": "", "chrominfopath": "",
                  "source": "ncbi_mt", "accession": "NC_012920.1"}
         }
       }
@@ -61,6 +61,8 @@ class ReferenceSet:
     refpath: str = ""
     gtfpath: str = ""
     nuc_refpath: str = ""
+    #: NUMT sequences for Numt Parser; derived from nuc_refpath when empty.
+    numt_refpath: str = ""
     chrominfopath: str = ""
     source: str = "user"
     accession: str = ""
@@ -528,13 +530,16 @@ def uses_placeholder(workflow, name: str, steps: Optional[list] = None) -> bool:
 
 
 def derived_paths(ref: ReferenceSet, organism: str, workspace_dir: str, shift: int) -> dict:
-    """Where the rotated mtDNA and the nuclear + mtDNA reference of ``ref`` are kept."""
+    """Where the references derived from ``ref`` are kept: the rotated mtDNA, the nuclear + mtDNA
+    reference, and the NUMT reference for Numt Parser (``ref.numt_refpath`` when given)."""
     stem = Path(ref.refpath).name
     for ext in (".gz", ".fasta", ".fa", ".fna", ".fas"):
         stem = stem[: -len(ext)] if stem.endswith(ext) else stem
     folder = f"{workspace_dir}/references/derived/{organism}"
     return {"rotated": f"{folder}/{stem}.rotated{shift}.fa",
-            "combined": f"{folder}/{stem}.with_nuclear.fa" if ref.nuc_refpath else ""}
+            "combined": f"{folder}/{stem}.with_nuclear.fa" if ref.nuc_refpath else "",
+            "numt": ref.numt_refpath or (f"{folder}/{stem}.numts.fa" if ref.nuc_refpath else ""),
+            "numt_work": f"{folder}/{stem}.numt_search"}
 
 
 def mt_shift(workflow) -> int:
@@ -561,7 +566,27 @@ def derived_commands(ref: ReferenceSet, organism: str, workspace_dir: str, workf
         commands.append(_unless_exists(paths["combined"], f'mitopiper mt combine-references "{ref.nuc_refpath}" '
                                                           f'"{ref.refpath}" "{paths["combined"]}"', csh))
         commands += _fasta_index_commands(paths["combined"], workflow, csh, star=False)
+    if uses_placeholder(workflow, "numt_fasta", steps) and paths["numt"]:
+        if not ref.numt_refpath:
+            commands += numt_reference_commands(ref, paths, workflow, csh)
+        commands += _fasta_index_commands(paths["numt"], workflow, csh, star=False)
     return commands
+
+
+def numt_reference_commands(ref: ReferenceSet, paths: dict, workflow, csh: bool) -> list:
+    """Find the NUMTs of the nuclear genome: align overlapping mtDNA fragments to it
+    (``bwa mem -a``) and extract the regions they hit (``samtools faidx -r``)."""
+    work, nuclear = paths["numt_work"], ref.nuc_refpath
+    bwa_steps = _steps_running(workflow, "bwa")
+    bwa = (workflow.pipeline[bwa_steps[0]].get("path") or "bwa") if bwa_steps else "bwa"
+    commands = [] if nuclear in ref.downloads else _fasta_index_commands(nuclear, workflow, csh, star=False)
+    return commands + [
+        _unless_exists(f"{work}.fragments.fa", f'mitopiper mt fragments "{ref.refpath}" "{work}.fragments.fa"', csh),
+        _unless_exists(f"{work}.sam", f'{bwa} mem -a "{nuclear}" "{work}.fragments.fa" > "{work}.sam"', csh),
+        _unless_exists(f"{work}.regions.txt",
+                       f'mitopiper mt numt-regions "{work}.sam" "{ref.refpath}" "{work}.regions.txt"', csh),
+        _unless_exists(paths["numt"], f'samtools faidx "{nuclear}" -r "{work}.regions.txt" -o "{paths["numt"]}"', csh),
+    ]
 
 
 def prepare_commands(ref: ReferenceSet, organism: str, workspace_dir: str, workflow, csh: Optional[bool] = None,

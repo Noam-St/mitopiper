@@ -25,7 +25,8 @@ MT = "ACGT" * 7 + "AC"  # 30 bases
 FAKE_SAMTOOLS = r"""#!/bin/sh
 cmd=$1; shift
 case "$cmd" in
-  faidx) touch "$1.fai" ;;
+  faidx) out=""; f=$1; while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift;; esac; shift; done
+         if [ -n "$out" ]; then printf '>chr1:1-10\nAAAAAAAAAA\n' > "$out"; else touch "$f.fai"; fi ;;
   index) touch "$1.bai" ;;
   fastq) echo "@r"; echo "ACGT"; echo "+"; echo "IIII" ;;
   sort)  out=""; in="-"; while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift;; *) in=$1;; esac; shift; done
@@ -39,14 +40,26 @@ case "$cmd" in
   *) exit 0 ;;
 esac
 """
-FAKE_BWA = '#!/bin/sh\n[ "$1" = index ] && touch "$2.bwt"\necho "@HD"\n'
+FAKE_BWA = r"""#!/bin/sh
+[ "$1" = index ] && touch "$2.bwt"
+case " $* " in *" - "*) cat > /dev/null ;; esac   # read the piped reads, as bwa does (no SIGPIPE upstream)
+echo "@HD"
+case "$*" in *fragments.fa*) printf '@SQ\tSN:chr1\tLN:10\nNC_012920.1_1\t0\tchr1\t3\t0\t60M\t*\t0\t0\t*\t*\n' ;; esac
+"""
+# Numt Parser's table: r1 is mtDNA, r2 a NUMT, r3 one mate of each.
+FAKE_NUMT_PARSER = r"""#!/bin/sh
+while [ $# -gt 0 ]; do case "$1" in --outfile) out=$2; shift;; esac; shift; done
+printf '#read_ID\tread_in_pair\tmt_aln_bp\tmt_mismatch\tmt_identity\tnumt_aln_bp\tnumt_mismatch\tnumt_identity\tcandidate\n' > "$out"
+printf 'r1\t0\t4\t0\t1.0\tNone\tNone\tNone\tcymt\nr2\t0\t4\t1\t0.75\t4\t0\t1.0\tnumt\n' >> "$out"
+printf 'r3\t1\t4\t0\t1.0\t4\t1\t0.75\tcymt\nr3\t2\t4\t1\t0.75\t4\t0\t1.0\tnumt\n' >> "$out"
+"""
 
 
 @pytest.fixture
 def cluster(tmp_path, monkeypatch):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    tools = {"samtools": FAKE_SAMTOOLS, "bwa": FAKE_BWA,
+    tools = {"samtools": FAKE_SAMTOOLS, "bwa": FAKE_BWA, "numt_parser.py": FAKE_NUMT_PARSER,
              "mitopiper": f'#!/bin/sh\nPYTHONPATH="{REPO}" exec "{sys.executable}" -m mitopiper "$@"\n'}
     for name, body in tools.items():
         (bin_dir / name).write_text(body)
@@ -119,10 +132,45 @@ def test_numt_preset_needs_a_nuclear_genome(cluster, caplog):
     assert "NUMT-aware" in caplog.text and "refs fetch-genome Homo_sapiens --nuclear-of" in caplog.text
 
 
+NUMT_PARSER = ["wget", "align-mt", "mt-sam", "align-numt", "numt-parser", "cymt-reads", "mt-reads", "index-mt", "mpileup"]
+
+
+@pytest.mark.parametrize("shell", ["bash"] + (["tcsh"] if __import__("shutil").which("tcsh") else []))
+def test_numt_parser_preset_finds_numts_in_the_nuclear_genome(cluster, shell):
+    ws, tmp_path = cluster
+    (tmp_path / "nuc.fa").write_text(">chr1\nAAAAAAAAAA\n")
+    ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath=str(tmp_path / "mt.fa"), nuc_refpath=str(tmp_path / "nuc.fa")))
+    assert run_preset(ws, tmp_path, "mt-variants-numtparser", NUMT_PARSER + CIRCULAR, shell) == 0
+    states = {j.name: j.state for j in mon.collect(ws, ["exp"], mon.ErrorScanner(), lambda s, i: None)}
+    assert all(s == mon.DONE for s in states.values()), states
+    derived = ws.references_dir / "derived" / "Homo_sapiens"
+    assert (derived / "mt.numt_search.regions.txt").read_text() == "chr1:1-10\n"   # hit at 3..62, flanked, clipped
+    assert (derived / "mt.numts.fa.bwt").exists() and (tmp_path / "nuc.fa.bwt").exists()
+    numt = ws.output_dir / "exp" / "numt"
+    assert (numt / "a_0_HS.cymt_reads.txt").read_text() == "r1\n"                 # both mates of r3 must be cymt
+    script = (ws.output_dir / "exp" / "scripts" / "s_a_0.sh").read_text()
+    assert f"numt_parser.py --mt-fasta {tmp_path}/mt.fa --numt-fasta {derived}/mt.numts.fa --mt-sam {numt}/a_0_HS.mtref.sam" in script
+    assert f"-N {numt}/a_0_HS.cymt_reads.txt" in script and "-h -F 0x904" in script
+    assert [p for p, d in merged_depths(ws).items() if d == 2] == [1, 2, 3, 28, 29, 30]
+
+
+def test_numt_parser_preset_uses_a_given_numt_reference(cluster, caplog):
+    ws, tmp_path = cluster
+    registry = ReferenceRegistry(ws)
+    registry.add("Homo_sapiens", ReferenceSet(refpath=str(tmp_path / "mt.fa")))
+    assert run_preset(ws, tmp_path, "mt-variants-numtparser", ["wget", "align-numt"]) == 1
+    assert "needs a NUMT reference" in caplog.text
+    (tmp_path / "numts.fa").write_text(">numt1\nACGTACGT\n")
+    registry.add("Homo_sapiens", ReferenceSet(refpath=str(tmp_path / "mt.fa"), numt_refpath=str(tmp_path / "numts.fa")))
+    assert run_preset(ws, tmp_path, "mt-variants-numtparser", NUMT_PARSER) == 0
+    prep = next((ws.output_dir / "exp" / "scripts").glob("prep_*")).read_text()
+    assert "numt-regions" not in prep and f'bwa index "{tmp_path}/numts.fa"' in prep
+
+
 def test_bundled_presets_are_written_once(tmp_path):
     ws = Workspace(tmp_path / "ws")
     ws.initialise()
-    assert {"mt-variants", "mt-variants-numt", "rnaseq-expression"} <= set(ws.list_presets())
+    assert {"mt-variants", "mt-variants-numt", "mt-variants-numtparser", "rnaseq-expression"} <= set(ws.list_presets())
     wf = ws.load_workflow("rnaseq-expression")
     assert wf.active_order() == ["wget", "fastqc_pre", "trim", "fastqc", "STAR-alignment", "featureCounts", "multiqc"]
     wf.set_general("qsub_queue", "mine")

@@ -52,6 +52,11 @@ CONDA_PACKAGES = {
     "picard": "picard", "gatk": "gatk4", "bcftools": "bcftools", "minimap2": "minimap2",
     "fasterq-dump": "sra-tools", "prefetch": "sra-tools", "curl": "curl",
 }
+#: Tools that are not packaged anywhere: how to get them.
+MANUAL_INSTALL = {
+    "numt_parser.py": "not packaged - 'git clone https://github.com/adeflamingh/NuMt_parser' and add its bin/ "
+                      "directory to your PATH (or set the step's 'path' to bin/numt_parser.py)",
+}
 #: executable -> pip package, used when no conda environment is active
 PIP_PACKAGES = {"multiqc": "multiqc", "htseq-count": "HTSeq", "cutadapt": "cutadapt"}
 
@@ -233,6 +238,8 @@ def install_plan(missing: list, env: Optional[dict] = None, which: Callable = sh
     for tool in missing:
         if tool.startswith("/"):
             manual[tool] = "an absolute path that does not exist - fix the step's 'path' setting"
+        elif tool in MANUAL_INSTALL:
+            manual[tool] = MANUAL_INSTALL[tool]
         elif manager:
             package = CONDA_PACKAGES.get(tool, tool.lower())
             if package not in conda_pkgs:

@@ -329,7 +329,9 @@ def _circular_steps() -> tuple:
     return pipeline, settings, ["align-rotated", "index-rotated", "mpileup-rotated", "circular-merge"]
 
 
-def _mt_variants(numt: bool) -> dict:
+def _mt_variants(numt: str = "") -> dict:
+    """mtDNA presets: ``numt`` is "" (no NUMT handling), "mapq" (align to nuclear + mtDNA and keep
+    reads with a high mapping quality on the mtDNA) or "parser" (classify reads with Numt Parser)."""
     config = default_config()
     pipe, settings, general = config["pipeline"], config["settings"], config["general_settings"]
     settings["mpileup"] = _params(*_PILEUP, ("reference", "mtDNA FASTA", "-f", "_fasta"))
@@ -337,13 +339,16 @@ def _mt_variants(numt: bool) -> dict:
     circ_pipe, circ_settings, circ_order = _circular_steps()
     pipe.update(circ_pipe)
     settings.update(circ_settings)
+    index_mt = _step("samtools index", "Index the mtDNA reads", "alignment", "alignment", ".mt.bam",
+                     ".mt.bam.bai", "key settings input")
+    trimmed = ["wget", "fastqc_pre", "trim", "fastqc"]
     if not numt:
         settings["bwa-align"] = _params(*_BWA)
-        order = ["wget", "fastqc_pre", "trim", "fastqc", "bwa-align", "view", "sort", "index", "mpileup"]
+        order = trimmed + ["bwa-align", "view", "sort", "index", "mpileup"]
         general["preset_description"] = [
             "mtDNA coverage/variants: trim, align to the mtDNA and to a rotated copy of it, and merge the pileups "
             "around the origin so reads spanning the circular junction are counted", "what this preset is for"]
-    else:
+    elif numt == "mapq":
         pipe.update({
             "align-combined": _step("bwa mem", "Align to nuclear genome + mtDNA (NUMT-aware)", "alignment", "post_trim",
                                     ".fq.gz", ".combined.sorted.bam",
@@ -354,8 +359,7 @@ def _mt_variants(numt: bool) -> dict:
             "mt-reads": _step("samtools view", "Keep reads that map to the mtDNA with high mapping quality",
                               "alignment", "alignment", ".combined.sorted.bam", ".mt.bam",
                               "key settings -o output input _mt_contigs"),
-            "index-mt": _step("samtools index", "Index the mtDNA reads", "alignment", "alignment", ".mt.bam",
-                              ".mt.bam.bai", "key settings input"),
+            "index-mt": index_mt,
         })
         settings.update({
             "align-combined": _params(*_BWA),
@@ -363,15 +367,55 @@ def _mt_variants(numt: bool) -> dict:
             "mt-reads": _params(("bam", "Output BAM", "-b", ""), ("min mapq", "Minimum mapping quality", "-q", "_mt_mapq")),
             "index-mt": {},
         })
-        pipe["mpileup"]["input_ext"] = ".mt.bam"
-        # The rotated alignment realigns only the reads kept above, so it is NUMT-aware too.
-        pipe["align-rotated"].update(inputdir="alignment", input_ext=".mt.bam",
-                                     structure="samtools \\fastq input | key settings _fasta_rotated - | samtools sort -o output -")
-        order = ["wget", "fastqc_pre", "trim", "fastqc", "align-combined", "index-combined", "mt-reads", "index-mt", "mpileup"]
+        order = trimmed + ["align-combined", "index-combined", "mt-reads", "index-mt", "mpileup"]
         general["preset_description"] = [
             "mtDNA coverage/variants, NUMT-aware: align to the nuclear genome + mtDNA, keep reads mapping to the mtDNA "
             "(MAPQ >= numt_min_mapq), then handle circularity as mt-variants. Needs a nuclear FASTA in the reference "
             "(refs fetch-genome --nuclear-of / refs add --nuc-fasta)", "what this preset is for"]
+    else:
+        # Numt Parser (de Flamingh et al. 2023) wants SAM files of primary alignments to the mtDNA and to the NUMTs.
+        primary = (("header", "Keep the header", "-h", ""),
+                   ("primary only", "Drop unmapped, secondary and supplementary alignments", "-F", "0x904"))
+        pipe.update({
+            "align-mt": _step("bwa mem", "Align to the mtDNA", "alignment", "post_trim", ".fq.gz", ".mtref.sorted.bam",
+                              "key settings _fasta _fastq | samtools sort -o output -"),
+            "mt-sam": _step("samtools view", "Primary mtDNA alignments as SAM, for Numt Parser", "numt", "alignment",
+                            ".mtref.sorted.bam", ".mtref.sam", "key settings -o output input"),
+            "align-numt": _step("bwa mem", "Align to the NUMT reference", "numt", "post_trim", ".fq.gz", ".numt.sam",
+                                "key settings _numt_fasta _fastq | samtools view -h -F 0x904 -o output -"),
+            "numt-parser": _step("numt_parser.py", "Classify reads as mtDNA (cymt) or NUMT (Numt Parser)", "numt", "", "",
+                                 ".numt_parser.tsv",
+                                 "key --mt-fasta _fasta --numt-fasta _numt_fasta --mt-sam output_mt-sam "
+                                 "--numt-sam output_align-numt --outfile output", memory="16G"),
+            "cymt-reads": _step("mitopiper mt numt-reads", "Names of the reads classified as mtDNA", "numt", "", "",
+                                ".cymt_reads.txt", "key output_numt-parser output settings"),
+            "mt-reads": _step("samtools view", "Keep the reads classified as mtDNA", "alignment", "alignment",
+                              ".mtref.sorted.bam", ".mt.bam", "key settings -N output_cymt-reads -o output input"),
+            "index-mt": index_mt,
+        })
+        settings.update({
+            "align-mt": _params(*_BWA),
+            "mt-sam": _params(*primary),
+            "align-numt": _params(*_BWA),
+            "numt-parser": {},
+            "cymt-reads": _params(
+                ("keep", "cymt: only reads classified as mtDNA; not-numt: also the undetermined ones", "--keep", "cymt"),
+                ("pairs", "all: both mates must qualify; any: one qualifying mate keeps the pair", "--pairs", "all")),
+            "mt-reads": _params(("bam", "Output BAM", "-b", "")),
+            "index-mt": {},
+        })
+        order = trimmed + ["align-mt", "mt-sam", "align-numt", "numt-parser", "cymt-reads", "mt-reads", "index-mt",
+                           "mpileup"]
+        general["preset_description"] = [
+            "mtDNA coverage/variants, NUMTs removed with Numt Parser (github.com/adeflamingh/NuMt_parser): reads are "
+            "aligned to the mtDNA and to NUMT sequences, only reads more similar to the mtDNA are kept, then "
+            "circularity is handled as in mt-variants. The NUMT reference is refs add --numt-fasta, or is found in the "
+            "nuclear FASTA (refs fetch-genome --nuclear-of / refs add --nuc-fasta)", "what this preset is for"]
+    if numt:
+        pipe["mpileup"]["input_ext"] = ".mt.bam"
+        # The rotated alignment realigns only the reads kept above, so it is NUMT-aware too.
+        pipe["align-rotated"].update(inputdir="alignment", input_ext=".mt.bam",
+                                     structure="samtools \\fastq input | key settings _fasta_rotated - | samtools sort -o output -")
     active = order + circ_order + ["multiqc"]
     for name, step in pipe.items():
         step["switch"] = name in active
@@ -403,5 +447,6 @@ def _rnaseq_expression() -> dict:
 
 def bundled_presets() -> dict:
     """Curated workflows written to every workspace that does not have them yet."""
-    return {"mt-variants": _mt_variants(numt=False), "mt-variants-numt": _mt_variants(numt=True),
+    return {"mt-variants": _mt_variants(), "mt-variants-numt": _mt_variants("mapq"),
+            "mt-variants-numtparser": _mt_variants("parser"),
             "rnaseq-expression": _rnaseq_expression()}
