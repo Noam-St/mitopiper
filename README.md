@@ -561,10 +561,24 @@ samtools sort → samtools index → samtools mpileup`. `htseq-count`, `STAR` an
 
 ### General settings
 `qsub_queue` (queue/partition), `qsub_threads` (number, or `auto` to use the largest thread option
-of the active steps), `qsub_memory`, `walltime` (SLURM), `account` (SLURM `--account` / LSF `-P`),
+of the active steps), `qsub_memory`, `walltime` (SLURM `--time`, SGE `-l h_rt`, LSF `-W`), `account` (SLURM `--account` / LSF `-P`),
 `parallel_env` (SGE `-pe`), `environment` (shell), and `free_form` (lines added to every job, e.g.
 `module load samtools`). Also: `fail_fast` (`set -eo pipefail`), `verify_md5`, `download_delay`,
 `ignore_paired_end`, and `tool_check` (write and run the `check_<exp>.sh` job).
+
+### Resources per step
+A step can declare what it needs with the optional fields `threads`, `memory` and `walltime` in
+`pipeline.json` (or in *modify a pipeline step*):
+
+```json
+"STAR-alignment": { "threads": "8", "memory": "32G", "walltime": "04:00:00", ... }
+```
+
+All steps of a sample run in one job, so the job asks for the largest `threads` and `memory` among
+its steps, and for the sum of their `walltime`s. It never asks for less than the general settings.
+`_threads` in a step's options resolves to that step's threads; for example, the bundled STAR step
+uses `--runThreadN _threads`. Time limits are passed to SLURM (`--time`), SGE (`-l h_rt`) and LSF
+(`-W`).
 
 ### Placeholders
 Setting values and step `structure` templates can refer to per-sample values. The replacement is a

@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from .schedulers import format_walltime, walltime_seconds
 from .monitor import FAILED, KILLED, SKIPPED, UNKNOWN, JobStatus, tail
 
 
@@ -137,28 +138,11 @@ def double_memory(memory: str, minimum: str = "8G") -> str:
     return f"{int(value) if value == int(value) else round(value, 1)}{unit}"
 
 
-def _parse_walltime(text: str) -> Optional[int]:
-    text = str(text or "").strip()
-    match = re.fullmatch(r"(?:(\d+)-)?(\d+)(?::(\d+))?(?::(\d+))?", text)
-    if not match:
-        return None
-    days, a, b, c = (int(g) if g else None for g in match.groups())
-    if b is None and c is None:
-        return (days or 0) * 86400 + a * (3600 if days else 60)  # "D-HH" or plain minutes
-    if c is None:
-        return (days or 0) * 86400 + a * 3600 + b * 60 if days else a * 60 + b  # "D-HH:MM" or "MM:SS"
-    return (days or 0) * 86400 + a * 3600 + b * 60 + c
-
-
 def double_walltime(walltime: str, minimum: str = "1-00:00:00") -> str:
-    seconds = _parse_walltime(walltime)
+    seconds = walltime_seconds(walltime)
     if not seconds:
         return minimum
-    seconds *= 2
-    days, rem = divmod(seconds, 86400)
-    h, rem = divmod(rem, 3600)
-    m, s = divmod(rem, 60)
-    return f"{days}-{h:02d}:{m:02d}:{s:02d}" if days else f"{h:02d}:{m:02d}:{s:02d}"
+    return format_walltime(seconds * 2)
 
 
 # ---------------------------------------------------------------- rules
@@ -201,8 +185,7 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
         new = double_walltime(ctx.walltime)
         advice = [f"The job exceeded its run-time limit ({ctx.walltime or 'scheduler default'})."]
         if ctx.scheduler in ("sge", "lsf"):
-            advice.append("mitopiper only sets the time limit on SLURM; on SGE/LSF add it to 'free_form' or ask "
-                          "for a longer queue with --queue.")
+            advice.append("If the queue itself has a shorter limit, also ask for a longer queue with --queue.")
         add(Suggestion("The job hit its time limit" + (f" in step '{step}'" if step else ""), advice,
                        [f"mitopiper rerun --walltime {new}"], {"walltime": new}))
     if sched.startswith("CANCELLED") and not found:

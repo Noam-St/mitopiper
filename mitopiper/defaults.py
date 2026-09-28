@@ -19,6 +19,11 @@ input_ext    extension of the file the step reads
 structure    command template; empty means ``key settings input``
 scope        ``sample`` (one job per sample, default) or ``experiment``
              (run once, after every sample job has finished)
+threads      optional: threads this step needs (``_threads`` in its settings)
+memory       optional: memory this step needs, e.g. ``32G``
+walltime     optional: run time this step needs, e.g. ``04:00:00``
+             (a job asks for the largest threads/memory and the sum of the
+             run times of its steps, and never less than the general settings)
 """
 
 from __future__ import annotations
@@ -157,6 +162,8 @@ DEFAULT_PIPE = {
         "input_ext": ".fq.gz",
         "structure": "key settings",
         "scope": "sample",
+        "threads": "8",
+        "memory": "32G",
     },
     "multiqc": {
         "key": "multiqc",
@@ -219,7 +226,7 @@ DEFAULT_SETTINGS = {
         "readFilesIn": _setting("Input fastq", "--readFilesIn", "_fastq"),
         "outSAMtype": _setting("output format", "--outSAMtype", "BAM SortedByCoordinate"),
         "readFilesCommand": _setting("Input format", "--readFilesCommand", "gunzip -c"),
-        "runThreadN": _setting("The amount of threads to use", "--runThreadN", 4),
+        "runThreadN": _setting("The amount of threads to use", "--runThreadN", "_threads"),
         "outFileNamePrefix": _setting("Output prefix", "--outFileNamePrefix", "_STAR_out"),
         "limit sort RAM": _setting("Maximum RAM for sorting BAM", "--limitBAMsortRAM", 1205130643),
     },
@@ -243,7 +250,7 @@ DEFAULT_MAIN = {
     "qsub_memory": ["30G", "choose the amount of memory to use for each job"],
     "free_form": ["", "any command you type here will be added to every single job script created, enter nothing to wipe setting"],
     "account": ["", "accounting/project name (SLURM --account, LSF -P); empty to omit"],
-    "walltime": ["1-20:00:00", "maximum run time (SLURM --time); empty to omit"],
+    "walltime": ["1-20:00:00", "maximum run time per job, e.g. 1-20:00:00 (SLURM --time, SGE -l h_rt, LSF -W); empty to omit"],
     "parallel_env": ["shared", "SGE parallel environment used with -pe"],
     "fail_fast": [True, "abort a job as soon as one of its commands fails (set -e -o pipefail)"],
     "verify_md5": [True, "verify downloaded FASTQ files against ENA's fastq_md5 column when available"],

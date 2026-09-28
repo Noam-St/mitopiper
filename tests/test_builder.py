@@ -172,3 +172,28 @@ def test_output_all_and_embedded():
     assert outputs["output_index"] == "/data/output/EXP/alignment/S.bai"
     assert outputs["output_index:all"] == "/data/output/EXP/alignment/S.bai /data/output/EXP/alignment/S.csi"
     assert substitute("x={output_index:1}", outputs) == "x=/data/output/EXP/alignment/S.csi"
+
+
+def test_per_step_resources():
+    from mitopiper.build import job_resources
+
+    wf = Workflow.default()
+    wf.set_general("qsub_threads", 2)
+    wf.set_general("qsub_memory", "8G")
+    wf.set_general("walltime", "02:00:00")
+    base = job_resources(wf, ["trim", "fastqc"])
+    assert (base.threads, base.memory, base.walltime) == (2, "8G", "02:00:00")
+    wf.pipeline["trim"]["walltime"] = "01:30:00"
+    wf.pipeline["bwa-align"].update(threads="6", memory="12G", walltime="01:00:00")
+    res = job_resources(wf, ["trim", "bwa-align"])
+    assert (res.threads, res.memory, res.walltime) == (6, "12G", "02:30:00")
+    wf.pipeline["view"]["memory"] = "1500M"                      # smaller than the general setting: ignored
+    assert job_resources(wf, ["view"]).memory == "8G"
+
+
+def test_star_uses_the_step_threads():
+    wf = Workflow.default()
+    wf.pipeline["STAR-alignment"]["switch"] = True
+    wf.run_order = ["STAR-alignment"]
+    (cmd,) = lines(build_sample_job(se_sample(), wf, EXP, REF))["STAR-alignment"]
+    assert "--runThreadN 8" in cmd

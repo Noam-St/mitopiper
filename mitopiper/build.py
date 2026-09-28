@@ -15,6 +15,7 @@ from typing import Callable, Optional
 
 from . import __version__, jobscript, toolcheck
 from .builder import (
+    step_threads,
     build_experiment_steps,
     build_sample_job,
     job_threads,
@@ -25,7 +26,8 @@ from .config import MANIFEST, Workflow, Workspace, manifest_path
 from .metadata import load_samples, write_sample_table
 from .references import ReferenceRegistry, ReferenceSet, index_commands
 from .schedulers import (
-    ExperimentJobs, JobResources, check_resources, header, job_name, master_script, stage_dependencies,
+    ExperimentJobs, JobResources, check_resources, format_walltime, header, job_name, master_script, memory_mb,
+    stage_dependencies, walltime_seconds,
 )
 
 log = logging.getLogger(__name__)
@@ -137,12 +139,33 @@ def prepare_experiment_dir(workspace: Workspace, metadata: Path, name: Optional[
     return exp_dir, target
 
 
-def job_resources(workflow: Workflow) -> JobResources:
+def job_resources(workflow: Workflow, steps: Optional[list] = None) -> JobResources:
+    """Scheduler resources of a job running ``steps``.
+
+    Steps may declare their own ``threads``, ``memory`` and ``walltime``. The
+    job asks for the largest threads and memory among its steps and for the
+    sum of its steps' time limits - never less than the general settings.
+    """
+    threads = job_threads(workflow)
+    memory = str(workflow.general("qsub_memory", "") or "")
+    walltime = str(workflow.general("walltime", "") or "")
+    step_times = []
+    for step in steps or []:
+        conf = workflow.pipeline.get(step, {})
+        threads = max(threads, step_threads(workflow, step))
+        mem = str(conf.get("memory", "") or "").strip()
+        if mem and memory_mb(mem) and (not memory or (memory_mb(memory) or 0) < memory_mb(mem)):
+            memory = mem
+        seconds = walltime_seconds(str(conf.get("walltime", "") or ""))
+        if seconds:
+            step_times.append(seconds)
+    if step_times and sum(step_times) > (walltime_seconds(walltime) or 0):
+        walltime = format_walltime(sum(step_times))
     return JobResources(
         queue=str(workflow.general("qsub_queue", "") or ""),
-        threads=job_threads(workflow),
-        memory=str(workflow.general("qsub_memory", "") or ""),
-        walltime=str(workflow.general("walltime", "") or ""),
+        threads=threads,
+        memory=memory,
+        walltime=walltime,
         account=str(workflow.general("account", "") or ""),
         shell=str(workflow.general("environment", "bash") or "bash"),
         parallel_env=str(workflow.general("parallel_env", "shared") or "shared"),
@@ -275,10 +298,11 @@ def build_experiment(
         jobs.prepare = write(prep_name, "prepare", jobscript.body(steps_, exp_dir.name, workflow))
     for job in runnable:
         body = f'echo "Current organism: {job.sample.organism}"\n\n' + jobscript.body(job.steps, job.sample.name, workflow)
-        jobs.samples.append(write(job.job_name, "sample", body))
+        jobs.samples.append(write(job.job_name, "sample", body, job_resources(workflow, [s.step for s in job.steps])))
     if experiment_steps:
         jobs.experiment = write(job_name("experiment", exp_dir.name), "experiment",
-                                jobscript.body(experiment_steps, exp_dir.name, workflow))
+                                jobscript.body(experiment_steps, exp_dir.name, workflow),
+                                job_resources(workflow, [s.step for s in experiment_steps]))
 
     write_manifest(exp_dir, workflow, options, samples, refs, plan)
     return ExperimentResult(exp_dir.name, exp_dir, samples, skipped, jobs, plan, tools)

@@ -126,6 +126,12 @@ def guess_threads(workflow: Workflow, default: int = 4) -> int:
     return max(values) if values else default
 
 
+def step_threads(workflow: Workflow, step: str) -> int:
+    """Threads a step asks for (its own ``threads`` field, else the job default)."""
+    value = str(workflow.pipeline.get(step, {}).get("threads", "") or "").strip()
+    return int(value) if value.isdigit() and int(value) > 0 else job_threads(workflow)
+
+
 def job_threads(workflow: Workflow) -> int:
     value = workflow.general("qsub_threads", 1)
     if isinstance(value, str) and value.strip().lower() == "auto":
@@ -346,6 +352,7 @@ def build_sample_job(
         input_ext = conf.get("input_ext", "")
         output_ext = first_ext(conf)
         variables = dict(base)
+        variables["threads"] = str(step_threads(workflow, step))
         variables.update(
             {
                 "command_key": command_key(conf),
@@ -411,7 +418,7 @@ def build_experiment_steps(samples: list, workflow: Workflow, exp_dir: str, step
         variables = {
             "tsv_dir": exp_dir,
             "samples": " ".join(s.name for s in samples),
-            "threads": str(job_threads(workflow)),
+            "threads": str(step_threads(workflow, step)),
             "command_key": command_key(conf),
             "command_outdir": outdir,
             "command_output_dir_path": _join(exp_dir, outdir),

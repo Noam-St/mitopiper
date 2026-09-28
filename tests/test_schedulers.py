@@ -18,8 +18,12 @@ def test_headers():
     slurm = header("slurm", "job", "/exp", res)
     assert "#SBATCH --account=lab" in slurm and "#SBATCH --time=10:00:00" in slurm
     assert "#SBATCH --output=/exp/stdout/%x_%j.out" in slurm
+    assert "#$ -l h_rt=10:00:00" in sge
     lsf = header("lsf", "job", "/exp", res)
-    assert "#BSUB -P lab" in lsf and '#BSUB -R "rusage[mem=8G]"' in lsf
+    assert "#BSUB -P lab" in lsf and '#BSUB -R "rusage[mem=8G]"' in lsf and "#BSUB -W 10:00" in lsf
+    long = JobResources(walltime="1-20:00:00")
+    assert "#$ -l h_rt=44:00:00" in header("sge", "j", "/e", long) and "#BSUB -W 44:00" in header("lsf", "j", "/e", long)
+    assert "h_rt" not in header("sge", "j", "/e", JobResources(walltime=""))
     assert header("local", "job", "/exp", res) == "#!/bin/bash\n"
 
 

@@ -8,6 +8,7 @@ workstation or for testing).
 from __future__ import annotations
 
 import posixpath
+import re
 import shlex
 from dataclasses import dataclass, replace
 from typing import Optional
@@ -35,6 +36,46 @@ class JobResources:
     parallel_env: str = "shared"
 
 
+def walltime_seconds(text: str) -> Optional[int]:
+    """Parse a SLURM-style time limit (``D-HH:MM:SS``, ``HH:MM:SS``, ``MM:SS``, ``D-HH`` or minutes)."""
+    text = str(text or "").strip()
+    match = re.fullmatch(r"(?:(\d+)-)?(\d+)(?::(\d+))?(?::(\d+))?", text)
+    if not match:
+        return None
+    days, a, b, c = (int(g) if g else None for g in match.groups())
+    if b is None and c is None:
+        return (days or 0) * 86400 + a * (3600 if days else 60)  # "D-HH" or plain minutes
+    if c is None:
+        return (days or 0) * 86400 + a * 3600 + b * 60 if days else a * 60 + b  # "D-HH:MM" or "MM:SS"
+    return (days or 0) * 86400 + a * 3600 + b * 60 + c
+
+
+def memory_mb(text: str) -> Optional[float]:
+    """``30G`` / ``1500M`` / ``2T`` / ``512K`` (optionally with ``B``) in megabytes; plain numbers are MB."""
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([KMGT]?)B?\s*", str(text or ""), re.IGNORECASE)
+    if not match:
+        return None
+    factor = {"K": 1 / 1024, "": 1, "M": 1, "G": 1024, "T": 1024 * 1024}[match.group(2).upper()]
+    return float(match.group(1)) * factor
+
+
+def format_walltime(seconds: int) -> str:
+    days, rem = divmod(int(seconds), 86400)
+    h, rem = divmod(rem, 3600)
+    m, s = divmod(rem, 60)
+    return f"{days}-{h:02d}:{m:02d}:{s:02d}" if days else f"{h:02d}:{m:02d}:{s:02d}"
+
+
+def _sge_time(seconds: int) -> str:
+    h, rem = divmod(seconds, 3600)
+    return f"{h}:{rem // 60:02d}:{rem % 60:02d}"
+
+
+def _lsf_time(seconds: int) -> str:
+    minutes = max(1, (seconds + 59) // 60)
+    return f"{minutes // 60}:{minutes % 60:02d}"
+
+
 def header(scheduler: str, job_name: str, log_dir: str, res: JobResources) -> str:
     """Shebang + scheduler directives for a job script."""
     shell = res.shell or "bash"
@@ -48,6 +89,8 @@ def header(scheduler: str, job_name: str, log_dir: str, res: JobResources) -> st
         lines += [f"#$ -S /bin/{shell}", "#$ -V", f"#$ -pe {res.parallel_env or 'shared'} {res.threads}"]
         if res.memory:
             lines.append(f"#$ -l mem_free={res.memory}")
+        if walltime_seconds(res.walltime):
+            lines.append(f"#$ -l h_rt={_sge_time(walltime_seconds(res.walltime))}")
     elif scheduler == "slurm":
         lines += [
             "#SBATCH --nodes=1",
@@ -74,6 +117,8 @@ def header(scheduler: str, job_name: str, log_dir: str, res: JobResources) -> st
         lines.append(f"#BSUB -n {res.threads}")
         if res.memory:
             lines.append(f'#BSUB -R "rusage[mem={res.memory}]"')
+        if walltime_seconds(res.walltime):
+            lines.append(f"#BSUB -W {_lsf_time(walltime_seconds(res.walltime))}")
     elif scheduler != "local":
         raise ValueError(f"Unknown scheduler {scheduler}")
     return "\n".join(lines) + "\n"

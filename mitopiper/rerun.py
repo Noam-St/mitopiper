@@ -20,7 +20,7 @@ import json
 import logging
 import shlex
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Optional
 
@@ -192,33 +192,40 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
         waits = stage_dependencies(present["check"], present["prepare"], tuple(n for n in by_job if n in rerun_names))
         for item in (i for i in items if i.experiment == exp):
             wf = _apply_overrides(base, item.overrides, options.free_form)
-            res = job_resources(wf)
             path = scripts / f"{item.name}.sh"
-            content = header(scheduler, item.name, exp_s, check_resources(res) if item.kind == "check" else res)
-            content += jobscript.preamble(wf, exp_s, item.name, waits[item.kind])
+            job_steps: list = []
             if item.kind == "sample":
                 sample = by_job.get(item.name)
                 if sample is None or sample.organism not in refs:
                     raise BuildError(f"Cannot rebuild {item.name}: sample or reference no longer found in {exp}")
                 sample_steps = [s for s in steps if step_scope(wf, s) == "sample"]
-                todo = sample_steps[sample_steps.index(item.start_step):] if item.start_step else sample_steps
-                job = build_sample_job(sample, wf, exp_s, refs[sample.organism], todo)
-                content += f'echo "Current organism: {sample.organism}"\n'
-                content += f'echo "[mitopiper] rerun starting at step {item.start_step or todo[0]}"\n\n'
+                job_steps = sample_steps[sample_steps.index(item.start_step):] if item.start_step else sample_steps
+                job = build_sample_job(sample, wf, exp_s, refs[sample.organism], job_steps)
+                body = f'echo "Current organism: {sample.organism}"\n'
+                body += f'echo "[mitopiper] rerun starting at step {item.start_step or job_steps[0]}"\n\n'
                 clean = _clean_lines(sample, wf, exp_s, item.start_step) if item.clean and item.start_step else []
-                content += jobscript.body(job.steps, sample.name, wf, before=clean)
+                body += jobscript.body(job.steps, sample.name, wf, before=clean)
                 jobs.samples.append(str(path))
             elif item.kind == "experiment":
-                content += jobscript.body(build_experiment_steps(samples, wf, exp_s, steps), exp, wf)
+                experiment_steps = build_experiment_steps(samples, wf, exp_s, steps)
+                job_steps = [s.step for s in experiment_steps]
+                body = jobscript.body(experiment_steps, exp, wf)
                 jobs.experiment = str(path)
             elif item.kind == "check":
-                content += toolcheck.check_job_body(manifest.get("tools", {}), wf)
+                body = toolcheck.check_job_body(manifest.get("tools", {}), wf)
                 jobs.check = str(path)
             elif item.kind == "prepare":
                 commands = [c for ref in refs.values() if ref.needs_indexing for c in index_commands(ref, wf)]
-                prep = [StepCommands("prepare_references", "Index the automatically downloaded references", commands)]
-                content += jobscript.body(prep, exp, wf)
+                body = jobscript.body([StepCommands("prepare_references", "Index the automatically downloaded references",
+                                                    commands)], exp, wf)
                 jobs.prepare = str(path)
+            res = job_resources(wf, job_steps)
+            # Resources given explicitly for this rerun win over what the steps declare.
+            fixed = {"memory": "memory", "walltime": "walltime", "threads": "threads", "queue": "queue"}
+            res = replace(res, **{field: (int(item.overrides[key]) if key == "threads" else item.overrides[key])
+                                  for key, field in fixed.items() if item.overrides.get(key) not in (None, "")})
+            content = header(scheduler, item.name, exp_s, check_resources(res) if item.kind == "check" else res)
+            content += jobscript.preamble(wf, exp_s, item.name, waits[item.kind]) + body
             _write_script(path, content)
             item.script = str(path)
         experiments.append(jobs)

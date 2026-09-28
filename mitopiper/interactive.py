@@ -210,6 +210,9 @@ class Menus:
             "structure": "Command template; empty for 'key settings input'. Tokens: key, settings, input, output, "
             "output_pipe, output_<step>, dir_<step> and the placeholders listed in the manual",
             "scope": "'sample' (one job per sample) or 'experiment' (runs once after all samples)",
+            "threads": "Threads this step needs (empty: the general setting); available as _threads in its settings",
+            "memory": "Memory this step needs, e.g. 32G (empty: the general setting)",
+            "walltime": "Run time this step needs, e.g. 04:00:00 (empty: no extra)",
         }
         name = ask("Name of the new step (must be unique)", input_fn=self.input).replace(" ", "_")
         if not name or name in self.wf.pipeline:

@@ -102,3 +102,14 @@ def test_builds_made_before_the_rename_are_still_read(registered, data_dir):
     (exp / "mitopiper_manifest.json").rename(exp / "pipemaker_manifest.json")
     assert load_manifest(exp)["scheduler"] == "slurm"
     assert monitor.experiment_scheduler(exp) == "slurm"
+
+
+def test_step_resources_reach_the_job_header(registered, data_dir):
+    ws = registered
+    wf = ws.load_workflow("default")
+    wf.pipeline["STAR-alignment"]["switch"] = True
+    wf.run_order = ["wget", "STAR-alignment"]
+    ws.write_workflow(wf, "star")
+    assert run(ws, "build", "--no-check", str(data_dir / "ena_runs.tsv"), "-s", "slurm", "-p", "star") == 0
+    text = (ws.output_dir / "ena_runs" / "scripts" / "s_SAMEA1_0.sh").read_text()
+    assert "#SBATCH --mem=32G" in text and "#SBATCH --cpus-per-task=8" in text and "--runThreadN 8" in text
