@@ -34,7 +34,7 @@ from .config import Workflow, Workspace
 from .diagnose import Context, diagnose, merged_rerun_options
 from .metadata import load_samples
 from .monitor import DONE, FAILED, KILLED, PENDING, RUNNING, SKIPPED, UNKNOWN, ErrorScanner, collect, default_experiments
-from .references import ReferenceSet, index_commands
+from .references import ReferenceSet, prepare_commands
 from .schedulers import STAGES, ExperimentJobs, check_resources, header, job_name, master_script, stage_dependencies
 
 log = logging.getLogger(__name__)
@@ -241,7 +241,8 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
                 body = toolcheck.check_job_body(manifest.get("tools", {}), wf, exp_s)
                 jobs.check = str(path)
             elif item.kind == "prepare":
-                commands = [c for ref in refs.values() if ref.needs_indexing for c in index_commands(ref, wf)]
+                commands = [c for org, ref in sorted(refs.items())
+                            for c in prepare_commands(ref, org, str(workspace.root), wf, steps=steps)]
                 body = jobscript.body([StepCommands("prepare_references", "Index the automatically downloaded references",
                                                     commands)], exp, wf)
                 jobs.prepare = str(path)

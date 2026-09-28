@@ -1,0 +1,151 @@
+"""End-to-end runs of the bundled mtDNA presets with stand-in aligners.
+
+bwa and samtools are replaced by small scripts (the tests are about the wiring, not the
+aligners): the stand-in `samtools mpileup` prints one line per reference position with depth 1
+for the normal and 2 for the rotated reference, so the merged pileup shows where every position
+came from. `mitopiper mt ...` runs for real.
+"""
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from mitopiper import monitor as mon
+from mitopiper import mtdna
+from mitopiper.cli import main
+from mitopiper.config import Workspace
+from mitopiper.local_samples import make_tsv
+from mitopiper.references import ReferenceRegistry, ReferenceSet
+
+REPO = Path(__file__).resolve().parent.parent
+MT = "ACGT" * 7 + "AC"  # 30 bases
+
+FAKE_SAMTOOLS = r"""#!/bin/sh
+cmd=$1; shift
+case "$cmd" in
+  faidx) touch "$1.fai" ;;
+  index) touch "$1.bai" ;;
+  fastq) echo "@r"; echo "ACGT"; echo "+"; echo "IIII" ;;
+  sort)  out=""; in="-"; while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift;; *) in=$1;; esac; shift; done
+         if [ "$in" = - ]; then cat > "$out"; else cp "$in" "$out"; fi ;;
+  view)  out=""; while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift;; esac; shift; done
+         if [ -n "$out" ]; then echo bam > "$out"; else echo bam; fi ;;
+  mpileup) ref=""; while [ $# -gt 0 ]; do case "$1" in -f) ref=$2; shift;; esac; shift; done
+         depth=1; case "$ref" in *rotated*) depth=2;; esac
+         awk -v d=$depth '/^>/{split(substr($0,2),h," "); name=h[1]; next} {seq=seq $0}
+                          END{for(i=1;i<=length(seq);i++) printf "%s\t%d\t%s\t%d\t.\tI\n", name, i, substr(seq,i,1), d}' "$ref" ;;
+  *) exit 0 ;;
+esac
+"""
+FAKE_BWA = '#!/bin/sh\n[ "$1" = index ] && touch "$2.bwt"\necho "@HD"\n'
+
+
+@pytest.fixture
+def cluster(tmp_path, monkeypatch):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    tools = {"samtools": FAKE_SAMTOOLS, "bwa": FAKE_BWA,
+             "mitopiper": f'#!/bin/sh\nPYTHONPATH="{REPO}" exec "{sys.executable}" -m mitopiper "$@"\n'}
+    for name, body in tools.items():
+        (bin_dir / name).write_text(body)
+        (bin_dir / name).chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    ws = Workspace(tmp_path / "ws")
+    ws.initialise()
+    fq = tmp_path / "fq"
+    fq.mkdir()
+    (fq / "a.fastq").write_text("@r\nACGT\n+\nIIII\n")
+    make_tsv(fq, "Homo sapiens", tmp_path / "exp.tsv")
+    (tmp_path / "mt.fa").write_text(f">NC_012920.1 Homo sapiens mitochondrion\n{MT}\n")
+    return ws, tmp_path
+
+
+def run_preset(ws, tmp_path, preset, steps, shell="bash"):
+    wf = ws.load_workflow(preset)
+    wf.set_general("environment", shell)
+    wf.set_general("mt_rotation", 5)
+    wf.set_general("mt_junction_window", 3)
+    ws.write_workflow(wf, preset)
+    code = main(["-w", str(ws.root), "build", "--no-check", str(tmp_path / "exp.tsv"), "-s", "local", "-p", preset,
+                 "--steps", ",".join(steps)])
+    if code == 0:
+        subprocess.run(["bash", str(ws.root / "master.sh")], check=True, capture_output=True)
+    return code
+
+
+def merged_depths(ws):
+    rows = [line.split("\t") for line in (ws.output_dir / "exp" / "pileup" / "a_0_HS.circular.pileup").read_text().splitlines()]
+    assert [int(r[1]) for r in rows] == list(range(1, 31))
+    return {int(r[1]): int(r[3]) for r in rows}
+
+
+CIRCULAR = ["align-rotated", "index-rotated", "mpileup-rotated", "circular-merge"]
+
+
+def test_mt_variants_merges_the_rotated_alignment_around_the_origin(cluster):
+    ws, tmp_path = cluster
+    ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath=str(tmp_path / "mt.fa")))
+    assert run_preset(ws, tmp_path, "mt-variants", ["wget", "bwa-align", "view", "sort", "index", "mpileup"] + CIRCULAR) == 0
+    states = {j.name: j.state for j in mon.collect(ws, ["exp"], mon.ErrorScanner(), lambda s, i: None)}
+    assert all(s == mon.DONE for s in states.values()), states
+    rotated = ws.references_dir / "derived" / "Homo_sapiens" / "mt.rotated5.fa"
+    assert mtdna.sequence_length(rotated) == 30 and (rotated.parent / "mt.rotated5.fa.bwt").exists()
+    depths = merged_depths(ws)
+    assert [p for p, d in depths.items() if d == 2] == [1, 2, 3, 28, 29, 30]   # next to the origin: rotated alignment
+
+
+@pytest.mark.parametrize("shell", ["bash"] + (["tcsh"] if __import__("shutil").which("tcsh") else []))
+def test_mt_variants_numt_aligns_to_nuclear_plus_mt(cluster, shell):
+    ws, tmp_path = cluster
+    (tmp_path / "nuc.fa").write_text(">chr1\nAAAAAAAAAA\n>chrM\nCCCCCCCC\n")
+    ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath=str(tmp_path / "mt.fa"), nuc_refpath=str(tmp_path / "nuc.fa")))
+    steps = ["wget", "align-combined", "index-combined", "mt-reads", "index-mt", "mpileup"] + CIRCULAR
+    assert run_preset(ws, tmp_path, "mt-variants-numt", steps, shell) == 0
+    combined = ws.references_dir / "derived" / "Homo_sapiens" / "mt.with_nuclear.fa"
+    assert mtdna.contigs(combined) == ["chr1", "NC_012920.1"]               # the nuclear chrM copy was left out
+    script = (ws.output_dir / "exp" / "scripts" / "s_a_0.sh").read_text()
+    assert "-q 20 -o" in script and f"`mitopiper mt contigs {tmp_path}/mt.fa`" in script
+    assert "samtools fastq" in script and "mt.rotated5.fa -" in script    # the rotated realignment uses the mt reads
+    depths = merged_depths(ws)
+    assert [p for p, d in depths.items() if d == 2] == [1, 2, 3, 28, 29, 30]
+
+
+def test_numt_preset_needs_a_nuclear_genome(cluster, caplog):
+    ws, tmp_path = cluster
+    ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath=str(tmp_path / "mt.fa")))
+    assert run_preset(ws, tmp_path, "mt-variants-numt", ["wget", "align-combined"]) == 1
+    assert "NUMT-aware" in caplog.text and "refs fetch-genome Homo_sapiens --nuclear-of" in caplog.text
+
+
+def test_bundled_presets_are_written_once(tmp_path):
+    ws = Workspace(tmp_path / "ws")
+    ws.initialise()
+    assert {"mt-variants", "mt-variants-numt", "rnaseq-expression"} <= set(ws.list_presets())
+    wf = ws.load_workflow("rnaseq-expression")
+    assert wf.active_order() == ["wget", "fastqc_pre", "trim", "fastqc", "STAR-alignment", "featureCounts", "multiqc"]
+    wf.set_general("qsub_queue", "mine")
+    ws.write_workflow(wf, "rnaseq-expression")
+    Workspace(tmp_path / "ws").initialise()                                  # never overwritten
+    assert ws.load_workflow("rnaseq-expression").general("qsub_queue") == "mine"
+
+
+def test_rnaseq_expression_commands(tmp_path):
+    from mitopiper.builder import build_sample_job
+    from mitopiper.metadata import Run, Sample
+
+    ws = Workspace(tmp_path / "ws")
+    ws.initialise()
+    wf = ws.load_workflow("rnaseq-expression")
+    ref = ReferenceSet(refpath="/refs/GRCh38/genome.fa", gtfpath="/refs/GRCh38/genes.gtf")
+    pe = Sample(0, "S1", "Homo_sapiens", [Run("r", ["f/x_1.fastq.gz", "f/x_2.fastq.gz"])])
+    se = Sample(1, "S2", "Homo_sapiens", [Run("r", ["f/y.fastq.gz"])])
+    steps = {s.step: s.lines for s in build_sample_job(pe, wf, str(tmp_path / "ws/output/E"), ref).steps}
+    (star,) = steps["STAR-alignment"]
+    assert "--genomeDir /refs/GRCh38" in star and "--runThreadN 8" in star and "--readFilesCommand gunzip -c" in star
+    (counts,) = steps["featureCounts"]
+    assert counts.startswith("featureCounts -T 4 -a /refs/GRCh38/genes.gtf -t exon -g gene_id -p --countReadPairs -o ")
+    assert counts.endswith("S1_0_HSAligned.sortedByCoord.out.bam")
+    se_counts = {s.step: s.lines for s in build_sample_job(se, wf, str(tmp_path / "ws/output/E"), ref).steps}["featureCounts"][0]
+    assert "--countReadPairs" not in se_counts

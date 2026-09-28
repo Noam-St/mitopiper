@@ -263,6 +263,9 @@ DEFAULT_MAIN = {
     "download_queue": ["", "queue/partition of the download job with download_mode 'queue' (empty: qsub_queue)"],
     "array_jobs": [False, "submit the sample jobs of an experiment as one array job"],
     "max_running": [0, "run at most this many sample jobs at the same time (0 = no limit; uses an array job)"],
+    "mt_rotation": [500, "mtDNA: bases moved from the start to the end of the rotated reference (circularity)"],
+    "mt_junction_window": [400, "mtDNA: positions next to the origin taken from the rotated alignment (at most mt_rotation)"],
+    "numt_min_mapq": [20, "mtDNA: minimum mapping quality of reads kept after aligning to nuclear + mtDNA (NUMTs)"],
     "container_runtime": ["apptainer", "program that runs step containers ('apptainer' or 'singularity')"],
     "tool_check": [True, "run check_<exp>.sh first: it stops the pipeline if a tool the jobs call cannot be found"],
 }
@@ -278,3 +281,127 @@ def default_config() -> dict:
         "run_order": list(DEFAULT_ORDER),
         "general_settings": copy.deepcopy(DEFAULT_MAIN),
     }
+
+
+# ------------------------------------------------------------------ bundled presets
+def _step(key, description, outdir, inputdir, input_ext, output_ext, structure, **extra) -> dict:
+    step = {"key": key, "description": description, "switch": True, "path": "", "outdir": outdir,
+            "output_ext": output_ext, "inputdir": inputdir, "input_ext": input_ext, "structure": structure,
+            "scope": "sample"}
+    step.update(extra)
+    return step
+
+
+def _params(*items) -> dict:
+    """``(name, description, key, value)`` tuples -> ordered settings of a step."""
+    return {name: dict(_setting(description, key, value), order=i) for i, (name, description, key, value) in enumerate(items)}
+
+
+_BWA = (("seed", "Minimum seed length", "-k", 19), ("threads", "Threads", "-t", "_threads"))
+_PILEUP = (
+    ("all positions", "Report every position, also those without coverage", "-a", ""),
+    ("no depth limit", "Do not cap the depth (mtDNA coverage is very high)", "-d", 0),
+    ("quality", "Minimum base quality for a base to be considered", "-Q", 30),
+)
+
+
+def _circular_steps() -> tuple:
+    """Steps that align to the rotated mtDNA and merge the two pileups (circularity)."""
+    pipeline = {
+        "align-rotated": _step("bwa mem", "Align to the rotated mtDNA (reads spanning the origin)", "alignment",
+                               "post_trim", ".fq.gz", ".rotated.sorted.bam",
+                               "key settings _fasta_rotated _fastq | samtools sort -o output -"),
+        "index-rotated": _step("samtools index", "Index the rotated alignment", "alignment", "alignment",
+                               ".rotated.sorted.bam", ".rotated.sorted.bam.bai", "key settings input"),
+        "mpileup-rotated": _step("samtools mpileup", "Pileup of the rotated alignment", "pileup", "alignment",
+                                 ".rotated.sorted.bam", ".rotated.pileup", "key settings input output_pipe"),
+        "circular-merge": _step("mitopiper mt combine-pileups", "Merge the pileups around the origin (circular mtDNA)",
+                                "pileup", "", "", ".circular.pileup",
+                                "key output_mpileup output_mpileup-rotated output --reference _fasta "
+                                "--shift _mt_shift --window _mt_window"),
+    }
+    settings = {
+        "align-rotated": _params(*_BWA),
+        "index-rotated": {},
+        "mpileup-rotated": _params(*_PILEUP, ("reference", "Rotated mtDNA FASTA", "-f", "_fasta_rotated")),
+        "circular-merge": {},
+    }
+    return pipeline, settings, ["align-rotated", "index-rotated", "mpileup-rotated", "circular-merge"]
+
+
+def _mt_variants(numt: bool) -> dict:
+    config = default_config()
+    pipe, settings, general = config["pipeline"], config["settings"], config["general_settings"]
+    settings["mpileup"] = _params(*_PILEUP, ("reference", "mtDNA FASTA", "-f", "_fasta"))
+    pipe["multiqc"]["switch"] = True
+    circ_pipe, circ_settings, circ_order = _circular_steps()
+    pipe.update(circ_pipe)
+    settings.update(circ_settings)
+    if not numt:
+        settings["bwa-align"] = _params(*_BWA)
+        order = ["wget", "fastqc_pre", "trim", "fastqc", "bwa-align", "view", "sort", "index", "mpileup"]
+        general["preset_description"] = [
+            "mtDNA coverage/variants: trim, align to the mtDNA and to a rotated copy of it, and merge the pileups "
+            "around the origin so reads spanning the circular junction are counted", "what this preset is for"]
+    else:
+        pipe.update({
+            "align-combined": _step("bwa mem", "Align to nuclear genome + mtDNA (NUMT-aware)", "alignment", "post_trim",
+                                    ".fq.gz", ".combined.sorted.bam",
+                                    "key settings _fasta_combined _fastq | samtools sort -o output -",
+                                    threads="8", memory="16G"),
+            "index-combined": _step("samtools index", "Index the nuclear + mtDNA alignment", "alignment", "alignment",
+                                    ".combined.sorted.bam", ".combined.sorted.bam.bai", "key settings input"),
+            "mt-reads": _step("samtools view", "Keep reads that map to the mtDNA with high mapping quality",
+                              "alignment", "alignment", ".combined.sorted.bam", ".mt.bam",
+                              "key settings -o output input _mt_contigs"),
+            "index-mt": _step("samtools index", "Index the mtDNA reads", "alignment", "alignment", ".mt.bam",
+                              ".mt.bam.bai", "key settings input"),
+        })
+        settings.update({
+            "align-combined": _params(*_BWA),
+            "index-combined": {},
+            "mt-reads": _params(("bam", "Output BAM", "-b", ""), ("min mapq", "Minimum mapping quality", "-q", "_mt_mapq")),
+            "index-mt": {},
+        })
+        pipe["mpileup"]["input_ext"] = ".mt.bam"
+        # The rotated alignment realigns only the reads kept above, so it is NUMT-aware too.
+        pipe["align-rotated"].update(inputdir="alignment", input_ext=".mt.bam",
+                                     structure="samtools \\fastq input | key settings _fasta_rotated - | samtools sort -o output -")
+        order = ["wget", "fastqc_pre", "trim", "fastqc", "align-combined", "index-combined", "mt-reads", "index-mt", "mpileup"]
+        general["preset_description"] = [
+            "mtDNA coverage/variants, NUMT-aware: align to the nuclear genome + mtDNA, keep reads mapping to the mtDNA "
+            "(MAPQ >= numt_min_mapq), then handle circularity as mt-variants. Needs a nuclear FASTA in the reference "
+            "(refs fetch-genome --nuclear-of / refs add --nuc-fasta)", "what this preset is for"]
+    active = order + circ_order + ["multiqc"]
+    for name, step in pipe.items():
+        step["switch"] = name in active
+    config["run_order"] = active
+    return config
+
+
+def _rnaseq_expression() -> dict:
+    config = default_config()
+    pipe, settings, general = config["pipeline"], config["settings"], config["general_settings"]
+    pipe["featureCounts"] = _step("featureCounts", "Count reads per gene", "counts", "", "", ".featureCounts.txt",
+                                  "key settings -o output output_STAR-alignment:bam", threads="4")
+    settings["featureCounts"] = _params(
+        ("threads", "Threads", "-T", "_threads"),
+        ("annotation", "GTF/GFF annotation", "-a", "_gtf"),
+        ("feature type", "Feature type to count (Ensembl GTF: exon; NCBI GFF3: gene)", "-t", "exon"),
+        ("attribute", "Attribute naming the gene (Ensembl GTF: gene_id; NCBI GFF3: ID)", "-g", "gene_id"),
+        ("pairs", "Count read pairs of paired-end samples", "-p --countReadPairs", "_if_PE"),
+    )
+    active = ["wget", "fastqc_pre", "trim", "fastqc", "STAR-alignment", "featureCounts", "multiqc"]
+    for name, step in pipe.items():
+        step["switch"] = name in active
+    config["run_order"] = active
+    general["preset_description"] = [
+        "Gene expression: trim, align with STAR (splice-aware, genome with STAR index in _fasta_dir) and count reads "
+        "per gene with featureCounts", "what this preset is for"]
+    return config
+
+
+def bundled_presets() -> dict:
+    """Curated workflows written to every workspace that does not have them yet."""
+    return {"mt-variants": _mt_variants(numt=False), "mt-variants-numt": _mt_variants(numt=True),
+            "rnaseq-expression": _rnaseq_expression()}

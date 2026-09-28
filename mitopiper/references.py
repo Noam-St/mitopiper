@@ -484,19 +484,27 @@ def _sa_index_nbases(fasta: str) -> int:
         return 14  # not downloaded yet: STAR's default
 
 
+def _steps_running(workflow, program: str) -> list:
+    """Active steps whose command runs ``program`` (e.g. every ``bwa mem`` step, whatever its name)."""
+    pipeline = workflow.pipeline
+    return [s for s in workflow.active_order()
+            if Path(str(pipeline[s].get("path") or pipeline[s].get("key", "")).split(" ")[0]).name == program]
+
+
 def _fasta_index_commands(fasta: str, workflow, csh: bool, star: bool) -> list:
     """Guarded commands building the indices of ``fasta`` that the active steps need."""
-    active = workflow.active_order()
     pipeline = workflow.pipeline
+    bwa_steps = _steps_running(workflow, "bwa")
+    star_steps = _steps_running(workflow, "STAR")
     commands = []
-    if any(pipeline[s].get("key", "").startswith("samtools") for s in active) or "bwa-align" in active:
+    if _steps_running(workflow, "samtools") or bwa_steps:
         commands.append(_unless_exists(f"{fasta}.fai", f'samtools faidx "{fasta}"', csh))
-    if "bwa-align" in active:
-        step = pipeline["bwa-align"]
+    if bwa_steps:
+        step = pipeline[bwa_steps[0]]
         bwa = step.get("path") or step.get("key", "bwa").split(" ")[0]
         commands.append(_unless_exists(f"{fasta}.bwt", f'{bwa} index "{fasta}"', csh))
-    if star and "STAR-alignment" in active:
-        step = pipeline["STAR-alignment"]
+    if star and star_steps:
+        step = pipeline[star_steps[0]]
         star_bin = step.get("path") or step.get("key", "STAR")
         fasta_dir = str(Path(fasta).parent)
         commands.append(_unless_exists(
@@ -504,6 +512,64 @@ def _fasta_index_commands(fasta: str, workflow, csh: bool, star: bool) -> list:
             f'{star_bin} --runMode genomeGenerate --genomeDir "{fasta_dir}" --runThreadN 4 '
             f'--genomeFastaFiles "{fasta}" --genomeSAindexNbases {_sa_index_nbases(fasta)}', csh))
     return commands
+
+
+# ------------------------------------------------------- derived references
+def uses_placeholder(workflow, name: str, steps: Optional[list] = None) -> bool:
+    """Whether one of ``steps`` (default: the active run order) uses ``_<name>`` / ``<name>`` /
+    ``{name}`` in its structure or settings."""
+    wanted = {name, f"_{name}"}
+    for step in steps if steps is not None else workflow.active_order():
+        texts = [str(workflow.pipeline.get(step, {}).get("structure", ""))]
+        texts += [str(p.get("value", "")) for p in workflow.settings.get(step, {}).values() if p.get("switch", True)]
+        if any(wanted & set(re.findall(r"[\w\-:.]+", t)) for t in texts):
+            return True
+    return False
+
+
+def derived_paths(ref: ReferenceSet, organism: str, workspace_dir: str, shift: int) -> dict:
+    """Where the rotated mtDNA and the nuclear + mtDNA reference of ``ref`` are kept."""
+    stem = Path(ref.refpath).name
+    for ext in (".gz", ".fasta", ".fa", ".fna", ".fas"):
+        stem = stem[: -len(ext)] if stem.endswith(ext) else stem
+    folder = f"{workspace_dir}/references/derived/{organism}"
+    return {"rotated": f"{folder}/{stem}.rotated{shift}.fa",
+            "combined": f"{folder}/{stem}.with_nuclear.fa" if ref.nuc_refpath else ""}
+
+
+def mt_shift(workflow) -> int:
+    try:
+        return int(workflow.general("mt_rotation", 500) or 500)
+    except (TypeError, ValueError):
+        return 500
+
+
+def derived_commands(ref: ReferenceSet, organism: str, workspace_dir: str, workflow, csh: Optional[bool] = None,
+                     steps: Optional[list] = None) -> list:
+    """Build and index the rotated / nuclear + mtDNA references that the active steps use."""
+    if csh is None:
+        from .jobscript import family, shell_of
+
+        csh = family(shell_of(workflow)) == "csh"
+    paths = derived_paths(ref, organism, workspace_dir, mt_shift(workflow))
+    commands = []
+    if uses_placeholder(workflow, "fasta_rotated", steps):
+        commands.append(_unless_exists(paths["rotated"], f'mitopiper mt rotate "{ref.refpath}" "{paths["rotated"]}" '
+                                                         f"--shift {mt_shift(workflow)}", csh))
+        commands += _fasta_index_commands(paths["rotated"], workflow, csh, star=False)
+    if uses_placeholder(workflow, "fasta_combined", steps) and paths["combined"]:
+        commands.append(_unless_exists(paths["combined"], f'mitopiper mt combine-references "{ref.nuc_refpath}" '
+                                                          f'"{ref.refpath}" "{paths["combined"]}"', csh))
+        commands += _fasta_index_commands(paths["combined"], workflow, csh, star=False)
+    return commands
+
+
+def prepare_commands(ref: ReferenceSet, organism: str, workspace_dir: str, workflow, csh: Optional[bool] = None,
+                     steps: Optional[list] = None) -> list:
+    """Everything the reference job does for one organism: downloads and indices of references
+    mitopiper manages, and the derived (rotated, nuclear + mtDNA) references the steps use."""
+    base = index_commands(ref, workflow, csh) if ref.needs_indexing else []
+    return base + derived_commands(ref, organism, workspace_dir, workflow, csh, steps)
 
 
 def index_commands(ref: ReferenceSet, workflow, csh: Optional[bool] = None) -> list:

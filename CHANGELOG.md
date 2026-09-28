@@ -5,6 +5,10 @@
 The single `maker.py` script was refactored into the installable `mitopiper` package.
 
 ### Added
+- mtDNA circularity, based on the original `circulize.py` / `combine_processed_pileups.py`: samples are also aligned to a rotated copy of the mtDNA (`mt_rotation`, default 500), and `mitopiper mt combine-pileups` merges both pileups so the `mt_junction_window` positions (default 400) on either side of the origin come from the rotated alignment.
+- NUMT-aware alignment: `mt-variants-numt` aligns to nuclear genome + mtDNA (`mitopiper mt combine-references` drops duplicate mitochondrial sequences of the assembly), keeps reads mapping to the mtDNA with MAPQ ≥ `numt_min_mapq`, and realigns only those to the rotated mtDNA.
+- Curated presets in every workspace: `mt-variants`, `mt-variants-numt` and `rnaseq-expression` (STAR + featureCounts). The mt pileups report every position without a depth cap (`-a -d 0`).
+- Derived references (rotated, nuclear + mtDNA) are built and indexed once by the reference job under `references/derived/`. Index detection looks at a step's command, not its name. Structure tokens can be escaped with `\word`.
 - Reproducibility: the tool-check job records the path and version of every tool in `output/<exp>/tool_versions.tsv`. Steps can run in their own `container` (Apptainer/Singularity, general setting `container_runtime`) or `conda_env`. `envs/mitopiper-tools.yml` pins the tools of the bundled workflows, and failures to start a container or conda environment are diagnosed.
 - `download_mode`: downloads can run on the login node (`login`, by `master.sh` before submitting) or in one download job (`queue`, optionally on `download_queue`), as a stage of their own that samples wait for. Reruns re-download what is missing.
 - Array jobs: with `max_running` (a concurrency limit) or `array_jobs`, the sample jobs of an experiment are submitted as one array job (SLURM `--array=1-N%M`, SGE `-t`/`-tc`, LSF `name[1-N]%M`). Monitoring, diagnosis and reruns stay per sample, and SLURM array tasks are queried individually.

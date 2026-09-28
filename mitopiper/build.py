@@ -24,7 +24,7 @@ from .builder import (
 )
 from .config import MANIFEST, Workflow, Workspace, manifest_path
 from .metadata import load_samples, write_sample_table
-from .references import ReferenceRegistry, ReferenceSet, index_commands
+from .references import ReferenceRegistry, ReferenceSet, prepare_commands, uses_placeholder
 from .schedulers import (
     ExperimentJobs, JobResources, check_resources, format_walltime, header, job_name, master_script, memory_mb,
     stage_dependencies, walltime_seconds,
@@ -231,6 +231,13 @@ def build_experiment(
     refs, skipped = resolve_references(samples, registry, options.reference, resolver)
     for organism in skipped:
         log.warning("Skipping samples of %s: no reference available", organism)
+    if uses_placeholder(workflow, "fasta_combined", steps):
+        for organism in [o for o, ref in refs.items() if not ref.nuc_refpath]:
+            log.error("Skipping samples of %s: this workflow aligns to the nuclear genome + mtDNA (NUMT-aware), but its "
+                      "reference has no nuclear FASTA. Add one with 'mitopiper refs fetch-genome %s --nuclear-of NAME' "
+                      "or 'mitopiper refs add %s --fasta MT.fa --nuc-fasta GENOME.fa'.", organism, organism, organism)
+            skipped.append(organism)
+            del refs[organism]
     samples = [s for s in samples if s.organism in refs]
 
     exp = str(exp_dir)
@@ -239,14 +246,13 @@ def build_experiment(
     scripts_dir = exp_dir / "scripts"
     plan = {"experiment": exp_dir.name, "directory": exp, "steps": steps, "samples": []}
 
-    # Reference preparation (indexing of automatically downloaded references).
+    # Reference preparation: downloads/indices of managed references, derived references.
     prep_lines = []
     for organism, ref in sorted(refs.items()):
-        if ref.needs_indexing:
-            cmds = index_commands(ref, workflow)
-            if cmds:
-                prep_lines.append(f'echo "Preparing reference of {organism}"')
-                prep_lines.extend(cmds)
+        cmds = prepare_commands(ref, organism, str(workspace.root), workflow, steps=steps)
+        if cmds:
+            prep_lines.append(f'echo "Preparing reference of {organism}"')
+            prep_lines.extend(cmds)
     plan["prepare_references"] = prep_lines
 
     sample_jobs = [build_sample_job(s, workflow, exp, refs[s.organism], steps) for s in samples]
@@ -267,7 +273,7 @@ def build_experiment(
         )
     plan["experiment_steps"] = [{"step": s.step, "commands": s.lines} for s in experiment_steps]
     plan["downloads"] = {"mode": download_mode(workflow), "steps": [{"step": s.step, "commands": s.lines} for s in downloads]}
-    tools = pipeline_tools(workflow, sample_jobs, experiment_steps, refs, downloads)
+    tools = pipeline_tools(workflow, sample_jobs, experiment_steps, refs, downloads, str(workspace.root), steps)
     plan["tools"] = tools
 
     jobs = ExperimentJobs(name=exp_dir.name, prepare=None, samples=[], experiment=None)
@@ -391,7 +397,7 @@ def tool_check_enabled(workflow: Workflow) -> bool:
 
 
 def pipeline_tools(workflow: Workflow, sample_jobs: list, experiment_steps: list, refs: dict,
-                   downloads: Optional[list] = None) -> dict:
+                   downloads: Optional[list] = None, workspace_dir: str = "", steps: Optional[list] = None) -> dict:
     """Every executable the jobs of a build call, with the steps that call it."""
     step_lines: dict = {}
     for step in downloads or []:
@@ -402,9 +408,9 @@ def pipeline_tools(workflow: Workflow, sample_jobs: list, experiment_steps: list
     for step in experiment_steps:
         step_lines.setdefault(step.step, []).extend(step.lines)
     # Reference preparation: read the POSIX form of the commands (same tools in every shell).
-    for ref in refs.values():
-        if ref.needs_indexing:
-            step_lines.setdefault("prepare_references", []).extend(index_commands(ref, workflow, csh=False))
+    for organism, ref in refs.items():
+        step_lines.setdefault("prepare_references", []).extend(
+            prepare_commands(ref, organism, workspace_dir, workflow, csh=False, steps=steps))
     return toolcheck.required_tools(step_lines)
 
 

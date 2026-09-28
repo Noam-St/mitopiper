@@ -44,6 +44,7 @@ mitochondrial reference genome from NCBI.
 - [Monitoring](#monitoring)
 - [Rerunning failed samples](#rerunning-failed-samples)
 - [Workflows (presets)](#workflows-presets)
+- [Mitochondrial analyses](#mitochondrial-analyses)
 - [References](#references)
 - [Reproducibility](#reproducibility)
 - [Troubleshooting](#troubleshooting)
@@ -378,6 +379,7 @@ the command line and use `mitopiper monitor -i` to handle failures.
 | `mitopiper monitor [EXP…] [options]` | Follow submitted jobs and their errors |
 | `mitopiper rerun [options]` | Resubmit failed jobs, resuming at the failed step |
 | `mitopiper check [EXP…] [--auto-fix]` | Check that every tool the jobs call can be found here (and try to install missing ones) |
+| `mitopiper mt rotate \| combine-pileups \| combine-references \| contigs` | mtDNA helpers used by the mt presets (see [Mitochondrial analyses](#mitochondrial-analyses)) |
 | `mitopiper cleanup [FOLDERS…]` | Remove logs and generated scripts |
 
 Global options: `-w/--workdir DIR` (workspace, default: current directory) and `-v` (more logging).
@@ -562,6 +564,19 @@ The default workflow is: `wget → fastqc_pre → trim_galore → fastqc → bwa
 samtools sort → samtools index → samtools mpileup`. `htseq-count`, `STAR` and an experiment-level
 `multiqc` step are included but switched off.
 
+Every workspace also gets three **curated presets**. Choose one with `-p NAME`, or at the preset
+prompt; `mitopiper presets show NAME` describes each one:
+
+| Preset | For | Steps |
+| --- | --- | --- |
+| `mt-variants` | mtDNA coverage, heteroplasmy and variants | trim → align to the mtDNA *and* to a rotated copy → pileups (all positions, no depth cap) → merged circular pileup |
+| `mt-variants-numt` | the same, without false heteroplasmy from nuclear mtDNA copies | trim → align to nuclear genome + mtDNA → keep reads mapping to the mtDNA with MAPQ ≥ 20 → pileup → the same rotated alignment of those reads → merged circular pileup |
+| `rnaseq-expression` | gene expression | trim → STAR (splice-aware) → featureCounts → MultiQC |
+
+`bwa mem` is not splice-aware. That is fine for the mtDNA, which has no introns, but use
+`rnaseq-expression` (STAR) for nuclear genes. See [Mitochondrial analyses](#mitochondrial-analyses)
+for the reasoning behind the mt presets.
+
 ### General settings
 `qsub_queue` (queue/partition), `qsub_threads` (number, or `auto` to use the largest thread option
 of the active steps), `qsub_memory`, `walltime` (SLURM `--time`, SGE `-l h_rt`, LSF `-W`), `account` (SLURM `--account` / LSF `-P`),
@@ -630,7 +645,8 @@ plain dictionary lookup; no user text is ever evaluated as code.
 | `_if_SE`, `_if_PE` | flag switched on only for single-/paired-end samples |
 
 In `structure`, the tokens `key`, `settings`, `input`, `output` and `output_pipe` (`> output`) are
-also available, e.g. `key settings fasta fastq output_pipe`.
+also available, e.g. `key settings fasta fastq output_pipe`. A word that happens to be a variable name
+can be written literally with a backslash: `samtools \fastq input` runs `samtools fastq`.
 
 ### Steps with several output files
 A step's `output_ext` can list several outputs, each with a name. Write them as name=extension pairs
@@ -678,6 +694,42 @@ sample). Example: enable the bundled `multiqc` step.
   reference folders are bind-mounted. The tool check then looks for the container runtime instead of
   the tools inside the image. Versions of containerised tools are defined by the image, which is
   recorded in the manifest.
+
+## Mitochondrial analyses
+
+**Circularity.** The mtDNA is circular but references are linear, so reads that span the origin of
+the sequence (inside the D-loop) align badly to both ends, and coverage and variants near the origin
+are under-called. The `mt-variants` presets therefore also align every sample to a rotated copy of
+the mtDNA, whose first `mt_rotation` bases (default 500) were moved to the end, so the origin lies
+inside the sequence. `mitopiper mt combine-pileups` then builds `pileup/<sample>.circular.pileup`
+in normal coordinates. The first and last `mt_junction_window` positions (default 400, at most
+`mt_rotation`) come from the rotated alignment, and every other position comes from the normal one.
+This is the approach of the original `circulize.py` / `combine_processed_pileups.py` scripts, applied
+directly to `samtools mpileup` output and extended to both sides of the origin. For the original
+start-only behaviour, run the helper with `--tail-window 0`.
+
+**NUMTs.** Nuclear copies of mitochondrial sequence attract reads when the mtDNA alone is the
+reference, which shows up as heteroplasmy that isn't there. `mt-variants-numt` aligns to the nuclear
+genome *plus* the mtDNA (`mitopiper mt combine-references`). It leaves out any mitochondrial sequence
+already in the nuclear assembly (`chrM`, `MT`, …), because a duplicate would make every mtDNA read
+ambiguous. Only reads that map to the mtDNA with mapping quality ≥ `numt_min_mapq` (default 20) are
+kept. These kept reads are also the ones realigned to the rotated mtDNA. The preset needs a nuclear
+FASTA in the reference set: `mitopiper refs fetch-genome ORGANISM --nuclear-of mt`, or
+`mitopiper refs add ORGANISM --fasta mt.fa --nuc-fasta genome.fa`.
+
+The rotated and the nuclear + mtDNA references are built and indexed once, by the reference job,
+under `references/derived/<organism>/`. The helpers run inside the jobs, so mitopiper must be
+installed in the job environment (the tool check verifies this). They are also available directly:
+
+```bash
+mitopiper mt rotate mt.fa mt.rotated.fa --shift 500
+mitopiper mt combine-pileups normal.pileup rotated.pileup merged.pileup --reference mt.fa --shift 500 --window 400
+mitopiper mt combine-references genome.fa mt.fa genome_with_mt.fa
+mitopiper mt contigs mt.fa
+```
+
+Step placeholders for your own workflows: `_fasta_rotated`, `_fasta_combined`, `_mt_contigs` (the
+mtDNA sequence names, looked up when the job runs), `_mt_shift`, `_mt_window` and `_mt_mapq`.
 
 ## References
 

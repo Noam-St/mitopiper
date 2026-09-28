@@ -173,6 +173,11 @@ class Workspace:
         if not (self.preset_dir("default") / "pipeline.json").exists():
             self.write_workflow(Workflow.default(), "default")
             log.info("Created default preset in %s", self.preset_dir("default"))
+        from .defaults import bundled_presets
+
+        for name, config in bundled_presets().items():
+            if not (self.preset_dir(name) / "pipeline.json").exists():
+                self.write_workflow(Workflow(**config), name)
         self.migrate_presets()
         self._initialised = True
 

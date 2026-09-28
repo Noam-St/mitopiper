@@ -36,7 +36,7 @@ from typing import Optional
 from .config import Workflow
 from .config import truthy as _truthy
 from .metadata import Sample
-from .references import ReferenceSet
+from .references import ReferenceSet, derived_paths, mt_shift
 
 #: Names usable as ``_name`` in setting values (and in structures).
 PLACEHOLDERS = (
@@ -44,6 +44,7 @@ PLACEHOLDERS = (
     "command_input", "command_output", "command_output_dir_path", "command_input_dir_path",
     "fastq", "fastq_pre", "fastq1", "fastq2", "fastq_dir", "fastq_pre_dir", "fastq_sample_path_no_ext",
     "sample", "org_name", "bam", "sam", "STAR_out", "STAR_final_log", "tsv_dir", "threads",
+    "fasta_rotated", "fasta_combined", "mt_contigs", "mt_shift", "mt_window", "mt_mapq",
 )
 
 #: Structure shorthands inherited from maker.py (``input`` -> ``command_input``...).
@@ -161,7 +162,15 @@ def sample_variables(sample: Sample, workflow: Workflow, exp_dir: str, ref: Refe
         fastq_pre = _join(raw_dir, f"{name}.fastq.gz")
     fasta = ref.refpath
     fasta_nuc = ref.nuc_refpath
+    derived = derived_paths(ref, sample.organism, workspace_of(exp_dir), mt_shift(workflow))
     return {
+        "fasta_rotated": derived["rotated"],
+        "fasta_combined": derived["combined"],
+        # Names of the mtDNA sequences, looked up when the job runs (works in sh and csh).
+        "mt_contigs": f"`mitopiper mt contigs {fasta}`" if fasta else "",
+        "mt_shift": str(mt_shift(workflow)),
+        "mt_window": str(workflow.general("mt_junction_window", 400) or 400),
+        "mt_mapq": str(workflow.general("numt_min_mapq", 20) or 20),
         "sample": name,
         "org_name": sample.organism,
         "org": sample.initials,
@@ -272,6 +281,9 @@ def render_settings(params: dict, variables: dict, lookups: dict, paired: bool, 
 def render_structure(structure: str, variables: dict, lookups: dict) -> str:
     tokens = []
     for token in structure.split():
+        if token.startswith("\\"):  # \word: the word itself, even if it names a variable (e.g. samtools \fastq)
+            tokens.append(token[1:])
+            continue
         bare = re.sub(r"[{}\[\],]", "", token)
         if bare in STRUCTURE_ALIASES:
             bare = "command_" + bare

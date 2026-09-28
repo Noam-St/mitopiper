@@ -153,7 +153,8 @@ def test_interactive_preflight_adds_a_setup_line_and_rebuilds(tmp_path):
 
     ws = workspace(tmp_path)
     fake_tool(tmp_path / "bin", "mytool")
-    answers = iter(["0", str(tmp_path / "exp.tsv"), "1", "n", "all", "",     # scheduler sge, metadata, preset t
+    preset = str([p for p in ws.list_presets() if p != "current"].index("t"))
+    answers = iter(["0", str(tmp_path / "exp.tsv"), preset, "n", "all", "",  # scheduler sge, metadata, preset t
                     "2", f'export PATH="{tmp_path}/bin:$PATH"',              # add a set-up line -> rebuild -> recheck ok
                     "n"])                                                    # don't launch
     assert run_interactive(ws, lambda prompt="": next(answers)) == 0
