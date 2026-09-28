@@ -5,6 +5,7 @@
 The single `maker.py` script was refactored into the installable `mitopiper` package.
 
 ### Added
+- `download_mode`: downloads can run on the login node (`login`, by `master.sh` before submitting) or in one download job (`queue`, optionally on `download_queue`), as a stage of their own that samples wait for. Reruns re-download what is missing.
 - Array jobs: with `max_running` (a concurrency limit) or `array_jobs`, the sample jobs of an experiment are submitted as one array job (SLURM `--array=1-N%M`, SGE `-t`/`-tc`, LSF `name[1-N]%M`). Monitoring, diagnosis and reruns stay per sample, and SLURM array tasks are queried individually.
 - Per-step resources: optional `threads`, `memory` and `walltime` fields on a step. A job asks for the largest threads and memory and the summed time of its steps, never less than the general settings. `_threads` gives a step its own thread count, and the STAR step declares 8 threads and 32G.
 - Time limits (`walltime`) are also passed to SGE (`-l h_rt`) and LSF (`-W`), not only to SLURM.

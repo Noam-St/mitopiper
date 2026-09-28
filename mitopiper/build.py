@@ -250,6 +250,7 @@ def build_experiment(
     plan["prepare_references"] = prep_lines
 
     sample_jobs = [build_sample_job(s, workflow, exp, refs[s.organism], steps) for s in samples]
+    downloads = split_downloads(workflow, sample_jobs)
     experiment_steps = build_experiment_steps(samples, workflow, exp, steps)
     for job in sample_jobs:
         plan["samples"].append(
@@ -265,7 +266,8 @@ def build_experiment(
             }
         )
     plan["experiment_steps"] = [{"step": s.step, "commands": s.lines} for s in experiment_steps]
-    tools = pipeline_tools(workflow, sample_jobs, experiment_steps, refs)
+    plan["downloads"] = {"mode": download_mode(workflow), "steps": [{"step": s.step, "commands": s.lines} for s in downloads]}
+    tools = pipeline_tools(workflow, sample_jobs, experiment_steps, refs, downloads)
     plan["tools"] = tools
 
     jobs = ExperimentJobs(name=exp_dir.name, prepare=None, samples=[], experiment=None)
@@ -284,7 +286,8 @@ def build_experiment(
     prep_name = job_name("prepare", exp_dir.name) if prep_lines else None
     # A build of experiment-level steps only (e.g. --steps multiqc) has no sample jobs to run.
     runnable = [job for job in sample_jobs if job.steps]
-    waits = stage_dependencies(check_name, prep_name, tuple(j.job_name for j in runnable))
+    dl_name = job_name("download", exp_dir.name) if downloads else None
+    waits = stage_dependencies(check_name, prep_name, tuple(j.job_name for j in runnable), dl_name)
 
     def write(name: str, stage: str, body: str, res: JobResources = resources) -> str:
         path = scripts_dir / f"{name}.sh"
@@ -296,6 +299,10 @@ def build_experiment(
     if prep_name:
         steps_ = [StepCommands("prepare_references", "Index the automatically downloaded references", prep_lines)]
         jobs.prepare = write(prep_name, "prepare", jobscript.body(steps_, exp_dir.name, workflow))
+    if dl_name:
+        jobs.download = write(dl_name, "download", jobscript.body(downloads, exp_dir.name, workflow),
+                              download_resources(workflow, resources))
+        jobs.download_mode = download_mode(workflow)
     for job in runnable:
         body = f'echo "Current organism: {job.sample.organism}"\n\n' + jobscript.body(job.steps, job.sample.name, workflow)
         jobs.samples.append(write(job.job_name, "sample", body, job_resources(workflow, [s.step for s in job.steps])))
@@ -310,6 +317,38 @@ def build_experiment(
 
     write_manifest(exp_dir, workflow, options, samples, refs, plan)
     return ExperimentResult(exp_dir.name, exp_dir, samples, skipped, jobs, plan, tools)
+
+
+DOWNLOAD_MODES = ("job", "login", "queue")
+
+
+def download_mode(workflow: Workflow) -> str:
+    mode = str(workflow.general("download_mode", "job") or "job").strip().lower()
+    if mode not in DOWNLOAD_MODES:
+        raise BuildError(f"download_mode must be one of {', '.join(DOWNLOAD_MODES)}, not '{mode}'")
+    return mode
+
+
+def split_downloads(workflow: Workflow, sample_jobs: list) -> list:
+    """With download_mode 'login'/'queue', move the download step out of the sample jobs.
+
+    Returns the download steps (one per sample, named ``download:<sample>``) for the
+    separate download job; the sample jobs start with the step after the download.
+    """
+    if download_mode(workflow) == "job":
+        return []
+    downloads = []
+    for job in sample_jobs:
+        for step in [s for s in job.steps if s.step == "wget"]:
+            downloads.append(StepCommands(f"download:{job.sample.name}", step.description, step.lines))
+        job.steps = [s for s in job.steps if s.step != "wget"]
+    return downloads
+
+
+def download_resources(workflow: Workflow, resources: JobResources) -> JobResources:
+    """Downloads need one thread and little memory, possibly on a transfer queue."""
+    queue = str(workflow.general("download_queue", "") or "") or resources.queue
+    return replace(resources, threads=1, memory="2G" if resources.memory else "", queue=queue)
 
 
 def uses_array(workflow: Workflow, scheduler: str) -> bool:
@@ -351,9 +390,12 @@ def tool_check_enabled(workflow: Workflow) -> bool:
     return workflow.flag("tool_check", True)
 
 
-def pipeline_tools(workflow: Workflow, sample_jobs: list, experiment_steps: list, refs: dict) -> dict:
+def pipeline_tools(workflow: Workflow, sample_jobs: list, experiment_steps: list, refs: dict,
+                   downloads: Optional[list] = None) -> dict:
     """Every executable the jobs of a build call, with the steps that call it."""
     step_lines: dict = {}
+    for step in downloads or []:
+        step_lines.setdefault("wget", []).extend(step.lines)
     for job in sample_jobs:
         for step in job.steps:
             step_lines.setdefault(step.step, []).extend(step.lines)

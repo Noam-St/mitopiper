@@ -449,6 +449,8 @@ are grouped and concatenated.
     ├── scripts/
     │   ├── check_<exp>.sh        tool check: runs first and stops the pipeline if a tool is missing
     │   ├── prep_<exp>.sh         indexing of auto-downloaded references (if needed)
+    │   ├── dl_<exp>.sh           staged downloads (download_mode login/queue)
+    │   ├── a_<exp>.array/.list   array job running the sample scripts (max_running/array_jobs)
     │   ├── s_<sample>_<i>.sh     one job per sample
     │   └── e_<exp>.sh            experiment-level steps (e.g. MultiQC), if any
     ├── jobs.tsv                  job ids recorded by master.sh / rerun.sh
@@ -565,6 +567,19 @@ of the active steps), `qsub_memory`, `walltime` (SLURM `--time`, SGE `-l h_rt`, 
 `parallel_env` (SGE `-pe`), `environment` (shell), and `free_form` (lines added to every job, e.g.
 `module load samtools`). Also: `fail_fast` (`set -eo pipefail`), `verify_md5`, `download_delay`,
 `ignore_paired_end`, and `tool_check` (write and run the `check_<exp>.sh` job).
+
+### Where downloads run
+By default each sample job downloads its own FASTQ files. Clusters often allow internet access only
+on login or transfer nodes, so the general setting `download_mode` can move the downloads:
+
+| `download_mode` | Downloads run… |
+| --- | --- |
+| `job` (default) | in each sample job |
+| `login` | in `master.sh`, on the machine it runs on (the login node), before the samples are submitted |
+| `queue` | in one download job (`dl_<exp>.sh`), on `download_queue` if set, e.g. a transfer partition |
+
+Either way the downloads are a stage of their own (`dl_<exp>`), with a status and a log. Every
+sample waits for it and skips itself if a download failed. `rerun` downloads again what is missing.
 
 ### Array jobs and a limit on running jobs
 Set the general setting `max_running` to run at most that many samples at the same time, or set
@@ -691,7 +706,7 @@ policy.
 | The tool check reports missing tools | Add `module load …` / `conda activate …` to `free_form` (interactive option 2 does it for you), or install them with `mitopiper check --auto-fix`. If the tools exist only on the compute nodes, build with `--no-check`: the check job verifies them there. |
 | `Submitting failed … sbatch: command not found` | Run mitopiper on the cluster's login node, and pick the scheduler your cluster uses. |
 | Jobs fail with `command not found` | Add `module load …` / `conda activate …` to the `free_form` general setting (or use `mitopiper rerun --free-form …` once). |
-| Downloads fail on compute nodes | Many clusters have no internet on compute nodes. Download on the login node first: `mitopiper build EXP --steps wget -s local && bash master.sh`, then build or rerun the remaining steps. |
+| Downloads fail on compute nodes | Many clusters have no internet on compute nodes. Set the general setting `download_mode` to `login` or `queue` (see [Where downloads run](#where-downloads-run)) and build again. |
 | `Could not reach ENA` / `Request to NCBI failed` | The machine running mitopiper cannot reach ENA/NCBI. Download the metadata table in a browser and pass the file instead, and register references with `refs add`. |
 | Jobs killed for memory or time | `mitopiper rerun --auto-fix --submit` doubles the limit for those jobs. Raise `qsub_memory` / `walltime` in the preset for next time. |
 | Too many harmless "errors" counted | Some tools write progress to stderr; hide those lines with `mitopiper monitor --ignore 'REGEX'`. |

@@ -304,11 +304,12 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
     elif _find(r"unable to resolve host|name or service not known|temporary failure in name resolution|"
                r"network is unreachable|connection timed out|connection refused|unable to establish", text):
         add(Suggestion("The download failed: no network access from the compute node, or ENA was unreachable",
-                       ["Many clusters have no internet on compute nodes. Download on the login node first, then "
-                        "rerun the remaining steps:",
+                       ["Many clusters have no internet on compute nodes. Set the general setting download_mode to "
+                        "'login' (master.sh downloads on the login node before submitting the samples) or 'queue' "
+                        "(one download job, on download_queue if your cluster has a transfer partition), then "
+                        "rebuild and submit again.",
                         "Otherwise wait and rerun; increase 'download_delay' if ENA throttles you."],
-                       ["mitopiper build EXPERIMENT --steps wget --scheduler local && bash master.sh",
-                        f"mitopiper rerun --from {ctx.step_after('wget') or 'NEXT_STEP'}"], {}))
+                       ["mitopiper build EXPERIMENT   # after setting download_mode", "mitopiper rerun"], {}))
 
     # --- tools -------------------------------------------------------------------
     if rc == 139 or _find(r"segmentation fault|core dumped", text):

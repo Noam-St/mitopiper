@@ -59,9 +59,12 @@ def test_stage_helpers():
 
     assert [kind_of(job_name(k, "E")) for k in ("check", "prepare", "experiment")] == ["check", "prepare", "experiment"]
     assert kind_of("s_SAMN1_0") == "sample"
-    assert stage_dependencies("c", "p", ("a", "b")) == {"check": [], "prepare": ["c"], "sample": ["p"], "experiment": ["a", "b"]}
-    assert stage_dependencies("c", None, ()) == {"check": [], "prepare": ["c"], "sample": ["c"], "experiment": ["c"]}
-    assert stage_dependencies() == {"check": [], "prepare": [], "sample": [], "experiment": []}
+    assert stage_dependencies("c", "p", ("a", "b")) == {"check": [], "prepare": ["c"], "download": ["p"], "sample": ["p"],
+                                                         "experiment": ["a", "b"]}
+    assert stage_dependencies("c", None, ()) == {"check": [], "prepare": ["c"], "download": ["c"], "sample": ["c"],
+                                                 "experiment": ["c"]}
+    assert stage_dependencies() == {"check": [], "prepare": [], "download": [], "sample": [], "experiment": []}
+    assert stage_dependencies("c", "p", ("a",), download="d")["sample"] == ["d"]
     small = check_resources(JobResources(queue="q", threads=16, memory="64G", walltime="3-00:00:00"))
     assert (small.queue, small.threads, small.memory, small.walltime) == ("q", 1, "1G", "00:15:00")
     jobs = ExperimentJobs("E", "/p.sh", ["/a.sh"], "/e.sh", check="/c.sh")

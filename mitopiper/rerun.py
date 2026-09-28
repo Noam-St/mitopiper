@@ -26,7 +26,8 @@ from typing import Optional
 
 from . import jobscript, toolcheck
 from .build import (
-    BuildError, _write_script, find_experiment_metadata, job_resources, load_manifest, uses_array, write_array,
+    BuildError, _write_script, download_mode, download_resources, find_experiment_metadata, job_resources, load_manifest,
+    split_downloads, uses_array, write_array,
 )
 from .builder import StepCommands, _join, build_experiment_steps, build_sample_job, output_paths, step_scope
 from .config import Workflow, Workspace
@@ -156,6 +157,15 @@ def plan(workspace: Workspace, experiments: Optional[list] = None, options: Opti
                 if getattr(options, key) not in (None, ""):
                     item.overrides[key] = getattr(options, key)
             selected.append(item)
+        # Staged downloads: a sample resumed at the download step needs the download job again.
+        staged = str(manifest.get("workflow", {}).get("general_settings", {}).get("download_mode", ["job"])[0]) != "job"
+        redownload = [i for i in selected if i.experiment == exp and i.kind == "sample" and i.start_step == "wget"]
+        if staged and redownload:
+            dl = next((i for i in selected if i.experiment == exp and i.kind == "download"), None)
+            if dl is None:
+                dl = RerunJob(exp, job_name("download", exp), "download", "", "")
+                selected.append(dl)
+            dl.clean = dl.clean or any(i.clean for i in redownload)
     return selected
 
 
@@ -190,8 +200,10 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
         # Rerun jobs only wait for jobs that this rerun resubmits: the others are not run again, and
         # builds made by older versions may have no status files to check.
         rerun_names = {i.name for i in items if i.experiment == exp}
-        present = {kind: job_name(kind, exp) if job_name(kind, exp) in rerun_names else None for kind in ("check", "prepare")}
-        waits = stage_dependencies(present["check"], present["prepare"], tuple(n for n in by_job if n in rerun_names))
+        present = {kind: job_name(kind, exp) if job_name(kind, exp) in rerun_names else None
+                   for kind in ("check", "prepare", "download")}
+        waits = stage_dependencies(present["check"], present["prepare"], tuple(n for n in by_job if n in rerun_names),
+                                   present["download"])
         for item in (i for i in items if i.experiment == exp):
             wf = _apply_overrides(base, item.overrides, options.free_form)
             path = scripts / f"{item.name}.sh"
@@ -203,9 +215,13 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
                 sample_steps = [s for s in steps if step_scope(wf, s) == "sample"]
                 job_steps = sample_steps[sample_steps.index(item.start_step):] if item.start_step else sample_steps
                 job = build_sample_job(sample, wf, exp_s, refs[sample.organism], job_steps)
+                split_downloads(wf, [job])  # staged downloads run in the download job, not here
+                job_steps = [s.step for s in job.steps]
                 body = f'echo "Current organism: {sample.organism}"\n'
                 body += f'echo "[mitopiper] rerun starting at step {item.start_step or job_steps[0]}"\n\n'
-                clean = _clean_lines(sample, wf, exp_s, item.start_step) if item.clean and item.start_step else []
+                staged = download_mode(wf) != "job"
+                clean = (_clean_lines(sample, wf, exp_s, item.start_step)
+                         if item.clean and item.start_step and not (staged and item.start_step == "wget") else [])
                 body += jobscript.body(job.steps, sample.name, wf, before=clean)
                 jobs.samples.append(str(path))
             elif item.kind == "experiment":
@@ -213,6 +229,14 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
                 job_steps = [s.step for s in experiment_steps]
                 body = jobscript.body(experiment_steps, exp, wf)
                 jobs.experiment = str(path)
+            elif item.kind == "download":
+                # Download again what the samples of this rerun need (all samples if none is rerun).
+                wanted = [s for n, s in by_job.items() if n in rerun_names] or list(by_job.values())
+                dl_jobs = [build_sample_job(s, wf, exp_s, refs[s.organism], ["wget"]) for s in wanted if s.organism in refs]
+                clean = [line for s in wanted for line in _clean_lines(s, wf, exp_s, "wget")] if item.clean else []
+                body = jobscript.body(split_downloads(wf, dl_jobs), exp, wf, before=clean)
+                jobs.download = str(path)
+                jobs.download_mode = download_mode(wf)
             elif item.kind == "check":
                 body = toolcheck.check_job_body(manifest.get("tools", {}), wf)
                 jobs.check = str(path)
@@ -226,7 +250,11 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
             fixed = {"memory": "memory", "walltime": "walltime", "threads": "threads", "queue": "queue"}
             res = replace(res, **{field: (int(item.overrides[key]) if key == "threads" else item.overrides[key])
                                   for key, field in fixed.items() if item.overrides.get(key) not in (None, "")})
-            content = header(scheduler, item.name, exp_s, check_resources(res) if item.kind == "check" else res)
+            if item.kind == "check":
+                res = check_resources(res)
+            elif item.kind == "download":
+                res = download_resources(wf, res)
+            content = header(scheduler, item.name, exp_s, res)
             content += jobscript.preamble(wf, exp_s, item.name, waits[item.kind]) + body
             _write_script(path, content)
             item.script = str(path)

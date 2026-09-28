@@ -207,15 +207,17 @@ class ExperimentJobs:
     directory: str = ""
     check: Optional[str] = None      # tool check, submitted before everything else
     array: Optional[str] = None      # array job running the sample scripts (instead of one job each)
+    download: Optional[str] = None   # staged downloads (download_mode "login" or "queue")
+    download_mode: str = "job"
 
     def scripts(self) -> list:
         """Every script of the experiment, in stage order."""
-        return [s for s in (self.check, self.prepare, *self.samples, self.experiment) if s]
+        return [s for s in (self.check, self.prepare, self.download, *self.samples, self.experiment) if s]
 
 
 #: Job stages in run order. Each stage waits for the nearest earlier stage that exists.
-STAGES = ("check", "prepare", "sample", "experiment")
-_PREFIXES = {"check": "check_", "prepare": "prep_", "experiment": "e_"}
+STAGES = ("check", "prepare", "download", "sample", "experiment")
+_PREFIXES = {"check": "check_", "prepare": "prep_", "download": "dl_", "experiment": "e_"}
 
 
 def job_name(kind: str, experiment: str) -> str:
@@ -228,10 +230,13 @@ def kind_of(name: str) -> str:
     return next((kind for kind, prefix in _PREFIXES.items() if name.startswith(prefix)), "sample")
 
 
-def stage_dependencies(check: Optional[str] = None, prepare: Optional[str] = None, samples: tuple = ()) -> dict:
+def stage_dependencies(check: Optional[str] = None, prepare: Optional[str] = None, samples: tuple = (),
+                       download: Optional[str] = None) -> dict:
     """Jobs each stage waits for, given the jobs that exist: ``{stage: [job names]}``."""
-    first = [prepare or check] if (prepare or check) else []
-    return {"check": [], "prepare": [check] if check else [], "sample": first, "experiment": list(samples) or first}
+    before_download = [prepare or check] if (prepare or check) else []
+    before_samples = [download] if download else before_download
+    return {"check": [], "prepare": [check] if check else [], "download": before_download,
+            "sample": before_samples, "experiment": list(samples) or before_samples}
 
 
 def check_resources(resources: "JobResources") -> "JobResources":
@@ -252,6 +257,14 @@ def master_script(scheduler: str, experiments: list, delay: float = 0.5, shell: 
         "set -euo pipefail",
         "",
         submit,
+        "",
+        "# Runs a job script right here (download_mode 'login'), with the same logs and status as a job.",
+        "run_here() {",
+        '    local script=$1 name logdir; name=$(basename "$script" .sh); logdir=$(dirname "$(dirname "$script")")',
+        '    echo "[mitopiper] running $script on $(hostname)" >&2',
+        f'    /bin/{shell} "$script" > "$logdir/stdout/$name.out" 2> "$logdir/stderr/$name.err" \\',
+        '        || echo "[mitopiper] $script failed (see $logdir/stderr/$name.err)" >&2',
+        "}",
         "",
         "# Every submitted job is recorded in <experiment>/jobs.tsv for 'mitopiper monitor'.",
         "record() {",
@@ -280,6 +293,14 @@ def master_script(scheduler: str, experiments: list, delay: float = 0.5, shell: 
             lines.append(f'jid=$(submit {shlex.quote(exp.prepare)} ${{prep[@]+"${{prep[@]}}"}})')
             lines.append('prep=("$jid")')
             lines.append(f"record \"$jid\" {shlex.quote(exp.prepare)} prepare")
+        if exp.download and exp.download_mode == "login":
+            # Downloads run here, now; the sample jobs check that they succeeded before starting.
+            lines.append(f"run_here {shlex.quote(exp.download)}")
+            lines.append(f"record login {shlex.quote(exp.download)} download")
+        elif exp.download:
+            lines.append(f'jid=$(submit {shlex.quote(exp.download)} ${{prep[@]+"${{prep[@]}}"}})')
+            lines.append('prep=("$jid")')
+            lines.append(f"record \"$jid\" {shlex.quote(exp.download)} download")
         lines.append("jobs=()")
         if exp.samples and exp.array:
             # One array job runs every sample script; each task is recorded under the sample's name.

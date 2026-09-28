@@ -255,6 +255,10 @@ DEFAULT_MAIN = {
     "fail_fast": [True, "abort a job as soon as one of its commands fails (set -e -o pipefail)"],
     "verify_md5": [True, "verify downloaded FASTQ files against ENA's fastq_md5 column when available"],
     "download_delay": [30, "seconds to wait between consecutive downloads (be kind to ENA)"],
+    "download_mode": ["job", "where the FASTQ files are downloaded: 'job' (in each sample job), 'login' (by master.sh "
+                             "on the machine it runs on, before the samples are submitted) or 'queue' (one download job, "
+                             "see download_queue)"],
+    "download_queue": ["", "queue/partition of the download job with download_mode 'queue' (empty: qsub_queue)"],
     "array_jobs": [False, "submit the sample jobs of an experiment as one array job"],
     "max_running": [0, "run at most this many sample jobs at the same time (0 = no limit; uses an array job)"],
     "tool_check": [True, "run check_<exp>.sh first: it stops the pipeline if a tool the jobs call cannot be found"],
