@@ -197,6 +197,21 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
                         "missing shell. Fix it, then 'qmod -cj JOBID' to release, or 'qdel' and rerun."],
                        [f"qstat -j {job.job_id}", "mitopiper rerun"], {}))
 
+    # --- step environments -------------------------------------------------------
+    if _find(r"(apptainer|singularity).*(FATAL|could not open image|failed to|no such file)|"
+             r"FATAL:\s+(could not open image|while|container)", text):
+        image = step_conf.get("container", "the image")
+        add(Suggestion(f"The container of step '{step}' could not be started",
+                       [f"Check that {image} exists and is readable on the compute nodes (or that the URI can be "
+                        "pulled there), and that the 'container_runtime' setting names your cluster's program "
+                        "(apptainer or singularity)."],
+                       ["mitopiper presets show PRESET", "mitopiper rerun"], {}))
+    if _find(r"EnvironmentLocationNotFound|Could not find conda environment|environment location not found", text):
+        add(Suggestion(f"The conda environment of step '{step}' does not exist on the compute nodes",
+                       [f"Create it ({step_conf.get('conda_env', 'ENV')}), e.g. from envs/mitopiper-tools.yml, or "
+                        "fix the step's 'conda_env' field."],
+                       ["mamba env create -f envs/mitopiper-tools.yml", "mitopiper rerun"], {}))
+
     # --- environment -------------------------------------------------------------
     listed = re.findall(r"^MISSING (\S+)", text, re.MULTILINE)  # written by the tool check job
     if listed:

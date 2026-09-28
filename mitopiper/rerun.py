@@ -238,7 +238,7 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
                 jobs.download = str(path)
                 jobs.download_mode = download_mode(wf)
             elif item.kind == "check":
-                body = toolcheck.check_job_body(manifest.get("tools", {}), wf)
+                body = toolcheck.check_job_body(manifest.get("tools", {}), wf, exp_s)
                 jobs.check = str(path)
             elif item.kind == "prepare":
                 commands = [c for ref in refs.values() if ref.needs_indexing for c in index_commands(ref, wf)]

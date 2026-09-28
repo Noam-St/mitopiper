@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import posixpath
 import re
+import shlex
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -388,7 +389,8 @@ def build_sample_job(
         else:
             structure = conf.get("structure", "") or "key settings input"
             lines = [render_structure(structure, variables, lookups)]
-        job.steps.append(StepCommands(step, conf.get("description", ""), lines))
+        binds = [workspace_of(exp_dir)] + [posixpath.dirname(p) for p in (ref.refpath, ref.nuc_refpath, ref.gtfpath) if p]
+        job.steps.append(StepCommands(step, conf.get("description", ""), in_environment(conf, lines, workflow, binds)))
     return job
 
 
@@ -430,8 +432,33 @@ def build_experiment_steps(samples: list, workflow: Workflow, exp_dir: str, step
         lookups = {**dirs, **all_outputs}
         variables["command_settings"] = render_settings(workflow.settings.get(step, {}), variables, lookups, False, "")
         structure = conf.get("structure", "") or "key settings tsv_dir"
-        result.append(StepCommands(step, conf.get("description", ""), [render_structure(structure, variables, lookups)]))
+        lines = [render_structure(structure, variables, lookups)]
+        result.append(StepCommands(step, conf.get("description", ""), in_environment(conf, lines, workflow, [workspace_of(exp_dir)])))
     return result
+
+
+def workspace_of(exp_dir: str) -> str:
+    """The workspace an experiment directory (``<workspace>/output/<exp>``) belongs to."""
+    return posixpath.dirname(posixpath.dirname(str(exp_dir).rstrip("/")))
+
+
+def in_environment(conf: dict, lines: list, workflow: Workflow, binds: list) -> list:
+    """Run a step's commands in its ``container`` (Apptainer/Singularity image) or ``conda_env``.
+
+    Each command line runs as ``sh -c '<line>'`` inside the environment, so pipes and
+    redirections happen there too. The workspace and reference folders are bind-mounted.
+    """
+    image = str(conf.get("container", "") or "").strip()
+    env = str(conf.get("conda_env", "") or "").strip()
+    if not image and not env:
+        return lines
+    if image:
+        runtime = str(workflow.general("container_runtime", "apptainer") or "apptainer")
+        folders = ",".join(sorted({b for b in binds if b and b != "/"}))
+        prefix = f"{runtime} exec" + (f" --bind {folders}" if folders else "") + f" {image}"
+    else:
+        prefix = f"conda run --no-capture-output {'-p' if '/' in env else '-n'} {env}"
+    return [f"{prefix} sh -c {shlex.quote(line)}" if line.strip() else line for line in lines]
 
 
 def render_steps(steps: list, label: str, track: bool = False) -> str:

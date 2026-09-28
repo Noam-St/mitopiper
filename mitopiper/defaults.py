@@ -22,6 +22,8 @@ scope        ``sample`` (one job per sample, default) or ``experiment``
 threads      optional: threads this step needs (``_threads`` in its settings)
 memory       optional: memory this step needs, e.g. ``32G``
 walltime     optional: run time this step needs, e.g. ``04:00:00``
+container    optional: Apptainer/Singularity image the step runs in (``.sif`` path or URI)
+conda_env    optional: conda environment the step runs in (name, or path containing ``/``)
              (a job asks for the largest threads/memory and the sum of the
              run times of its steps, and never less than the general settings)
 """
@@ -261,6 +263,7 @@ DEFAULT_MAIN = {
     "download_queue": ["", "queue/partition of the download job with download_mode 'queue' (empty: qsub_queue)"],
     "array_jobs": [False, "submit the sample jobs of an experiment as one array job"],
     "max_running": [0, "run at most this many sample jobs at the same time (0 = no limit; uses an array job)"],
+    "container_runtime": ["apptainer", "program that runs step containers ('apptainer' or 'singularity')"],
     "tool_check": [True, "run check_<exp>.sh first: it stops the pipeline if a tool the jobs call cannot be found"],
 }
 

@@ -213,6 +213,8 @@ class Menus:
             "threads": "Threads this step needs (empty: the general setting); available as _threads in its settings",
             "memory": "Memory this step needs, e.g. 32G (empty: the general setting)",
             "walltime": "Run time this step needs, e.g. 04:00:00 (empty: no extra)",
+            "container": "Apptainer/Singularity image to run the step in, e.g. /images/star.sif or docker://... (optional)",
+            "conda_env": "Conda environment to run the step in, name or path (optional)",
         }
         name = ask("Name of the new step (must be unique)", input_fn=self.input).replace(" ", "_")
         if not name or name in self.wf.pipeline:

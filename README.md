@@ -45,6 +45,7 @@ mitochondrial reference genome from NCBI.
 - [Rerunning failed samples](#rerunning-failed-samples)
 - [Workflows (presets)](#workflows-presets)
 - [References](#references)
+- [Reproducibility](#reproducibility)
 - [Troubleshooting](#troubleshooting)
 - [Upgrading from `maker.py`](#upgrading-from-makerpy) (updating an existing clone with its configs)
 
@@ -654,6 +655,29 @@ Unnamed lists (`.bai;.csi`) are named `0`, `1`, …. The forms also work embedde
 Set a step's `scope` to `experiment` to run it once, after all sample jobs have finished. Such steps
 can also use `samples` (all sample stems) and `outputs_<step>` (the outputs of `<step>` for every
 sample). Example: enable the bundled `multiqc` step.
+
+## Reproducibility
+
+* **Provenance.** Every build writes `output/<exp>/mitopiper_manifest.json`: the mitopiper version,
+  the full workflow, the references with their accessions, and the samples. Reruns add
+  `manifests/rerun_<time>.json`.
+* **Tool versions.** The tool-check job runs first, on the compute nodes. It writes
+  `output/<exp>/tool_versions.tsv` with the path and reported version of every tool the pipeline
+  calls, ready for a methods section.
+* **Pinned tools.** `envs/mitopiper-tools.yml` pins the tools of the bundled workflows (bioconda /
+  conda-forge): `mamba env create -f envs/mitopiper-tools.yml`.
+* **Per-step environments.** A step can run in its own `container` (an Apptainer/Singularity image,
+  a `.sif` path or URI; the runtime is the general setting `container_runtime`) or `conda_env`:
+
+  ```json
+  "STAR-alignment": { "container": "/images/star_2.7.11b.sif", ... },
+  "fastqc": { "conda_env": "mitopiper-tools", ... }
+  ```
+
+  Each command of the step runs as `sh -c '<command>'` inside that environment, and the workspace and
+  reference folders are bind-mounted. The tool check then looks for the container runtime instead of
+  the tools inside the image. Versions of containerised tools are defined by the image, which is
+  recorded in the manifest.
 
 ## References
 

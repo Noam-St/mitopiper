@@ -295,7 +295,7 @@ def build_experiment(
         return str(path)
 
     if check_name:
-        jobs.check = write(check_name, "check", toolcheck.check_job_body(tools, workflow), check_resources(resources))
+        jobs.check = write(check_name, "check", toolcheck.check_job_body(tools, workflow, exp), check_resources(resources))
     if prep_name:
         steps_ = [StepCommands("prepare_references", "Index the automatically downloaded references", prep_lines)]
         jobs.prepare = write(prep_name, "prepare", jobscript.body(steps_, exp_dir.name, workflow))

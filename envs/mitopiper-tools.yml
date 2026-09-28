@@ -1,0 +1,27 @@
+# Tools used by the bundled mitopiper workflows, pinned for reproducibility.
+#
+#   mamba env create -f envs/mitopiper-tools.yml
+#   conda activate mitopiper-tools
+#   pip install .                      # mitopiper itself, from the repository
+#
+# Then either submit from this environment (jobs inherit it) or add
+# `conda activate mitopiper-tools` to the general setting `free_form`, or set
+# a step's `conda_env` to `mitopiper-tools`.
+name: mitopiper-tools
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - tabulate
+  - wget
+  - pigz
+  - trim-galore=0.6.10
+  - cutadapt=4.9
+  - fastqc=0.12.1
+  - bwa=0.7.18
+  - samtools=1.21
+  - star=2.7.11b
+  - htseq=2.0.5
+  - subread=2.0.6
+  - multiqc=1.25.1

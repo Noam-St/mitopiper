@@ -2,7 +2,6 @@ import io
 import os
 import subprocess
 
-import pytest
 
 from mitopiper import monitor as mon
 from mitopiper.cli import main

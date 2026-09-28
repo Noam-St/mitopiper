@@ -134,28 +134,52 @@ def merge(*tool_maps: dict) -> dict:
 
 
 # ---------------------------------------------------------------- job script
-def lookup_script(tools: dict) -> str:
+#: Prints the first line with a version number that ``$1 --version`` (or, for tools such as bwa
+#: that only show it in their usage text, ``$1`` alone) writes. No input, time-limited.
+_VERSION_OF = ('v() { t=""; command -v timeout >/dev/null 2>&1 && t="timeout 20"; '
+               '{ $t "$1" --version </dev/null 2>&1 || $t "$1" </dev/null 2>&1; } '
+               "| grep -m1 -E '[0-9]+\\.[0-9]+' | tr '\\t' ' '; }")
+
+
+def lookup_script(tools: dict, versions_file: Optional[str] = None) -> str:
     """A POSIX ``sh`` script that prints ``MISSING <tool> (used by: ...)`` on stderr for every
-    tool it cannot find and exits with status 1 if any is missing."""
+    tool it cannot find and exits with status 1 if any is missing.
+
+    With ``versions_file``, the path and reported version of every tool found are written
+    to it as ``tool<TAB>path<TAB>version`` lines (for methods sections and provenance).
+    """
     lines = ['m=""']
+    if versions_file:
+        quoted_file = shlex.quote(versions_file)
+        lines += [_VERSION_OF, f"printf 'tool\\tpath\\tversion\\n' > {quoted_file}"]
     for tool, steps in tools.items():
         quoted = shlex.quote(tool)
-        lines.append(f'command -v {quoted} >/dev/null 2>&1 || {{ echo "MISSING {tool} (used by: {", ".join(steps)})" >&2; m="$m {tool}"; }}')
+        found = ""
+        if versions_file:
+            found = (f' && printf "%s\\t%s\\t%s\\n" {quoted} "$(command -v {quoted})" "$(v {quoted})" '
+                     f">> {quoted_file}")
+        lines.append(f'{{ command -v {quoted} >/dev/null 2>&1{found}; }} || '
+                     f'{{ echo "MISSING {tool} (used by: {", ".join(steps)})" >&2; m="$m {tool}"; }}')
     lines.append('if [ -n "$m" ]; then echo "[mitopiper] not found:$m - load or install them (general setting free_form), then rerun" >&2; exit 1; fi')
     lines.append(f'echo "[mitopiper] all {len(tools)} tools found"')
     return "; ".join(lines)
 
 
-def lookup_command(tools: dict) -> str:
+def lookup_command(tools: dict, versions_file: Optional[str] = None) -> str:
     """:func:`lookup_script` as one command line that works in every job shell."""
-    return "sh -c " + shlex.quote(lookup_script(tools))
+    return "sh -c " + shlex.quote(lookup_script(tools, versions_file))
 
 
-def check_job_body(tools: dict, workflow: Workflow) -> str:
-    """Body of ``check_<exp>.sh``: report every missing tool, fail if any is missing."""
+VERSIONS_FILE = "tool_versions.tsv"
+
+
+def check_job_body(tools: dict, workflow: Workflow, exp_dir: Optional[str] = None) -> str:
+    """Body of ``check_<exp>.sh``: report every missing tool, fail if any is missing, and record
+    the versions of the tools found in ``<exp>/tool_versions.tsv``."""
     from .builder import StepCommands
 
-    step = StepCommands("check_tools", "check that the tools of the pipeline can be found", [lookup_command(tools)])
+    versions = f"{exp_dir}/{VERSIONS_FILE}" if exp_dir else None
+    step = StepCommands("check_tools", "check that the tools of the pipeline can be found", [lookup_command(tools, versions)])
     return jobscript.body([step], "this build", workflow)
 
 

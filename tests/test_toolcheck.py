@@ -159,3 +159,74 @@ def test_interactive_preflight_adds_a_setup_line_and_rebuilds(tmp_path):
     assert run_interactive(ws, lambda prompt="": next(answers)) == 0
     assert f'export PATH="{tmp_path}/bin:$PATH"' in (ws.output_dir / "exp" / "scripts" / "s_a_0.sh").read_text()
     assert f"{tmp_path}/bin" in ws.load_workflow("current").general("free_form")
+
+
+def test_tool_versions_are_recorded(tmp_path, monkeypatch):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "samtools").write_text('#!/bin/sh\n[ "$1" = --version ] && { echo "samtools 1.21"; echo "Using htslib 1.21"; exit 0; }\nexit 1\n')
+    (bin_dir / "bwa").write_text('#!/bin/sh\nif [ $# -eq 0 ]; then echo "Program: bwa"; echo "Version: 0.7.18-r1243"; exit 1; fi\n'
+                                 'echo "[main] unrecognized command $1" >&2; exit 1\n')
+    for tool in ("samtools", "bwa"):
+        (bin_dir / tool).chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:" + os.environ["PATH"])
+    versions = tmp_path / "tool_versions.tsv"
+    script = toolcheck.lookup_script({"samtools": ["view"], "bwa": ["bwa-align"], "gzip": ["wget"]}, str(versions))
+    assert subprocess.run(["sh", "-c", script], capture_output=True, text=True).returncode == 0
+    rows = {line.split("\t")[0]: line.split("\t") for line in versions.read_text().splitlines()[1:]}
+    assert rows["samtools"][1] == str(bin_dir / "samtools") and rows["samtools"][2] == "samtools 1.21"
+    assert rows["bwa"][2] == "Version: 0.7.18-r1243"
+    assert rows["gzip"][2].strip()                                      # the system gzip reports some version
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_check_job_writes_tool_versions(tmp_path, shell):
+    ws = workspace(tmp_path, shell)
+    fake_tool(tmp_path / "bin", "mytool")
+    wf = ws.load_workflow("t")
+    wf.set_general("free_form", f"setenv PATH {tmp_path}/bin:$PATH" if shell == "tcsh" else f'export PATH="{tmp_path}/bin:$PATH"')
+    ws.write_workflow(wf, "t")
+    assert main(["-w", str(ws.root), "build", "--no-check", str(tmp_path / "exp.tsv"), "-s", "local", "-p", "t"]) == 0
+    subprocess.run(["bash", str(ws.root / "master.sh")], check=True, capture_output=True)
+    table = (ws.output_dir / "exp" / "tool_versions.tsv").read_text().splitlines()
+    assert table[0] == "tool\tpath\tversion" and any(line.startswith(f"mytool\t{tmp_path}/bin/mytool") for line in table)
+
+
+def test_steps_run_in_their_container_or_conda_env(tmp_path, monkeypatch):
+    from mitopiper.builder import in_environment
+
+    wf = Workflow.default()
+    conf = {"container": "/images/star.sif"}
+    (line,) = in_environment(conf, ["STAR --genomeDir /r | samtools sort -o /o/x.bam -"], wf, ["/w", "/r", "/w"])
+    assert line == "apptainer exec --bind /r,/w /images/star.sif sh -c 'STAR --genomeDir /r | samtools sort -o /o/x.bam -'"
+    assert in_environment({"conda_env": "rnaseq"}, ["fastqc x"], wf, [])[0].startswith("conda run --no-capture-output -n rnaseq sh -c")
+    assert in_environment({"conda_env": "/envs/r"}, ["fastqc x"], wf, [])[0].startswith("conda run --no-capture-output -p /envs/r")
+    assert in_environment({}, ["fastqc x"], wf, []) == ["fastqc x"]
+    # a whole job: the step runs through the (fake) container runtime, and only the runtime is a required tool
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "apptainer").write_text('#!/bin/sh\necho "$@" >> "$FAKE_LOG"\nshift; [ "$1" = --bind ] && shift 2; shift\nexec "$@"\n')
+    (bin_dir / "apptainer").chmod(0o755)
+    fake_tool(tmp_path / "inside", "mytool")                 # only "inside the container"
+    monkeypatch.setenv("FAKE_LOG", str(tmp_path / "apptainer.log"))
+    monkeypatch.setenv("PATH", f"{bin_dir}:" + os.environ["PATH"])
+    ws = workspace(tmp_path)
+    wf = ws.load_workflow("t")
+    wf.pipeline["count"]["container"] = "/images/tools.sif"
+    wf.pipeline["count"]["structure"] = f"PATH={tmp_path}/inside:$PATH key input output_pipe"
+    ws.write_workflow(wf, "t")
+    assert main(["-w", str(ws.root), "build", str(tmp_path / "exp.tsv"), "-s", "local", "-p", "t"]) == 0
+    tools = __import__("json").loads((ws.output_dir / "exp" / "mitopiper_manifest.json").read_text())["tools"]
+    assert "apptainer" in tools and "mytool" not in tools
+    subprocess.run(["bash", str(ws.root / "master.sh")], check=True, capture_output=True)
+    states = {j.name: j.state for j in mon.collect(ws, ["exp"], mon.ErrorScanner(), lambda s, i: None)}
+    assert states["s_a_0"] == mon.DONE
+    log = (tmp_path / "apptainer.log").read_text()
+    assert "exec --bind" in log and str(ws.root) in log and "/images/tools.sif sh -c" in log
+
+
+def test_container_failures_are_diagnosed():
+    job = mon.JobStatus("E", "s_a_0", state=mon.FAILED, exit_code=255, step="count",
+                        errors=[mon.ErrorLine(1, "FATAL:   could not open image /images/tools.sif: failed to retrieve path")])
+    (sug, *_) = diagnose(job, Context(pipeline={"count": {"container": "/images/tools.sif"}}))
+    assert "container of step 'count'" in sug.cause and "/images/tools.sif" in sug.advice[0]
