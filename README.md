@@ -566,6 +566,22 @@ of the active steps), `qsub_memory`, `walltime` (SLURM `--time`, SGE `-l h_rt`, 
 `module load samtools`). Also: `fail_fast` (`set -eo pipefail`), `verify_md5`, `download_delay`,
 `ignore_paired_end`, and `tool_check` (write and run the `check_<exp>.sh` job).
 
+### Array jobs and a limit on running jobs
+Set the general setting `max_running` to run at most that many samples at the same time, or set
+`array_jobs` to `true` for an array job without a limit. The sample jobs of an experiment are then
+submitted as **one array job**, not one job per sample:
+
+| Scheduler | Directive |
+| --- | --- |
+| SLURM | `--array=1-N%M` |
+| SGE | `-t 1-N -tc M` |
+| LSF | `-J "name[1-N]%M"` |
+
+Each task runs one sample's script, so status tracking, logs, the monitor, the diagnosis and `rerun`
+still work per sample. The experiment-level job waits for the whole array. Many clusters limit how
+many jobs one user may queue, so this is the recommended mode for large projects. (The `local`
+scheduler always runs jobs one after another.)
+
 ### Resources per step
 A step can declare what it needs with the optional fields `threads`, `memory` and `walltime` in
 `pipeline.json` (or in *modify a pipeline step*):

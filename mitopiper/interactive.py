@@ -583,7 +583,12 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input, session_fa
     if scheduler == "local":
         print("NOTE: the 'local' scheduler runs the jobs one after another on this machine.")
     else:
-        print("IMPORTANT: every sample is submitted at once - make sure your cluster allows that many jobs!")
+        limit = int(workflow.general("max_running", 0) or 0) if str(workflow.general("max_running", 0)).isdigit() else 0
+        if limit:
+            print(f"The samples run as one array job, at most {limit} at a time (general setting max_running).")
+        else:
+            print("IMPORTANT: every sample is submitted at once. To limit how many run at the same time, set the "
+                  "general setting max_running.")
     if not yes_no("Launch the jobs now and follow them in the monitor?", True, input_fn):
         print(f"Submit later with 'bash {master}', then follow the jobs with 'mitopiper monitor -i'.")
         return 0

@@ -9,7 +9,7 @@ import os
 import platform
 import shutil
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -299,6 +299,10 @@ def build_experiment(
     for job in runnable:
         body = f'echo "Current organism: {job.sample.organism}"\n\n' + jobscript.body(job.steps, job.sample.name, workflow)
         jobs.samples.append(write(job.job_name, "sample", body, job_resources(workflow, [s.step for s in job.steps])))
+    if jobs.samples and uses_array(workflow, scheduler):
+        steps_used = list(dict.fromkeys(s.step for job in runnable for s in job.steps))
+        jobs.array = write_array(scripts_dir, exp_dir.name, exp, jobs.samples, workflow, scheduler,
+                                 job_resources(workflow, steps_used))
     if experiment_steps:
         jobs.experiment = write(job_name("experiment", exp_dir.name), "experiment",
                                 jobscript.body(experiment_steps, exp_dir.name, workflow),
@@ -306,6 +310,41 @@ def build_experiment(
 
     write_manifest(exp_dir, workflow, options, samples, refs, plan)
     return ExperimentResult(exp_dir.name, exp_dir, samples, skipped, jobs, plan, tools)
+
+
+def uses_array(workflow: Workflow, scheduler: str) -> bool:
+    """Whether sample jobs are submitted as one array job (never with the local scheduler)."""
+    try:
+        limit = int(workflow.general("max_running", 0) or 0)
+    except (TypeError, ValueError):
+        limit = 0
+    return scheduler != "local" and (workflow.flag("array_jobs", False) or limit > 0)
+
+
+def write_array(scripts_dir: Path, experiment: str, exp: str, sample_scripts: list, workflow: Workflow,
+                scheduler: str, resources: JobResources) -> str:
+    """Array job ``a_<exp>.array`` whose task *i* runs the *i*-th sample script of ``a_<exp>.list``.
+
+    Each sample script keeps its own status tracking and log files, so the monitor, diagnosis and
+    rerun work per sample as before.
+    """
+    try:
+        limit = max(0, int(workflow.general("max_running", 0) or 0))
+    except (TypeError, ValueError):
+        limit = 0
+    name = f"a_{experiment}"
+    listing = scripts_dir / f"{name}.list"
+    listing.write_text("".join(f"{s}\n" for s in sample_scripts), encoding="utf-8")
+    shell = str(workflow.general("environment", "bash") or "bash")
+    body = (
+        'task="${SLURM_ARRAY_TASK_ID:-${SGE_TASK_ID:-${LSB_JOBINDEX:-}}}"\n'
+        f'script=$(sed -n "${{task}}p" "{listing}")\n'
+        'name=$(basename "$script" .sh)\n'
+        f'exec /bin/{shell} "$script" > "{exp}/stdout/$name.out" 2> "{exp}/stderr/$name.err"\n'
+    )
+    path = scripts_dir / f"{name}.array"
+    _write_script(path, header(scheduler, name, exp, replace(resources, shell="bash"), (len(sample_scripts), limit)) + body)
+    return str(path)
 
 
 def tool_check_enabled(workflow: Workflow) -> bool:

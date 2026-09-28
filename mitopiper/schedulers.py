@@ -76,14 +76,23 @@ def _lsf_time(seconds: int) -> str:
     return f"{minutes // 60}:{minutes % 60:02d}"
 
 
-def header(scheduler: str, job_name: str, log_dir: str, res: JobResources) -> str:
-    """Shebang + scheduler directives for a job script."""
+def header(scheduler: str, job_name: str, log_dir: str, res: JobResources, array: Optional[tuple] = None) -> str:
+    """Shebang + scheduler directives for a job script.
+
+    ``array=(tasks, max_running)`` makes it an array job of ``tasks`` tasks, at
+    most ``max_running`` of them at a time (0 = no limit).
+    """
     shell = res.shell or "bash"
     lines = [f"#!/bin/{shell}"]
+    tasks, limit = array if array else (0, 0)
     out = f"{log_dir}/stdout"
     err = f"{log_dir}/stderr"
     if scheduler == "sge":
         lines += [f"#$ -o {out}", f"#$ -e {err}", "#$ -cwd", f"#$ -N {job_name}"]
+        if tasks:
+            lines.append(f"#$ -t 1-{tasks}")
+            if limit:
+                lines.append(f"#$ -tc {limit}")
         if res.queue:
             lines.append(f"#$ -q {res.queue}")
         lines += [f"#$ -S /bin/{shell}", "#$ -V", f"#$ -pe {res.parallel_env or 'shared'} {res.threads}"]
@@ -99,6 +108,8 @@ def header(scheduler: str, job_name: str, log_dir: str, res: JobResources) -> st
             f"#SBATCH --output={out}/%x_%j.out",
             f"#SBATCH --error={err}/%x_%j.err",
         ]
+        if tasks:
+            lines.append(f"#SBATCH --array=1-{tasks}" + (f"%{limit}" if limit else ""))
         if res.queue:
             lines.append(f"#SBATCH --partition={res.queue}")
         lines.append(f"#SBATCH --cpus-per-task={res.threads}")
@@ -109,7 +120,8 @@ def header(scheduler: str, job_name: str, log_dir: str, res: JobResources) -> st
         if res.account:
             lines.append(f"#SBATCH --account={res.account}")
     elif scheduler == "lsf":
-        lines += [f"#BSUB -o {out}/%J.out", f"#BSUB -e {err}/%J.err", f"#BSUB -J {job_name}"]
+        name = f'"{job_name}[1-{tasks}]' + (f"%{limit}" if limit else "") + '"' if tasks else job_name
+        lines += [f"#BSUB -o {out}/%J.out", f"#BSUB -e {err}/%J.err", f"#BSUB -J {name}"]
         if res.account:
             lines.append(f"#BSUB -P {res.account}")
         if res.queue:
@@ -194,6 +206,7 @@ class ExperimentJobs:
     experiment: Optional[str]
     directory: str = ""
     check: Optional[str] = None      # tool check, submitted before everything else
+    array: Optional[str] = None      # array job running the sample scripts (instead of one job each)
 
     def scripts(self) -> list:
         """Every script of the experiment, in stage order."""
@@ -268,7 +281,16 @@ def master_script(scheduler: str, experiments: list, delay: float = 0.5, shell: 
             lines.append('prep=("$jid")')
             lines.append(f"record \"$jid\" {shlex.quote(exp.prepare)} prepare")
         lines.append("jobs=()")
-        if exp.samples:
+        if exp.samples and exp.array:
+            # One array job runs every sample script; each task is recorded under the sample's name.
+            lines.append(f'jid=$(submit {shlex.quote(exp.array)} ${{prep[@]+"${{prep[@]}}"}})')
+            lines.append('jobs=("$jid")')
+            lines.append("task=0")
+            lines.append(f"for script in {' '.join(shlex.quote(s) for s in exp.samples)}; do")
+            lines.append('    task=$((task + 1))')
+            lines.append('    record "${jid}_${task}" "$script" sample')
+            lines.append("done")
+        elif exp.samples:
             quoted = " ".join(shlex.quote(s) for s in exp.samples)
             lines.append(f"for script in {quoted}; do")
             lines.append('    jid=$(submit "$script" ${prep[@]+"${prep[@]}"})')
@@ -283,7 +305,8 @@ def master_script(scheduler: str, experiments: list, delay: float = 0.5, shell: 
             lines.append(f"jid=$(submit {shlex.quote(exp.experiment)} ${{jobs[@]+\"${{jobs[@]}}\"}})")
             lines.append(f"record \"$jid\" {shlex.quote(exp.experiment)} experiment")
         lines.append('rm -f "$marker"')
-        lines.append(f'echo "Submitted {exp.name}: ${{#jobs[@]}} sample job(s)"')
+        count = f"{len(exp.samples)} sample job(s) in one array job" if exp.array else "${#jobs[@]} sample job(s)"
+        lines.append(f'echo "Submitted {exp.name}: {count}"')
         lines.append("")
     lines.append('echo "Follow the jobs with: mitopiper monitor -i   (or, from the mitopiper folder: python monitor.py -i)"')
     return "\n".join(lines) + "\n"

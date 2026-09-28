@@ -25,7 +25,9 @@ from pathlib import Path
 from typing import Optional
 
 from . import jobscript, toolcheck
-from .build import BuildError, _write_script, find_experiment_metadata, job_resources, load_manifest
+from .build import (
+    BuildError, _write_script, find_experiment_metadata, job_resources, load_manifest, uses_array, write_array,
+)
 from .builder import StepCommands, _join, build_experiment_steps, build_sample_job, output_paths, step_scope
 from .config import Workflow, Workspace
 from .diagnose import Context, diagnose, merged_rerun_options
@@ -228,6 +230,9 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
             content += jobscript.preamble(wf, exp_s, item.name, waits[item.kind]) + body
             _write_script(path, content)
             item.script = str(path)
+        if jobs.samples and uses_array(base, scheduler):
+            sample_steps = [s for s in steps if step_scope(base, s) == "sample"]
+            jobs.array = write_array(scripts, exp, exp_s, jobs.samples, base, scheduler, job_resources(base, sample_steps))
         experiments.append(jobs)
         record = {"created": _dt.datetime.now().astimezone().isoformat(timespec="seconds"),
                   "jobs": [{"name": i.name, "start_step": i.start_step, "overrides": i.overrides, "clean": i.clean}

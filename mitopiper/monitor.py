@@ -190,7 +190,8 @@ def query_scheduler(scheduler: str, job_ids: list, runner: Callable = _run) -> O
     when the scheduler cannot be queried (not installed, not on a login node).
     A job missing from the result is no longer known to the scheduler.
     """
-    ids = [j for j in job_ids if j and j.isdigit()]
+    # Array tasks are recorded as "<array id>_<task>"; the scheduler is asked about the array id.
+    ids = sorted({j.split("_")[0] for j in job_ids if j and re.fullmatch(r"\d+(_\d+)?", j)})
     if not ids or scheduler == "local":
         return None
     found = {}
@@ -201,7 +202,9 @@ def query_scheduler(scheduler: str, job_ids: list, runner: Callable = _run) -> O
                 parts = line.split("|")
                 if len(parts) >= 2:
                     raw = parts[1].split()[0] if parts[1] else ""
-                    found[parts[0].split("_")[0]] = (_SLURM_ACTIVE.get(raw) or _SLURM_FINAL.get(raw) or UNKNOWN, raw)
+                    state = (_SLURM_ACTIVE.get(raw) or _SLURM_FINAL.get(raw) or UNKNOWN, raw)
+                    # Pending array tasks are listed as a range ("123_[4-10%2]"): stand for all of them.
+                    found[re.sub(r"_\[.*$", "_*", parts[0])] = state
             return found
         out = runner(["squeue", "-h", "-j", ",".join(ids), "-o", "%i|%T"])
         if out is None:
@@ -233,6 +236,14 @@ def query_scheduler(scheduler: str, job_ids: list, runner: Callable = _run) -> O
                 found[parts[0].strip()] = (_LSF.get(raw, UNKNOWN), raw)
         return found
     return None
+
+
+def task_state(info: dict, job_id: str) -> Optional[tuple]:
+    """Scheduler state of a job or array task ("<array id>_<task>"), falling back to the array's state."""
+    if job_id in info:
+        return info[job_id]
+    base = job_id.split("_")[0]
+    return info.get(f"{base}_*") or (info.get(base) if base != job_id else None)
 
 
 # --------------------------------------------------------------- errors
@@ -365,7 +376,7 @@ def collect(workspace: Workspace, experiments: list, scanner: ErrorScanner,
             elif submitting:
                 job.state, job.scheduler_state = PENDING, "waiting for master.sh"
             status = read_status_file(exp_dir, name)
-            sched = scheduler_info.get(job.job_id) if scheduler_info else None
+            sched = task_state(scheduler_info, job.job_id) if scheduler_info else None
             if sched:
                 job.scheduler_state = sched[1]
             if status:
