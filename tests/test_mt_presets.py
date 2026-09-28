@@ -31,7 +31,7 @@ case "$cmd" in
   fastq) echo "@r"; echo "ACGT"; echo "+"; echo "IIII" ;;
   sort)  out=""; in="-"; while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift;; *) in=$1;; esac; shift; done
          if [ "$in" = - ]; then cat > "$out"; else cp "$in" "$out"; fi ;;
-  view)  out=""; while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift;; esac; shift; done
+  view)  out=""; while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift;; -) cat > /dev/null;; esac; shift; done
          if [ -n "$out" ]; then echo bam > "$out"; else echo bam; fi ;;
   mpileup) ref=""; while [ $# -gt 0 ]; do case "$1" in -f) ref=$2; shift;; esac; shift; done
          depth=1; case "$ref" in *rotated*) depth=2;; esac
