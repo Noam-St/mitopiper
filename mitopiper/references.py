@@ -591,10 +591,33 @@ def numt_reference_commands(ref: ReferenceSet, paths: dict, workflow, csh: bool)
 
 def prepare_commands(ref: ReferenceSet, organism: str, workspace_dir: str, workflow, csh: Optional[bool] = None,
                      steps: Optional[list] = None) -> list:
-    """Everything the reference job does for one organism: downloads and indices of references
-    mitopiper manages, and the derived (rotated, nuclear + mtDNA) references the steps use."""
-    base = index_commands(ref, workflow, csh) if ref.needs_indexing else []
+    """Everything the reference job does for one organism: downloads, the missing indices of the
+    reference, and the derived (rotated, nuclear + mtDNA, NUMT) references the steps use."""
+    if ref.needs_indexing:
+        base = index_commands(ref, workflow, csh)
+    else:
+        base = missing_index_commands(ref, workflow, csh)
     return base + derived_commands(ref, organism, workspace_dir, workflow, csh, steps)
+
+
+def missing_index_commands(ref: ReferenceSet, workflow, csh: Optional[bool] = None) -> list:
+    """Indices that the steps need but a reference you added lacks, when its FASTA is on this machine
+    (instead of every sample job failing). References built elsewhere are left to you."""
+    if not ref.refpath or not Path(ref.refpath).is_file():
+        return []
+    if csh is None:
+        from .jobscript import family, shell_of
+
+        csh = family(shell_of(workflow)) == "csh"
+    return [cmd for cmd in _fasta_index_commands(ref.refpath, workflow, csh, star=True)
+            if not _index_present(cmd)]
+
+
+def _index_present(command: str) -> bool:
+    """Whether the file an :func:`_unless_exists` command guards exists (and is not empty)."""
+    match = re.search(r'-s "([^"]+)"|! -e "([^"]+)"', command)
+    path = Path(next(g for g in match.groups() if g)) if match else None
+    return bool(path and path.exists() and path.stat().st_size > 0)
 
 
 def index_commands(ref: ReferenceSet, workflow, csh: Optional[bool] = None) -> list:

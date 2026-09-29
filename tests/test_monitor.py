@@ -153,3 +153,11 @@ def test_jobs_not_yet_submitted_by_a_running_master_are_pending(tmp_path):
     (exp / ".submitting").write_text("")
     jobs = {j.name: j for j in mon.collect(ws, ["E"], mon.ErrorScanner(), lambda s, i: None)}
     assert jobs["s_e_4"].state == mon.PENDING and jobs["s_e_4"].scheduler_state == "waiting for master.sh"
+
+
+def test_cutadapt_reports_are_not_errors(tmp_path):
+    log = tmp_path / "s.err"
+    log.write_text("Maximum trimming error rate: 0.1 (default)\nNo. of allowed errors:\n"
+                   "length\tcount\texpect\tmax.err\terror counts\ncutadapt: error: unrecognized arguments\n")
+    count, errors = mon.ErrorScanner().scan(log)
+    assert count == 1 and "unrecognized" in errors[0].text

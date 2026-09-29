@@ -220,3 +220,19 @@ def test_rnaseq_expression_commands(tmp_path):
     assert counts.endswith("S1_0_HSAligned.sortedByCoord.out.bam")
     se_counts = {s.step: s.lines for s in build_sample_job(se, wf, str(tmp_path / "ws/output/E"), ref).steps}["featureCounts"][0]
     assert "--countReadPairs" not in se_counts
+
+
+def test_references_you_add_get_their_missing_indices(tmp_path):
+    from mitopiper.references import prepare_commands
+
+    ws = Workspace(tmp_path / "ws")
+    ws.initialise()
+    wf = ws.load_workflow("mt-variants")
+    fasta = tmp_path / "mt.fa"
+    fasta.write_text(">m\nACGT\n")
+    (tmp_path / "mt.fa.fai").write_text("m\t4\t3\t4\t5\n")                       # already there
+    commands = prepare_commands(ReferenceSet(refpath=str(fasta)), "Homo_sapiens", str(ws.root), wf, csh=False,
+                                steps=["bwa-align"])
+    assert commands == [f'if [ ! -s "{fasta}.bwt" ]; then bwa index "{fasta}"; fi']
+    elsewhere = ReferenceSet(refpath="/cluster/only/mt.fa")                       # not on this machine: left to you
+    assert prepare_commands(elsewhere, "Homo_sapiens", str(ws.root), wf, csh=False, steps=["bwa-align"]) == []

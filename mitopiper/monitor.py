@@ -50,6 +50,8 @@ DEFAULT_ERROR_PATTERNS = (
 # Lines that match an error pattern but are known to be harmless.
 DEFAULT_IGNORE_PATTERNS = (
     r"\b0 errors?\b", r"errors?:\s*0\b", r"no errors?\b", r"--error", r"ignore_errors",
+    # cutadapt / Trim Galore reports
+    r"max\.err\s+error counts", r"trimming error rate", r"no\. of allowed errors",
 )
 
 _SCRIPT_PREFIX = re.compile(r"^\S+\.sh: line (\d+): ")
