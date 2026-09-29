@@ -245,12 +245,17 @@ def substitute(text: str, variables: dict) -> str:
     return _EMBEDDED.sub(lambda m: str(variables[m.group(1)]) if m.group(1) in variables else m.group(0), text)
 
 
+def is_placeholder(value) -> bool:
+    """``_name`` of a known placeholder (e.g. ``_gtf``)."""
+    return isinstance(value, str) and value.startswith("_") and value[1:] in PLACEHOLDERS
+
+
 def resolve_setting_value(value, variables: dict, lookups: dict):
     if not isinstance(value, str):
         return value
     if value in ("fasta", "fasta_nuc"):
         return variables[value]
-    if value.startswith("_") and value[1:] in PLACEHOLDERS and value[1:] in variables:
+    if is_placeholder(value) and value[1:] in variables:
         return variables[value[1:]]
     if value in lookups:
         return lookups[value]
@@ -271,7 +276,7 @@ def render_settings(params: dict, variables: dict, lookups: dict, paired: bool, 
         else:
             resolved = resolve_setting_value(value, variables, lookups)
             # an optional input the reference does not have (e.g. `--annotation _gtf` without a GTF): leave it out
-            if resolved == "" and isinstance(value, str) and value.startswith("_") and value[1:] in PLACEHOLDERS:
+            if resolved == "" and is_placeholder(value):
                 switch = False
             value = resolved
         if "output_file" in name and value != "":

@@ -24,6 +24,7 @@ It needs Python 3 only, and takes a few seconds::
 
 import argparse
 import gzip
+import io
 import random
 from pathlib import Path
 
@@ -56,6 +57,11 @@ def mutate(rng: random.Random, seq: str, rate: float) -> tuple:
         bases[i] = rng.choice([b for b in "ACGT" if b != bases[i]])
         changed.append(i)
     return "".join(bases), sorted(changed)
+
+
+def gzip_text(path: Path):
+    """A gzip text file without a timestamp in its header, so every run gives identical files."""
+    return io.TextIOWrapper(gzip.GzipFile(path, "wb", mtime=0), encoding="ascii")
 
 
 def write_fasta(path: Path, records: list) -> None:
@@ -128,14 +134,12 @@ def main(argv=None) -> None:
             haplotypes = [(w, s) for w, s in new if w > 0]
         for i in numt_diffs:
             truth.append((sample, numt_start + i + 1, mt[numt_start + i], numt[i], "", "numt"))
-        with gzip.open(out / "fastq" / f"{sample}_1.fastq.gz", "wt") as r1, \
-                gzip.open(out / "fastq" / f"{sample}_2.fastq.gz", "wt") as r2:
-            n = 0
+        with gzip_text(out / "fastq" / f"{sample}_1.fastq.gz") as r1, gzip_text(out / "fastq" / f"{sample}_2.fastq.gz") as r2:
+            n, quality = 0, "I" * args.read_length
             sources = [(seq, True, round(pairs * w)) for w, seq in haplotypes] + [(numt, False, numt_pairs)]
             for template, circular, count in sources:
                 for a, b in reads(rng, template, circular, count, args.read_length, 300, args.error):
                     n += 1
-                    quality = "I" * args.read_length
                     r1.write(f"@{sample}.{n}/1\n{a}\n+\n{quality}\n")
                     r2.write(f"@{sample}.{n}/2\n{b}\n+\n{quality}\n")
     with open(out / "truth.tsv", "w") as handle:

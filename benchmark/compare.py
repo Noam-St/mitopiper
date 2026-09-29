@@ -33,6 +33,7 @@ and, with ``--truth``, ``af_truth.png``. Only the standard library is needed oth
 import argparse
 import csv
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -78,8 +79,12 @@ def write(path: Path, rows: list, columns: list) -> None:
     with open(path, "w", encoding="utf-8", newline="") as out:
         writer = csv.writer(out, delimiter="\t", lineterminator="\n")
         writer.writerow(columns)
-        writer.writerows([fmt(r.get(c, "")) for c in columns] for r in rows)
+        writer.writerows([fmt(r[c]) for c in columns] for r in rows)   # a missing column is a bug: fail loudly
     print(f"wrote {path}")
+
+
+#: the columns of the annotated tables that are used (a table has ~40 columns per mtDNA position)
+USED = ("sample", "position", "coverage", "allele_depth", "minor_af", "heteroplasmic", "alt_major")
 
 
 class Experiment:
@@ -87,7 +92,7 @@ class Experiment:
         self.label, self.dir = label, directory
         self.tables = {}
         for table in sorted((directory / "annotated").glob("*.annotated.tsv")):
-            rows = read_table(table)
+            rows = [{c: r[c] for c in USED} for r in read_table(table)]
             if rows:
                 self.tables[rows[0]["sample"]] = rows
         if not self.tables:
@@ -98,25 +103,35 @@ class Experiment:
         return {int(r["position"]): float(r["minor_af"]) for r in self.tables.get(sample, [])
                 if r["heteroplasmic"] == "yes"}
 
-    def pileup(self, sample: str, suffix: str):
-        path = self.dir / "pileup" / f"{sample}{suffix}"
+    def depths(self, sample: str, kind: str):
+        """Position -> depth of the linear pileup, or of the circular one (which the annotated table holds)."""
+        if kind == "circular":
+            return {int(r["position"]): int(r["coverage"] or 0) for r in self.tables[sample]}
+        path = self.dir / "pileup" / f"{sample}.pileup"
         return pileup_depths(path) if path.exists() else None
+
+
+ORIGIN_COLUMNS = ["experiment", "sample", "pileup", "origin_depth", "other_depth", "origin_vs_other"]
+DEPTH_COLUMNS = ["experiment", "sample", "mean_depth", "heteroplasmic_calls", "alt_major_positions"]
+CONCORDANCE_COLUMNS = ["experiment_a", "experiment_b", "sample", "shared", "only_a", "only_b", "jaccard", "af_correlation"]
+ACCURACY_COLUMNS = ["experiment", "sample", "true_positives", "false_positives", "false_negatives", "precision",
+                    "recall", "af_mean_abs_error", "false_calls_at_numt_differences", "variants_found",
+                    "variants_expected", "missed"]
 
 
 def origin_coverage(experiments, window: int) -> list:
     rows = []
     for exp in experiments:
         for sample in exp.tables:
-            for kind, suffix in (("linear", ".pileup"), ("circular", ".circular.pileup")):
-                depths = exp.pileup(sample, suffix)
+            for kind in ("linear", "circular"):
+                depths = exp.depths(sample, kind)
                 if not depths:
                     continue
                 length = max(depths)
-                near = [d for p, d in depths.items() if p <= window or p > length - window]
-                rest = [d for p, d in depths.items() if window < p <= length - window]
-                rows.append({"experiment": exp.label, "sample": sample, "pileup": kind,
-                             "origin_depth": mean(near), "other_depth": mean(rest),
-                             "origin_vs_other": mean(near) / mean(rest) if rest and mean(rest) else float("nan")})
+                near = mean(d for p, d in depths.items() if p <= window or p > length - window)
+                rest = mean(d for p, d in depths.items() if window < p <= length - window)
+                rows.append({"experiment": exp.label, "sample": sample, "pileup": kind, "origin_depth": near,
+                             "other_depth": rest, "origin_vs_other": near / rest if rest else float("nan")})
     return rows
 
 
@@ -137,10 +152,10 @@ def concordance(experiments) -> list:
         for b in experiments[i + 1:]:
             for sample in sorted(set(a.tables) & set(b.tables)):
                 ca, cb = a.calls(sample), b.calls(sample)
-                shared = sorted(set(ca) & set(cb))
-                union = set(ca) | set(cb)
+                shared = sorted(ca.keys() & cb.keys())
+                union = ca.keys() | cb.keys()
                 rows.append({"experiment_a": a.label, "experiment_b": b.label, "sample": sample,
-                             "shared": len(shared), "only_a": len(set(ca) - set(cb)), "only_b": len(set(cb) - set(ca)),
+                             "shared": len(shared), "only_a": len(ca.keys() - cb.keys()), "only_b": len(cb.keys() - ca.keys()),
                              "jaccard": len(shared) / len(union) if union else float("nan"),
                              "af_correlation": pearson([ca[p] for p in shared], [cb[p] for p in shared])})
     return rows
@@ -148,23 +163,24 @@ def concordance(experiments) -> list:
 
 def match_sample(truth_sample: str, samples) -> list:
     """mitopiper names samples <name>_<index>_<organism initials>."""
-    return [s for s in samples if s == truth_sample or s.startswith(truth_sample + "_")]
+    pattern = re.compile(rf"{re.escape(truth_sample)}(_\d+_[A-Za-z]+)?")
+    return [s for s in samples if pattern.fullmatch(s)]
 
 
 def accuracy(experiments, truth_rows) -> tuple:
+    truth = {}                               # sample -> type -> {position: allele frequency}
+    for t in truth_rows:
+        truth.setdefault(t["sample"], {}).setdefault(t["type"], {})[int(t["position"])] = float(t["af"] or "nan")
     rows, points = [], []
     for exp in experiments:
-        for truth_sample in sorted({t["sample"] for t in truth_rows}):
-            het = {int(t["position"]): float(t["af"]) for t in truth_rows
-                   if t["sample"] == truth_sample and t["type"] == "heteroplasmy"}
-            variants = {int(t["position"]) for t in truth_rows if t["sample"] == truth_sample and t["type"] == "variant"}
-            numt = {int(t["position"]) for t in truth_rows if t["sample"] == truth_sample and t["type"] == "numt"}
+        for truth_sample, kinds in sorted(truth.items()):
+            het, variants, numt = (kinds.get(k, {}) for k in ("heteroplasmy", "variant", "numt"))
             for sample in match_sample(truth_sample, exp.tables):
                 calls = exp.calls(sample)
                 table = {int(r["position"]): r for r in exp.tables[sample]}
-                tp = sorted(set(calls) & set(het))
-                fp = sorted(set(calls) - set(het))
-                fn = sorted(set(het) - set(calls))
+                tp = sorted(calls.keys() & het.keys())
+                fp = sorted(calls.keys() - het.keys())
+                fn = sorted(het.keys() - calls.keys())
                 points += [(exp.label, het[p], calls[p]) for p in tp]
                 rows.append({
                     "experiment": exp.label, "sample": sample, "true_positives": len(tp), "false_positives": len(fp),
@@ -172,7 +188,7 @@ def accuracy(experiments, truth_rows) -> tuple:
                     "precision": len(tp) / (len(tp) + len(fp)) if tp or fp else float("nan"),
                     "recall": len(tp) / len(het) if het else float("nan"),
                     "af_mean_abs_error": mean(abs(calls[p] - het[p]) for p in tp) if tp else float("nan"),
-                    "false_calls_at_numt_differences": len(set(fp) & numt),
+                    "false_calls_at_numt_differences": len(numt.keys() & set(fp)),
                     "variants_found": sum(table.get(p, {}).get("alt_major") == "yes" for p in variants),
                     "variants_expected": len(variants),
                     "missed": ",".join(map(str, fn)),
@@ -237,18 +253,14 @@ def main(argv=None) -> int:
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     origin_rows = origin_coverage(experiments, args.window)
-    write(outdir / "origin_coverage.tsv", origin_rows,
-          ["experiment", "sample", "pileup", "origin_depth", "other_depth", "origin_vs_other"])
+    write(outdir / "origin_coverage.tsv", origin_rows, ORIGIN_COLUMNS)
     depth_rows = depth_table(experiments)
-    write(outdir / "depth.tsv", depth_rows, ["experiment", "sample", "mean_depth", "heteroplasmic_calls", "alt_major_positions"])
-    write(outdir / "concordance.tsv", concordance(experiments),
-          ["experiment_a", "experiment_b", "sample", "shared", "only_a", "only_b", "jaccard", "af_correlation"])
+    write(outdir / "depth.tsv", depth_rows, DEPTH_COLUMNS)
+    write(outdir / "concordance.tsv", concordance(experiments), CONCORDANCE_COLUMNS)
     points = []
     if args.truth:
         acc_rows, points = accuracy(experiments, read_table(args.truth))
-        write(outdir / "accuracy.tsv", acc_rows,
-              ["experiment", "sample", "true_positives", "false_positives", "false_negatives", "precision", "recall",
-               "af_mean_abs_error", "false_calls_at_numt_differences", "variants_found", "variants_expected", "missed"])
+        write(outdir / "accuracy.tsv", acc_rows, ACCURACY_COLUMNS)
     figures(outdir, origin_rows, depth_rows, points)
     return 0
 

@@ -22,3 +22,6 @@ dist/
 /rerun.sh
 /master.log
 /rerun.log
+
+# Python packages downloaded by hand
+*.whl

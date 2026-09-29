@@ -38,6 +38,8 @@ import sys
 from pathlib import Path
 from typing import Iterator, Optional, TextIO
 
+from . import pileup
+
 MITO_NAMES = {"chrm", "mt", "m", "chrmt", "mito", "mitochondrion", "chrmito"}
 
 
@@ -351,18 +353,14 @@ def add_parser(sub) -> None:
                        help="cymt: reads classified as mtDNA; not-numt: also the undetermined ones")
     reads.add_argument("--pairs", choices=("all", "any"), default="all",
                        help="all: every mate must qualify; any: one qualifying mate keeps the pair")
-    from . import pileup
-
     pileup.add_parsers(msub)
     names = msub.add_parser("contigs", help="print the sequence names of a FASTA")
     names.add_argument("fasta")
 
 
 def run(args) -> int:
-    if args.action in ("annotate", "heteroplasmy"):
-        from . import pileup
-
-        return pileup.run(args)
+    if getattr(args, "mt_run", None):           # sub-commands registered by another module (pileup)
+        return args.mt_run(args)
     if args.action == "rotate":
         rotate_fasta(args.fasta, args.output, args.shift)
     elif args.action == "combine-pileups":

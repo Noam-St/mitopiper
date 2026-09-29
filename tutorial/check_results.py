@@ -12,6 +12,8 @@ import csv
 import sys
 from pathlib import Path
 
+from mitopiper.mtdna import contigs
+
 
 def rows(path):
     with open(path, encoding="utf-8") as handle:
@@ -56,7 +58,7 @@ def main(argv=None) -> int:
     found = regions[0].read_text().split() if regions else []
     check(found == ["chr2:59901-63100"], f"NUMT search finds the planted NUMT (found: {found})")
     combined = list((ws / "references" / "derived").glob("*/*.with_nuclear.fa"))
-    names = [line[1:].split()[0] for line in combined[0].open() if line.startswith(">")] if combined else []
+    names = contigs(combined[0]) if combined else []
     check(names == ["chr1", "chr2", "chr3", "synthMT"], f"nuclear + mtDNA reference leaves chrM out ({names})")
 
     print(f"\n{len(failures)} check(s) failed" if failures else "\nAll checks passed.")

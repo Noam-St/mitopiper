@@ -493,27 +493,48 @@ def _steps_running(workflow, program: str) -> list:
             if Path(str(pipeline[s].get("path") or pipeline[s].get("key", "")).split(" ")[0]).name == program]
 
 
-def _fasta_index_commands(fasta: str, workflow, csh: bool, star: bool) -> list:
-    """Guarded commands building the indices of ``fasta`` that the active steps need."""
+def _resolve_csh(workflow, csh: Optional[bool]) -> bool:
+    """``csh`` if given, else whether the job shell (``environment``) is csh/tcsh."""
+    if csh is not None:
+        return csh
+    from .jobscript import family, shell_of
+
+    return family(shell_of(workflow)) == "csh"
+
+
+def _present(path: str) -> bool:
+    """Whether ``path`` exists and is not empty (what :func:`_unless_exists` tests in the job)."""
+    try:
+        return Path(path).stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _fasta_index_commands(fasta: str, workflow, csh: bool, star: bool, skip_present: bool = False) -> list:
+    """Guarded commands building the indices of ``fasta`` that the active steps need.
+
+    With ``skip_present``, indices that already exist on this machine are left out altogether.
+    STAR's command reads the whole FASTA (for ``--genomeSAindexNbases``), so it is only built
+    when it is needed."""
     pipeline = workflow.pipeline
     bwa_steps = _steps_running(workflow, "bwa")
     star_steps = _steps_running(workflow, "STAR")
-    commands = []
+    wanted = []                       # (index file, function returning the command)
     if _steps_running(workflow, "samtools") or bwa_steps:
-        commands.append(_unless_exists(f"{fasta}.fai", f'samtools faidx "{fasta}"', csh))
+        wanted.append((f"{fasta}.fai", lambda: f'samtools faidx "{fasta}"'))
     if bwa_steps:
         step = pipeline[bwa_steps[0]]
         bwa = step.get("path") or step.get("key", "bwa").split(" ")[0]
-        commands.append(_unless_exists(f"{fasta}.bwt", f'{bwa} index "{fasta}"', csh))
+        wanted.append((f"{fasta}.bwt", lambda: f'{bwa} index "{fasta}"'))
     if star and star_steps:
         step = pipeline[star_steps[0]]
         star_bin = step.get("path") or step.get("key", "STAR")
         fasta_dir = str(Path(fasta).parent)
-        commands.append(_unless_exists(
-            f"{fasta_dir}/SA",
+        wanted.append((f"{fasta_dir}/SA", lambda: (
             f'{star_bin} --runMode genomeGenerate --genomeDir "{fasta_dir}" --runThreadN 4 '
-            f'--genomeFastaFiles "{fasta}" --genomeSAindexNbases {_sa_index_nbases(fasta)}', csh))
-    return commands
+            f'--genomeFastaFiles "{fasta}" --genomeSAindexNbases {_sa_index_nbases(fasta)}')))
+    return [_unless_exists(path, command(), csh) for path, command in wanted
+            if not (skip_present and _present(path))]
 
 
 # ------------------------------------------------------- derived references
@@ -552,10 +573,7 @@ def mt_shift(workflow) -> int:
 def derived_commands(ref: ReferenceSet, organism: str, workspace_dir: str, workflow, csh: Optional[bool] = None,
                      steps: Optional[list] = None) -> list:
     """Build and index the rotated / nuclear + mtDNA references that the active steps use."""
-    if csh is None:
-        from .jobscript import family, shell_of
-
-        csh = family(shell_of(workflow)) == "csh"
+    csh = _resolve_csh(workflow, csh)
     paths = derived_paths(ref, organism, workspace_dir, mt_shift(workflow))
     commands = []
     if uses_placeholder(workflow, "fasta_rotated", steps):
@@ -593,6 +611,7 @@ def prepare_commands(ref: ReferenceSet, organism: str, workspace_dir: str, workf
                      steps: Optional[list] = None) -> list:
     """Everything the reference job does for one organism: downloads, the missing indices of the
     reference, and the derived (rotated, nuclear + mtDNA, NUMT) references the steps use."""
+    csh = _resolve_csh(workflow, csh)
     if ref.needs_indexing:
         base = index_commands(ref, workflow, csh)
     else:
@@ -605,19 +624,7 @@ def missing_index_commands(ref: ReferenceSet, workflow, csh: Optional[bool] = No
     (instead of every sample job failing). References built elsewhere are left to you."""
     if not ref.refpath or not Path(ref.refpath).is_file():
         return []
-    if csh is None:
-        from .jobscript import family, shell_of
-
-        csh = family(shell_of(workflow)) == "csh"
-    return [cmd for cmd in _fasta_index_commands(ref.refpath, workflow, csh, star=True)
-            if not _index_present(cmd)]
-
-
-def _index_present(command: str) -> bool:
-    """Whether the file an :func:`_unless_exists` command guards exists (and is not empty)."""
-    match = re.search(r'-s "([^"]+)"|! -e "([^"]+)"', command)
-    path = Path(next(g for g in match.groups() if g)) if match else None
-    return bool(path and path.exists() and path.stat().st_size > 0)
+    return _fasta_index_commands(ref.refpath, workflow, _resolve_csh(workflow, csh), star=True, skip_present=True)
 
 
 def index_commands(ref: ReferenceSet, workflow, csh: Optional[bool] = None) -> list:
@@ -631,10 +638,7 @@ def index_commands(ref: ReferenceSet, workflow, csh: Optional[bool] = None) -> l
     """
     if not ref.refpath:
         return []
-    if csh is None:
-        from .jobscript import family, shell_of
-
-        csh = family(shell_of(workflow)) == "csh"
+    csh = _resolve_csh(workflow, csh)
     commands = download_commands(ref)
     if ref.nuc_refpath and ref.nuc_refpath in ref.downloads:
         commands += _fasta_index_commands(ref.nuc_refpath, workflow, csh, star=False)

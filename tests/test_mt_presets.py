@@ -236,3 +236,21 @@ def test_references_you_add_get_their_missing_indices(tmp_path):
     assert commands == [f'if [ ! -s "{fasta}.bwt" ]; then bwa index "{fasta}"; fi']
     elsewhere = ReferenceSet(refpath="/cluster/only/mt.fa")                       # not on this machine: left to you
     assert prepare_commands(elsewhere, "Homo_sapiens", str(ws.root), wf, csh=False, steps=["bwa-align"]) == []
+
+
+def test_present_star_index_does_not_read_the_fasta(tmp_path, monkeypatch):
+    from mitopiper import references
+    from mitopiper.references import prepare_commands
+
+    ws = Workspace(tmp_path / "ws")
+    ws.initialise()
+    wf = ws.load_workflow("rnaseq-expression")
+    fasta = tmp_path / "genome.fa"
+    fasta.write_text(">c\nACGT\n")
+    (tmp_path / "SA").write_text("index")
+    monkeypatch.setattr(references, "validate_fasta", lambda path: pytest.fail("the FASTA was read"))
+    assert prepare_commands(ReferenceSet(refpath=str(fasta)), "Homo_sapiens", str(ws.root), wf, csh=False) == []
+    (tmp_path / "SA").unlink()                                                   # now it is needed: STAR's command
+    monkeypatch.setattr(references, "validate_fasta", lambda path: 4)
+    (command,) = prepare_commands(ReferenceSet(refpath=str(fasta)), "Homo_sapiens", str(ws.root), wf, csh=False)
+    assert "genomeGenerate" in command and "--genomeSAindexNbases" in command

@@ -18,7 +18,7 @@
 set -u -o pipefail
 
 if [ $# -lt 3 ]; then
-    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+    awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"   # the header comment
     exit 2
 fi
 workspace=$1 metadata=$2 scheduler=$3
