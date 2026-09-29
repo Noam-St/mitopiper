@@ -746,6 +746,37 @@ tells you if it is missing. Numt Parser was designed for DNA reads: it rejects s
 (CIGAR `N`), which bwa does not produce. It keeps the alignments in memory, so the step asks for 16G.
 Please cite Numt Parser when you use this preset.
 
+**Per-position tables and heteroplasmy.** Every mt preset ends with two steps.
+
+* `annotate` runs once per sample: `mitopiper mt annotate`, a port of the original `process_pileup.py`. It writes
+  `annotated/<sample>.annotated.tsv`, with one row per mtDNA position:
+  * coverage, per strand and in total;
+  * reads starting and ending at the position;
+  * z-scores of the coverage, and the start/end ratio;
+  * counts of A/C/G/T/N, deletions and insertions, the major and minor allele, and the minor allele frequency;
+  * the gene(s) at the position, from the reference's GFF3/GTF (or a GenBank file);
+  * RPM values, with `--counts htseq.txt` or `--total-reads N`.
+
+  A position is marked `heteroplasmic` when:
+  * its depth is at least `--min-depth` (default 50);
+  * its minor allele frequency is at least `--min-af` (default 0.03);
+  * the minor allele has at least `--min-strand` reads (default 2) on *each* strand, which filters out
+    strand-specific errors.
+
+  `alt_major` marks positions whose major allele differs from the reference.
+* `heteroplasmy` runs once per experiment: `mitopiper mt heteroplasmy` collects these positions from all samples into
+  `heteroplasmy/heteroplasmy_sites.tsv`. It also writes `heteroplasmy/heteroplasmy_matrix.tsv`, the minor allele
+  frequency of every called position in every sample.
+
+Compared with `process_pileup.py`, pandas and Biopython are no longer needed, and three things are corrected:
+* read starts are counted even when the mapping-quality character after `^` is a letter or digit;
+* a read end (`$`) is counted for the read *before* it;
+* genes cover exactly their annotated coordinates, and overlapping genes (ATP8/ATP6, ND4L/ND4) are all listed.
+
+Coverage, strand coverage and z-scores are identical to the original.
+With RNA-seq, apparent heteroplasmy can also come from RNA modifications and editing, or from
+mitochondrial tRNA processing. Treat calls at tRNA and rRNA positions with care.
+
 The rotated and the nuclear + mtDNA references are built and indexed once, by the reference job,
 under `references/derived/<organism>/`. The helpers run inside the jobs, so mitopiper must be
 installed in the job environment (the tool check verifies this). They are also available directly:
@@ -758,6 +789,8 @@ mitopiper mt contigs mt.fa
 mitopiper mt fragments mt.fa fragments.fa --size 100 --step 20
 mitopiper mt numt-regions fragments_vs_genome.sam mt.fa regions.txt   # then: samtools faidx genome.fa -r regions.txt
 mitopiper mt numt-reads sample.numt_parser.tsv keep.txt --keep cymt --pairs all
+mitopiper mt annotate sample.circular.pileup sample.annotated.tsv --annotation mt.gff3 --min-depth 50 --min-af 0.03
+mitopiper mt heteroplasmy annotated/*.annotated.tsv -o heteroplasmy/
 ```
 
 Step placeholders for your own workflows: `_fasta_rotated`, `_fasta_combined`, `_mt_contigs` (the

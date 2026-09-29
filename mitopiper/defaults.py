@@ -329,6 +329,26 @@ def _circular_steps() -> tuple:
     return pipeline, settings, ["align-rotated", "index-rotated", "mpileup-rotated", "circular-merge"]
 
 
+def _annotation_steps() -> tuple:
+    """Per-position table of every sample (process_pileup.py) and the heteroplasmic sites of all samples."""
+    pipeline = {
+        "annotate": _step("mitopiper mt annotate", "Coverage, read starts/ends, alleles and genes per position",
+                          "annotated", "", "", ".annotated.tsv", "key output_circular-merge output settings"),
+        "heteroplasmy": _step("mitopiper mt heteroplasmy", "Heteroplasmic sites of all samples", "heteroplasmy",
+                              "", "", "", "key -o dir_heteroplasmy outputs_annotate", scope="experiment"),
+    }
+    settings = {
+        "annotate": _params(
+            ("annotation", "Genes (GFF3/GTF/GenBank; left out when the reference has none)", "--annotation", "_gtf"),
+            ("sample", "Sample name in the table", "--sample", "_sample"),
+            ("min depth", "Heteroplasmy: minimum depth (A/C/G/T/deletions)", "--min-depth", 50),
+            ("min af", "Heteroplasmy: minimum minor allele frequency", "--min-af", 0.03),
+            ("min strand", "Heteroplasmy: minimum minor allele reads on each strand", "--min-strand", 2)),
+        "heteroplasmy": {},
+    }
+    return pipeline, settings, ["annotate", "heteroplasmy"]
+
+
 def _mt_variants(numt: str = "") -> dict:
     """mtDNA presets: ``numt`` is "" (no NUMT handling), "mapq" (align to nuclear + mtDNA and keep
     reads with a high mapping quality on the mtDNA) or "parser" (classify reads with Numt Parser)."""
@@ -339,6 +359,9 @@ def _mt_variants(numt: str = "") -> dict:
     circ_pipe, circ_settings, circ_order = _circular_steps()
     pipe.update(circ_pipe)
     settings.update(circ_settings)
+    ann_pipe, ann_settings, ann_order = _annotation_steps()
+    pipe.update(ann_pipe)
+    settings.update(ann_settings)
     index_mt = _step("samtools index", "Index the mtDNA reads", "alignment", "alignment", ".mt.bam",
                      ".mt.bam.bai", "key settings input")
     trimmed = ["wget", "fastqc_pre", "trim", "fastqc"]
@@ -416,7 +439,7 @@ def _mt_variants(numt: str = "") -> dict:
         # The rotated alignment realigns only the reads kept above, so it is NUMT-aware too.
         pipe["align-rotated"].update(inputdir="alignment", input_ext=".mt.bam",
                                      structure="samtools \\fastq input | key settings _fasta_rotated - | samtools sort -o output -")
-    active = order + circ_order + ["multiqc"]
+    active = order + circ_order + ann_order + ["multiqc"]
     for name, step in pipe.items():
         step["switch"] = name in active
     config["run_order"] = active

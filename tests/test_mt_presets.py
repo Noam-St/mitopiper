@@ -100,13 +100,36 @@ CIRCULAR = ["align-rotated", "index-rotated", "mpileup-rotated", "circular-merge
 def test_mt_variants_merges_the_rotated_alignment_around_the_origin(cluster):
     ws, tmp_path = cluster
     ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath=str(tmp_path / "mt.fa")))
-    assert run_preset(ws, tmp_path, "mt-variants", ["wget", "bwa-align", "view", "sort", "index", "mpileup"] + CIRCULAR) == 0
+    (tmp_path / "mt.gff3").write_text("NC_012920.1\tRefSeq\tgene\t2\t4\t.\t+\t.\tgene=TRNF\n")
+    ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath=str(tmp_path / "mt.fa"), gtfpath=str(tmp_path / "mt.gff3")))
+    steps = ["wget", "bwa-align", "view", "sort", "index", "mpileup"] + CIRCULAR + ["annotate", "heteroplasmy"]
+    assert run_preset(ws, tmp_path, "mt-variants", steps) == 0
     states = {j.name: j.state for j in mon.collect(ws, ["exp"], mon.ErrorScanner(), lambda s, i: None)}
     assert all(s == mon.DONE for s in states.values()), states
     rotated = ws.references_dir / "derived" / "Homo_sapiens" / "mt.rotated5.fa"
     assert mtdna.sequence_length(rotated) == 30 and (rotated.parent / "mt.rotated5.fa.bwt").exists()
     depths = merged_depths(ws)
     assert [p for p, d in depths.items() if d == 2] == [1, 2, 3, 28, 29, 30]   # next to the origin: rotated alignment
+    with open(ws.output_dir / "exp" / "annotated" / "a_0_HS.annotated.tsv") as handle:
+        table = list(__import__("csv").DictReader(handle, delimiter="\t"))
+    assert [(r["position"], r["coverage"], r["gene"]) for r in table[:5]] == [
+        ("1", "2", ""), ("2", "2", "TRNF"), ("3", "2", "TRNF"), ("4", "1", "TRNF"), ("5", "1", "")]
+    assert (ws.output_dir / "exp" / "heteroplasmy" / "heteroplasmy_matrix.tsv").exists()
+    script = (ws.output_dir / "exp" / "scripts" / "e_exp.sh").read_text()
+    assert f"mitopiper mt heteroplasmy -o {ws.output_dir}/exp/heteroplasmy {ws.output_dir}/exp/annotated/a_0_HS.annotated.tsv" in script
+
+
+def test_annotate_leaves_out_a_missing_annotation(tmp_path):
+    from mitopiper.builder import build_sample_job
+    from mitopiper.metadata import Run, Sample
+
+    ws = Workspace(tmp_path / "ws")
+    ws.initialise()
+    wf = ws.load_workflow("mt-variants")
+    sample = Sample(0, "S1", "Homo_sapiens", [Run("r", ["f/x.fastq.gz"])])
+    job = build_sample_job(sample, wf, str(tmp_path / "ws/output/E"), ReferenceSet(refpath="/refs/mt.fa"))
+    (line,) = {s.step: s.lines for s in job.steps}["annotate"]
+    assert "--annotation" not in line and "--sample S1_0_HS --min-depth 50 --min-af 0.03 --min-strand 2" in line
 
 
 @pytest.mark.parametrize("shell", ["bash"] + (["tcsh"] if __import__("shutil").which("tcsh") else []))

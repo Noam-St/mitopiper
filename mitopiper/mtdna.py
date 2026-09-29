@@ -24,6 +24,9 @@ NUMTs
     (where fragments of the mtDNA align) and :func:`numt_read_list` turns
     Numt Parser's table into the list of reads to keep.
 
+Per-position annotation and heteroplasmy of the resulting pileups are in
+:mod:`mitopiper.pileup`.
+
 The functions are also available as ``mitopiper mt ...`` commands, which the
 bundled mitochondrial presets call from their jobs.
 """
@@ -348,11 +351,18 @@ def add_parser(sub) -> None:
                        help="cymt: reads classified as mtDNA; not-numt: also the undetermined ones")
     reads.add_argument("--pairs", choices=("all", "any"), default="all",
                        help="all: every mate must qualify; any: one qualifying mate keeps the pair")
+    from . import pileup
+
+    pileup.add_parsers(msub)
     names = msub.add_parser("contigs", help="print the sequence names of a FASTA")
     names.add_argument("fasta")
 
 
 def run(args) -> int:
+    if args.action in ("annotate", "heteroplasmy"):
+        from . import pileup
+
+        return pileup.run(args)
     if args.action == "rotate":
         rotate_fasta(args.fasta, args.output, args.shift)
     elif args.action == "combine-pileups":

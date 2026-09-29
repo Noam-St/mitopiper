@@ -269,7 +269,11 @@ def render_settings(params: dict, variables: dict, lookups: dict, paired: bool, 
         elif value == "_if_PE":
             switch, value = switch and paired, ""
         else:
-            value = resolve_setting_value(value, variables, lookups)
+            resolved = resolve_setting_value(value, variables, lookups)
+            # an optional input the reference does not have (e.g. `--annotation _gtf` without a GTF): leave it out
+            if resolved == "" and isinstance(value, str) and value.startswith("_") and value[1:] in PLACEHOLDERS:
+                switch = False
+            value = resolved
         if "output_file" in name and value != "":
             value = f"{value}/{variables['sample']}{output_ext}"
         if not switch:
