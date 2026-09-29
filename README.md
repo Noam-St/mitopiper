@@ -26,12 +26,17 @@ mitochondrial reference genome from NCBI.
   sections. Both produce the same scripts.
 * **Lightweight.** Pure Python with one small dependency (`tabulate`).
 
+> **New here?** The [tutorial](docs/tutorial.md) runs the mtDNA workflows on a simulated dataset with a
+> known answer in about 10 minutes. [`benchmark/`](benchmark/README.md) compares them on your own data, and
+> [`docs/HPC_TESTING.md`](docs/HPC_TESTING.md) is a checklist for trying mitopiper on a new cluster.
+
 > mitopiper is the packaged successor of the `maker.py` script in this repository. Existing
 > workspaces (`config/`, `output/`) keep working, and `python maker.py` still starts the
 > interactive mode.
 
 ## Contents
 
+- [Tutorial](docs/tutorial.md) · [Benchmark](benchmark/README.md) · [Testing on a cluster](docs/HPC_TESTING.md)
 - [Installation](#installation)
 - [Getting started](#getting-started)
   - [Before you start](#before-you-start)
