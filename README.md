@@ -1,5 +1,7 @@
 # mitopiper
 
+[![tests](https://github.com/Noam-St/Semi-automatic_csh_files_for_qsub/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/Noam-St/Semi-automatic_csh_files_for_qsub/actions/workflows/tests.yml)
+
 **Build, launch and babysit sequencing pipelines on an HPC cluster, straight from ENA/SRA metadata.**
 
 mitopiper takes a set of samples and a configurable workflow (download → QC → trimming → alignment
@@ -957,8 +959,12 @@ read.
 
 ```bash
 pip install -e ".[test]"
-pytest
+pytest                               # unit tests: fast, stand-ins for bwa/samtools
+tutorial/run_tutorial.sh ci_run      # end to end with the real tools (envs/mitopiper-tools.yml + Numt Parser)
 ```
+
+CI (`.github/workflows/tests.yml`) runs both: the unit tests on Python 3.9, 3.11 and 3.13, and the tutorial
+with the pinned tools, checked against the simulated truth.
 
 ## Citation
 

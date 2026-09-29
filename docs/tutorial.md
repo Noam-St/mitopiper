@@ -156,6 +156,13 @@ circular pileup restores it. For `plain` the ratio stays lower only because NUMT
 matplotlib installed, `compare.py` also draws `origin_coverage.png`, `calls.png` and `af_truth.png`
 (called vs true frequency).
 
+Steps 2–5 are also a single script, which checks every number above against the truth and
+exits non-zero if one is off. CI runs it on every push:
+
+```bash
+tutorial/run_tutorial.sh tutorial_run
+```
+
 Your numbers should match these. The simulation is deterministic, but the trimming and alignment
 tools can differ slightly between versions.
 

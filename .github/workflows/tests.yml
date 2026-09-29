@@ -3,9 +3,11 @@ name: tests
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
+    name: unit tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -16,5 +18,50 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: sudo apt-get install -y tcsh csh   # the csh/tcsh job-script tests run real jobs
-      - run: pip install ".[test]"
+      - run: pip install ".[test]" pyflakes
+      - run: python -m pyflakes mitopiper tests benchmark tutorial
       - run: pytest -q
+
+  tutorial:
+    # The whole tutorial with the real tools (bwa, samtools, Trim Galore, FastQC, MultiQC,
+    # Numt Parser) from the pinned environment, checked against the simulated truth.
+    name: tutorial end to end (real tools)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash -el {0}   # login shell, so the micromamba environment is active
+    env:
+      NUMT_PARSER_COMMIT: fa4b2dd629859b326033e5b7d5fcb62887ba9232
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: envs/mitopiper-tools.yml
+          cache-environment: true
+      - name: Install mitopiper and Numt Parser
+        run: |
+          pip install .
+          git clone https://github.com/adeflamingh/NuMt_parser "$RUNNER_TEMP/NuMt_parser"
+          git -C "$RUNNER_TEMP/NuMt_parser" checkout "$NUMT_PARSER_COMMIT"
+          chmod +x "$RUNNER_TEMP/NuMt_parser/bin/numt_parser.py"
+          echo "$RUNNER_TEMP/NuMt_parser/bin" >> "$GITHUB_PATH"
+      - name: Tool versions
+        run: |
+          mitopiper --version
+          bwa 2>&1 | grep Version
+          samtools --version | head -1
+          trim_galore --version | grep version
+      - name: Run the tutorial
+        run: tutorial/run_tutorial.sh "$RUNNER_TEMP/tutorial"
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tutorial-results
+          path: |
+            ${{ runner.temp }}/tutorial/tutorial_ws/benchmark/
+            ${{ runner.temp }}/tutorial/tutorial_ws/output/*/stderr/
+            ${{ runner.temp }}/tutorial/tutorial_ws/output/*/tool_versions.tsv
+            ${{ runner.temp }}/tutorial/tutorial_ws/output/*/heteroplasmy/
+          if-no-files-found: warn
