@@ -65,3 +65,38 @@ jobs:
             ${{ runner.temp }}/tutorial/tutorial_ws/output/*/tool_versions.tsv
             ${{ runner.temp }}/tutorial/tutorial_ws/output/*/heteroplasmy/
           if-no-files-found: warn
+
+  package:
+    # After every push to master that passes both jobs above, rebuild mitopiper-latest.tar.gz
+    # (git archive of the commit) and publish it on the "latest" release, at a fixed URL:
+    # https://github.com/<owner>/<repo>/releases/download/latest/mitopiper-latest.tar.gz
+    name: package (mitopiper-latest.tar.gz)
+    needs: [test, tutorial]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # to move the "latest" tag and replace the release files
+    concurrency:
+      group: package-latest    # one publish at a time; a newer push waits instead of cutting an upload short
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the tarball
+        run: |
+          git archive --format=tar.gz --prefix=mitopiper/ -o mitopiper-latest.tar.gz HEAD
+          md5sum mitopiper-latest.tar.gz > mitopiper-latest.tar.gz.md5
+          echo "SHORT=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          tar tzf mitopiper-latest.tar.gz | grep -q '^mitopiper/pyproject.toml$'
+      - name: Publish on the "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag -f latest
+          git push -f origin refs/tags/latest
+          notes="mitopiper master at ${SHORT}, $(date -u '+%Y-%m-%d %H:%M UTC'). Rebuilt automatically after every commit to master that passes the tests. Unpack with: tar xzf mitopiper-latest.tar.gz"
+          if gh release view latest > /dev/null 2>&1; then
+            gh release edit latest --title "Latest master (${SHORT})" --notes "$notes" --prerelease
+          else
+            gh release create latest --title "Latest master (${SHORT})" --notes "$notes" --prerelease
+          fi
+          gh release upload latest mitopiper-latest.tar.gz mitopiper-latest.tar.gz.md5 --clobber

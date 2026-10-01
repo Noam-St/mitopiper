@@ -34,6 +34,10 @@ chmod +x NuMt_parser/bin/numt_parser.py
 export PATH="$PWD/NuMt_parser/bin:$PATH"
 ```
 
+Without git, download `mitopiper-latest.tar.gz` from the repository's `latest` release (rebuilt after every
+commit; see the README's Installation section), then run `tar xzf mitopiper-latest.tar.gz && cd mitopiper` and
+continue from `mamba env create`.
+
 `mitopiper --version` should print the version. The environment file was tested with
 micromamba 2.9, and it resolved to bwa 0.7.18, samtools 1.21, Trim Galore 0.6.10 and cutadapt 4.9.
 

@@ -22,6 +22,9 @@ mamba env create -f envs/mitopiper-tools.yml && conda activate mitopiper-tools &
 srun --pty -t 10 bash -lc 'conda activate mitopiper-tools; mitopiper --version'   # the jobs call mitopiper too
 ```
 
+If cloning fails, use the single-file package `mitopiper-latest.tar.gz` from the repository's `latest`
+release instead (`tar xzf mitopiper-latest.tar.gz && cd mitopiper`). It is rebuilt after every commit.
+
 - [ ] `mitopiper --version` works on the login node **and** on a compute node.
 
 ## 2. Workspace and settings

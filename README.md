@@ -70,6 +70,19 @@ pip install .                  # inside an active conda/virtual environment
 mitopiper --version
 ```
 
+**Without git** (e.g. when cloning fails on the cluster): every commit to `master` that passes the
+tests is packaged as one file, `mitopiper-latest.tar.gz`, on the
+[`latest` release](https://github.com/Noam-St/Semi-automatic_csh_files_for_qsub/releases/tag/latest).
+
+```bash
+wget https://github.com/Noam-St/Semi-automatic_csh_files_for_qsub/releases/download/latest/mitopiper-latest.tar.gz
+tar xzf mitopiper-latest.tar.gz && cd mitopiper && pip install .
+```
+
+While the repository is private, that link needs a login. Download the file from the release page in your
+browser and copy it to the cluster (`scp`), or use `gh release download latest -R Noam-St/Semi-automatic_csh_files_for_qsub`.
+The release title names the commit it was built from, and `mitopiper-latest.tar.gz.md5` lets you check the download.
+
 Without a conda/virtual environment, use `pip install --user .` instead. That puts the `mitopiper`
 command in `~/.local/bin`. If `mitopiper` is then "command not found", add that folder to your
 `PATH` once:
