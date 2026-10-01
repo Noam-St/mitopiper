@@ -137,13 +137,22 @@ def header(scheduler: str, job_name: str, log_dir: str, res: JobResources, array
 
 
 _SUBMIT_FUNCTIONS = {
+    # No -terse: older Grid Engines reject it. Every version answers 'Your job 123 ("name") has been
+    # submitted' (or 'Your job-array 123.1-4:1 ...'); a bare id is accepted too.
     "sge": r"""submit() {
     local script=$1; shift
+    local out id
     if [ $# -gt 0 ]; then
-        qsub -terse -hold_jid "$(IFS=,; echo "$*")" "$script"
+        out=$(qsub -hold_jid "$(IFS=,; echo "$*")" "$script")
     else
-        qsub -terse "$script"
-    fi | head -n1 | cut -d. -f1
+        out=$(qsub "$script")
+    fi
+    id=$(printf '%s\n' "$out" | sed -nE 's/^Your job(-array)? ([0-9]+).*/\2/p; s/^([0-9]+)(\.[0-9:-]+)?$/\1/p' | head -n1)
+    if [ -z "$id" ]; then
+        echo "[mitopiper] could not read the job id of $script from qsub's answer: $out" >&2
+        return 1
+    fi
+    echo "$id"
 }""",
     "slurm": r"""submit() {
     local script=$1; shift

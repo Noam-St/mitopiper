@@ -113,7 +113,9 @@ def resolve_metadata_source(workspace: Workspace, item: str, refresh: bool = Fal
             return dest
         kwargs = {"fetch": fetch} if fetch else {}
         return fetch_run_report(item, dest, **kwargs)
-    raise BuildError(f"'{item}' is not a metadata file, a previous experiment or an ENA/SRA accession")
+    hint = (f" (no file {path.resolve()}: a relative path is taken from the current folder, {Path.cwd()})"
+            if path.suffix or "/" in item else "")
+    raise BuildError(f"'{item}' is not a metadata file, a previous experiment or an ENA/SRA accession{hint}")
 
 
 def prepare_experiment_dir(workspace: Workspace, metadata: Path, name: Optional[str] = None) -> tuple:
