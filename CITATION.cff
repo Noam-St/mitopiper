@@ -9,7 +9,7 @@ authors:
     affiliation: "Ben-Gurion University of the Negev"
 version: 2.0.0.dev0
 license: Apache-2.0
-repository-code: "https://github.com/Noam-St/Semi-automatic_csh_files_for_qsub"
+repository-code: "https://github.com/Noam-St/mitopiper"
 keywords:
   - bioinformatics
   - RNA-seq

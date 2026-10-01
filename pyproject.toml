@@ -29,7 +29,7 @@ test = ["pytest>=7"]
 mitopiper = "mitopiper.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Noam-St/Semi-automatic_csh_files_for_qsub"
+Homepage = "https://github.com/Noam-St/mitopiper"
 
 [tool.setuptools]
 packages = ["mitopiper"]

@@ -20,7 +20,7 @@ real data.
 ## 1. Install
 
 ```bash
-git clone https://github.com/Noam-St/Semi-automatic_csh_files_for_qsub.git mitopiper
+git clone https://github.com/Noam-St/mitopiper.git
 cd mitopiper
 
 # the tools of the bundled workflows (bwa, samtools, Trim Galore, FastQC, MultiQC, ...)

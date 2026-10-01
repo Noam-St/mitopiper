@@ -1,6 +1,6 @@
 # mitopiper
 
-[![tests](https://github.com/Noam-St/Semi-automatic_csh_files_for_qsub/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/Noam-St/Semi-automatic_csh_files_for_qsub/actions/workflows/tests.yml)
+[![tests](https://github.com/Noam-St/mitopiper/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/Noam-St/mitopiper/actions/workflows/tests.yml)
 
 **Build, launch and babysit sequencing pipelines on an HPC cluster, straight from ENA/SRA metadata.**
 
@@ -64,23 +64,23 @@ mitochondrial reference genome from NCBI.
 Install mitopiper on the cluster's **login node**, where jobs are submitted from:
 
 ```bash
-git clone https://github.com/Noam-St/Semi-automatic_csh_files_for_qsub.git
-cd Semi-automatic_csh_files_for_qsub
+git clone https://github.com/Noam-St/mitopiper.git
+cd mitopiper
 pip install .                  # inside an active conda/virtual environment
 mitopiper --version
 ```
 
 **Without git** (e.g. when cloning fails on the cluster): every commit to `master` that passes the
 tests is packaged as one file, `mitopiper-latest.tar.gz`, on the
-[`latest` release](https://github.com/Noam-St/Semi-automatic_csh_files_for_qsub/releases/tag/latest).
+[`latest` release](https://github.com/Noam-St/mitopiper/releases/tag/latest).
 
 ```bash
-wget https://github.com/Noam-St/Semi-automatic_csh_files_for_qsub/releases/download/latest/mitopiper-latest.tar.gz
+wget https://github.com/Noam-St/mitopiper/releases/download/latest/mitopiper-latest.tar.gz
 tar xzf mitopiper-latest.tar.gz && cd mitopiper && pip install .
 ```
 
 While the repository is private, that link needs a login. Download the file from the release page in your
-browser and copy it to the cluster (`scp`), or use `gh release download latest -R Noam-St/Semi-automatic_csh_files_for_qsub`.
+browser and copy it to the cluster (`scp`), or use `gh release download latest -R Noam-St/mitopiper`.
 The release title names the commit it was built from, and `mitopiper-latest.tar.gz.md5` lets you check the download.
 
 Without a conda/virtual environment, use `pip install --user .` instead. That puts the `mitopiper`
@@ -138,7 +138,7 @@ Best for a first run, for exploring a dataset, and for anyone who prefers menus 
 
 ```bash
 mkdir zebrafish_liver && cd zebrafish_liver
-mitopiper                       # or: python /path/to/Semi-automatic_csh_files_for_qsub/maker.py
+mitopiper                       # or: python /path/to/mitopiper/maker.py
 ```
 
 **2. Answer the questions.** Every question shows numbered options. Type a number (or text) and
@@ -899,9 +899,11 @@ git status            # " M maker.py" = a local edit; config/ and output/ are no
 git stash             # skip if there is nothing to stash
 ```
 
-**3. Get the new version**
+**3. Get the new version.** The repository is now called `mitopiper`. GitHub redirects the old
+address, but point your clone at the new one once:
 
 ```bash
+git remote set-url origin https://github.com/Noam-St/mitopiper.git
 git fetch origin
 git checkout -b claude/rna-seq-pipeline-refactor-2om1jr origin/claude/rna-seq-pipeline-refactor-2om1jr
 # later updates of the same branch:  git pull

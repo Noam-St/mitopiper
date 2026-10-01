@@ -17,7 +17,7 @@ presets in about 10 minutes, with a known answer.
 ## 1. Install (login node)
 
 ```bash
-git clone https://github.com/Noam-St/Semi-automatic_csh_files_for_qsub.git mitopiper && cd mitopiper
+git clone https://github.com/Noam-St/mitopiper.git && cd mitopiper
 mamba env create -f envs/mitopiper-tools.yml && conda activate mitopiper-tools && pip install .
 srun --pty -t 10 bash -lc 'conda activate mitopiper-tools; mitopiper --version'   # the jobs call mitopiper too
 ```
