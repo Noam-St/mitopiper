@@ -28,11 +28,15 @@ id sge > /dev/null 2>&1 || sudo useradd -r -d /opt/sge sge
 sudo chown -R sge /opt/sge
 cd /opt/sge
 # The installers also try to start the daemons through systemd; start them by hand when that fails.
-yes "" | sudo ./install_qmaster > /tmp/install_qmaster.log 2>&1 || true
-pgrep sge_qmaster > /dev/null || sudo /opt/sge/bin/lx-amd64/sge_qmaster
+export SGE_ROOT=/opt/sge SGE_CELL=default
+(yes "" | sudo -E ./install_qmaster > /tmp/install_qmaster.log 2>&1) || true
+tail -n 25 /tmp/install_qmaster.log
+test -f /opt/sge/default/common/settings.sh      # the installer must at least have written the configuration
+pgrep sge_qmaster > /dev/null || sudo -E /opt/sge/bin/lx-amd64/sge_qmaster
 sleep 3
-yes "" | sudo ./install_execd > /tmp/install_execd.log 2>&1 || true
-pgrep sge_execd > /dev/null || sudo /opt/sge/bin/lx-amd64/sge_execd
+(yes "" | sudo -E ./install_execd > /tmp/install_execd.log 2>&1) || true
+tail -n 15 /tmp/install_execd.log
+pgrep sge_execd > /dev/null || sudo -E /opt/sge/bin/lx-amd64/sge_execd
 sleep 5
 pgrep -a sge_
 
