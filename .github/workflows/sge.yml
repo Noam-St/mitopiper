@@ -1,0 +1,29 @@
+name: sge
+
+# A real (one-machine) Son of Grid Engine cluster on the runner, to test mitopiper's SGE support.
+# Experimental: runs only on the ci-sge branch, or by hand.
+on:
+  push:
+    branches: [ci-sge]
+  workflow_dispatch:
+
+jobs:
+  sge:
+    name: grid engine (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install and start Grid Engine
+        run: .github/sge/setup_sge.sh
+      - name: Smoke test (qsub, -hold_jid, array, qacct)
+        run: .github/sge/smoke_test.sh
+      - name: Grid Engine logs
+        if: always()
+        run: |
+          sudo tail -n 40 /var/spool/gridengine/qmaster/messages || true
+          sudo find /var/spool/gridengine -name messages -path '*execd*' -exec tail -n 20 {} \; || true
