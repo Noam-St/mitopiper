@@ -191,7 +191,8 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
     if sched.startswith("CANCELLED") and not found:
         add(Suggestion("The job was cancelled (scancel/qdel/bkill or an administrator)",
                        ["If that was not intentional, just run it again."], ["mitopiper rerun"], {}))
-    if "E" in sched and ctx.scheduler == "sge":
+    # qstat's state letters (Eqw, E): not the accounting words (TIMEOUT, CANCELLED ...)
+    if ctx.scheduler == "sge" and re.fullmatch(r"[a-z]*E[a-z]*", job.scheduler_state or ""):
         add(Suggestion("SGE put the job in an error state (Eqw)",
                        [f"'qstat -j {job.job_id}' shows the reason, usually an unwritable log directory or a "
                         "missing shell. Fix it, then 'qmod -cj JOBID' to release, or 'qdel' and rerun."],
@@ -268,7 +269,8 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
         else:
             add(Suggestion(title, [f"{path or 'The file'} is not produced by any step of this build: replace it with a "
                                    "good copy (e.g. download it again), then rerun."], ["mitopiper rerun"], {}))
-    if _find(r"fail to locate the index|bwa_idx_load|\[E::bwa_idx", text):
+    # Only bwa's errors: it logs "[M::bwa_idx_load_from_disk] read 0 ALT contigs" on every successful run.
+    if _find(r"fail to locate the index|\[E::bwa_idx", text):
         fasta = next((r.get("refpath") for r in ctx.references.values() if r.get("refpath")), "REF.fa")
         add(Suggestion("The BWA index of the reference is missing",
                        ["Index the reference once (it is shared by every sample), then rerun."],
