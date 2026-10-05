@@ -47,17 +47,31 @@ set +u; source /opt/sge/default/common/settings.sh; set -u
 echo "/opt/sge/bin/lx-amd64" >> "${GITHUB_PATH:-/dev/null}"
 
 tmp=$(mktemp -d)
-printf 'group_name @allhosts\nhostlist %s\n' "$host" > "$tmp/allhosts"
-sudo -E env PATH="$PATH" qconf -Ahgrp "$tmp/allhosts"
-qconf -sp smp | sed 's/^pe_name .*/pe_name            shared/' > "$tmp/pe"
-sudo -E env PATH="$PATH" qconf -Ap "$tmp/pe"
-cat > "$tmp/edit_queue" <<'EOF'
+q() { sudo -E env PATH="$PATH" "$@"; }        # qconf as root (a manager)
+# The installer may already have made some of these (it does when systemd can start the daemons).
+if ! qconf -shgrpl 2>/dev/null | grep -qx '@allhosts'; then
+  printf 'group_name @allhosts\nhostlist %s\n' "$host" > "$tmp/allhosts"
+  q qconf -Ahgrp "$tmp/allhosts"
+fi
+if ! qconf -spl 2>/dev/null | grep -qx shared; then
+  qconf -sp smp | sed 's/^pe_name .*/pe_name            shared/' > "$tmp/pe"
+  q qconf -Ap "$tmp/pe"
+fi
+if qconf -sql 2>/dev/null | grep -qx all.q; then
+  q qconf -mattr queue hostlist @allhosts all.q
+  q qconf -mattr queue slots 4 all.q
+  q qconf -mattr queue pe_list "make smp shared" all.q
+  q qconf -mattr queue shell /bin/bash all.q
+else
+  cat > "$tmp/edit_queue" <<'EOF2'
 #!/bin/sh
 sed -i -e 's/^qname .*/qname all.q/' -e 's/^hostlist .*/hostlist @allhosts/' -e 's/^slots .*/slots 4/' \
        -e 's/^pe_list .*/pe_list make smp shared/' -e 's/^shell .*/shell \/bin\/bash/' "$1"
-EOF
-chmod +x "$tmp/edit_queue"
-sudo -E env PATH="$PATH" EDITOR="$tmp/edit_queue" qconf -aq all.q
-sudo -E env PATH="$PATH" qconf -as "$host"
+EOF2
+  chmod +x "$tmp/edit_queue"
+  q env EDITOR="$tmp/edit_queue" qconf -aq all.q
+fi
+qconf -ss 2>/dev/null | grep -qx "$host" || q qconf -as "$host"
+qconf -sq all.q | grep -E '^(hostlist|slots|pe_list|shell) '
 qhost -q
 qstat -f
