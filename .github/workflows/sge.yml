@@ -1,7 +1,7 @@
 name: sge
 
-# A real (one-machine) Son of Grid Engine cluster on the runner, to test mitopiper's SGE support.
-# Experimental: runs only on the ci-sge branch, or by hand.
+# A real one-machine Grid Engine (daimh/sge, built from source) on the runner, to test mitopiper's
+# SGE support end to end. Experimental: runs only on the ci-sge branch, or by hand.
 on:
   push:
     branches: [ci-sge]
@@ -9,21 +9,35 @@ on:
 
 jobs:
   sge:
-    name: grid engine (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, ubuntu-24.04]
+    name: tutorial on Grid Engine
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash -el {0}
+    env:
+      NUMT_PARSER_COMMIT: fa4b2dd629859b326033e5b7d5fcb62887ba9232
     steps:
       - uses: actions/checkout@v4
-      - name: Install and start Grid Engine
+      - name: Build and start Grid Engine
         run: .github/sge/setup_sge.sh
       - name: Smoke test (qsub, -hold_jid, array, qacct)
         run: .github/sge/smoke_test.sh
-      - name: Grid Engine logs
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: envs/mitopiper-tools.yml
+          cache-environment: true
+      - name: Install mitopiper and Numt Parser
+        run: |
+          pip install .
+          git clone https://github.com/adeflamingh/NuMt_parser "$RUNNER_TEMP/NuMt_parser"
+          git -C "$RUNNER_TEMP/NuMt_parser" checkout "$NUMT_PARSER_COMMIT"
+          chmod +x "$RUNNER_TEMP/NuMt_parser/bin/numt_parser.py"
+          echo "$RUNNER_TEMP/NuMt_parser/bin" >> "$GITHUB_PATH"
+      - name: Tutorial through Grid Engine (three presets, checked against the truth)
+        run: .github/sge/run_tutorial_sge.sh "$RUNNER_TEMP/sge_tutorial" all.q
+      - name: Grid Engine and job logs
         if: always()
         run: |
-          sudo tail -n 40 /var/spool/gridengine/qmaster/messages || true
-          sudo find /var/spool/gridengine -name messages -path '*execd*' -exec tail -n 20 {} \; || true
+          sudo tail -n 30 /opt/sge/default/spool/qmaster/messages || true
+          tail -n 20 "$RUNNER_TEMP"/sge_tutorial/tutorial_ws/output/*/stderr/s_* 2>/dev/null | tail -n 80 || true

@@ -1,138 +1,57 @@
 #!/usr/bin/env bash
-# Install and start a one-machine Son of Grid Engine cluster on a GitHub Actions Ubuntu runner,
-# with a queue "all.q" and the "shared" parallel environment mitopiper's job headers use.
+# Build and start a one-machine Grid Engine cluster on an Ubuntu GitHub Actions runner:
+# queue "all.q" on this host and the "shared" parallel environment mitopiper's job headers use.
+#
+# Ubuntu's gridengine packages (8.1.9, 22.04 and 24.04) crash while initialising the cluster
+# (segfault in the spooling library), so Grid Engine is built from daimh/sge, a maintained fork
+# of Son of Grid Engine that is tested weekly on Ubuntu. These are the steps of its README's
+# "Quick test on one machine", checked by hand before being put here.
 set -euxo pipefail
 
+SGE_COMMIT=${SGE_COMMIT:-82bf084f03d3a12d4a2d55aea83ca7b1915e1c29}
 host=$(hostname)
-# Grid Engine wants the host name to resolve to a real (non-loopback) address.
 ip=$(hostname -I | awk '{print $1}')
-sudo sed -i "/[[:space:]]$host\$/d" /etc/hosts
+sudo sed -i "/[[:space:]]$host\$/d" /etc/hosts      # the host name must not resolve to loopback
 echo "$ip $host" | sudo tee -a /etc/hosts
 
-sudo debconf-set-selections <<SEL
-gridengine-common shared/gridenginemaster string $host
-gridengine-common shared/gridenginecell string default
-gridengine-common shared/gridengineconfig boolean true
-gridengine-client shared/gridenginemaster string $host
-gridengine-client shared/gridenginecell string default
-gridengine-client shared/gridengineconfig boolean true
-postfix postfix/main_mailer_type select No configuration
-SEL
 sudo apt-get update -qq
-# a huge open-files limit crashes Grid Engine's setup
-ulimit -n 1024
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gridengine-master gridengine-exec gridengine-client
-dpkg -l | grep gridengine
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential cmake git libdb5.3-dev \
+    libhwloc-dev libncurses-dev libpam0g-dev libssl-dev libsystemd-dev libtirpc-dev libxext-dev pkgconf
+src=$(mktemp -d)
+git clone -q https://github.com/daimh/sge "$src"
+git -C "$src" checkout -q "$SGE_COMMIT"
+cmake -S "$src" -B "$src/build" -DCMAKE_INSTALL_PREFIX=/opt/sge > /dev/null
+cmake --build "$src/build" -j "$(nproc)" > /dev/null
+sudo cmake --install "$src/build" > /dev/null
 
-export SGE_ROOT=/var/lib/gridengine SGE_CELL=default
-echo "SGE_ROOT=$SGE_ROOT" >> "${GITHUB_ENV:-/dev/null}"
-echo "SGE_CELL=$SGE_CELL" >> "${GITHUB_ENV:-/dev/null}"
-echo "$host" | sudo tee $SGE_ROOT/$SGE_CELL/common/act_qmaster
-sudo service gridengine-master restart || sudo /etc/init.d/gridengine-master restart
+id sge > /dev/null 2>&1 || sudo useradd -r -d /opt/sge sge
+sudo chown -R sge /opt/sge
+cd /opt/sge
+# The installers also try to start the daemons through systemd; start them by hand when that fails.
+yes "" | sudo ./install_qmaster > /tmp/install_qmaster.log 2>&1 || true
+pgrep sge_qmaster > /dev/null || sudo /opt/sge/bin/lx-amd64/sge_qmaster
+sleep 3
+yes "" | sudo ./install_execd > /tmp/install_execd.log 2>&1 || true
+pgrep sge_execd > /dev/null || sudo /opt/sge/bin/lx-amd64/sge_execd
 sleep 5
-pgrep -a sge_qmaster
+pgrep -a sge_
 
-sudo -u sgeadmin qconf -am "$USER"
-qconf -ah "$host" || true
-qconf -as "$host" || true
+set +u; source /opt/sge/default/common/settings.sh; set -u
+{ echo "SGE_ROOT=$SGE_ROOT"; echo "SGE_CELL=$SGE_CELL"; } >> "${GITHUB_ENV:-/dev/null}"
+echo "/opt/sge/bin/lx-amd64" >> "${GITHUB_PATH:-/dev/null}"
 
 tmp=$(mktemp -d)
-cat > "$tmp/host" <<HOST
-hostname $host
-load_scaling NONE
-complex_values NONE
-user_lists NONE
-xuser_lists NONE
-projects NONE
-xprojects NONE
-usage_scaling NONE
-report_variables NONE
-HOST
-qconf -Ae "$tmp/host"
-cat > "$tmp/allhosts" <<HG
-group_name @allhosts
-hostlist $host
-HG
-qconf -Ahgrp "$tmp/allhosts"
-cat > "$tmp/pe" <<PE
-pe_name            shared
-slots              99
-user_lists         NONE
-xuser_lists        NONE
-start_proc_args    NONE
-stop_proc_args     NONE
-allocation_rule    \$pe_slots
-control_slaves     FALSE
-job_is_first_task  TRUE
-urgency_slots      min
-accounting_summary FALSE
-qsort_args         NONE
-PE
-qconf -Ap "$tmp/pe"
-qconf -sq > /dev/null 2>&1 || true
-# queue: start from the template, put every host in it, 4 slots, the "shared" PE
-qconf -sq all.q > "$tmp/q" 2>/dev/null || sed -n '1,$p' /usr/share/gridengine/default/common/queue_template > "$tmp/q" 2>/dev/null || true
-if [ ! -s "$tmp/q" ]; then
-  cat > "$tmp/q" <<Q
-qname all.q
-hostlist @allhosts
-seq_no 0
-load_thresholds NONE
-suspend_thresholds NONE
-nsuspend 1
-suspend_interval 00:05:00
-priority 0
-min_cpu_interval 00:05:00
-processors UNDEFINED
-qtype BATCH INTERACTIVE
-ckpt_list NONE
-pe_list shared
-rerun FALSE
-slots 4
-tmpdir /tmp
-shell /bin/bash
-prolog NONE
-epilog NONE
-shell_start_mode posix_compliant
-starter_method NONE
-suspend_method NONE
-resume_method NONE
-terminate_method NONE
-notify 00:00:60
-owner_list NONE
-user_lists NONE
-xuser_lists NONE
-subordinate_list NONE
-complex_values NONE
-projects NONE
-xprojects NONE
-calendar NONE
-initial_state default
-s_rt INFINITY
-h_rt INFINITY
-s_cpu INFINITY
-h_cpu INFINITY
-s_fsize INFINITY
-h_fsize INFINITY
-s_data INFINITY
-h_data INFINITY
-s_stack INFINITY
-h_stack INFINITY
-s_core INFINITY
-h_core INFINITY
-s_rss INFINITY
-h_rss INFINITY
-s_vmem INFINITY
-h_vmem INFINITY
-Q
-  qconf -Aq "$tmp/q"
-else
-  qconf -mattr queue hostlist @allhosts all.q
-  qconf -mattr queue slots 4 all.q
-  qconf -mattr queue pe_list shared all.q
-fi
-sudo service gridengine-exec restart || sudo /etc/init.d/gridengine-exec restart
-sleep 10
-pgrep -a sge_execd
-qhost
+printf 'group_name @allhosts\nhostlist %s\n' "$host" > "$tmp/allhosts"
+sudo -E env PATH="$PATH" qconf -Ahgrp "$tmp/allhosts"
+qconf -sp smp | sed 's/^pe_name .*/pe_name            shared/' > "$tmp/pe"
+sudo -E env PATH="$PATH" qconf -Ap "$tmp/pe"
+cat > "$tmp/edit_queue" <<'EOF'
+#!/bin/sh
+sed -i -e 's/^qname .*/qname all.q/' -e 's/^hostlist .*/hostlist @allhosts/' -e 's/^slots .*/slots 4/' \
+       -e 's/^pe_list .*/pe_list make smp shared/' -e 's/^shell .*/shell \/bin\/bash/' "$1"
+EOF
+chmod +x "$tmp/edit_queue"
+sudo -E env PATH="$PATH" EDITOR="$tmp/edit_queue" qconf -aq all.q
+sudo -E env PATH="$PATH" qconf -as "$host"
+qhost -q
 qstat -f
