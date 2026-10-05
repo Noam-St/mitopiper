@@ -32,6 +32,7 @@ import json
 import logging
 import math
 import re
+import shlex
 import time
 import urllib.error
 import urllib.parse
@@ -617,6 +618,25 @@ def prepare_commands(ref: ReferenceSet, organism: str, workspace_dir: str, workf
     else:
         base = missing_index_commands(ref, workflow, csh)
     return base + derived_commands(ref, organism, workspace_dir, workflow, csh, steps)
+
+
+def prepare_job_lines(ref: ReferenceSet, organism: str, workspace_dir: str, workflow,
+                      steps: Optional[list] = None) -> list:
+    """The reference job's lines for one organism: :func:`prepare_commands` under a lock.
+
+    Several builds of the same workspace (e.g. the three mt presets submitted together) share the
+    derived references and the indices of the reference. Their reference jobs can run at the same
+    time, and two ``bwa index`` writing the same files corrupt them. ``flock`` lets one job prepare
+    an organism at a time; the next one then finds everything built and skips it. The commands run
+    as one POSIX ``sh -ec`` script, so the lock works whatever the job shell (csh/tcsh included).
+    """
+    commands = prepare_commands(ref, organism, workspace_dir, workflow, csh=False, steps=steps)
+    if not commands:
+        return []
+    lock_dir = f"{workspace_dir}/references/derived/{organism}"
+    return [f'echo "Preparing reference of {organism}"',
+            f'mkdir -p "{lock_dir}"',
+            f'flock "{lock_dir}/.prepare.lock" sh -ec {shlex.quote("; ".join(commands))}']
 
 
 def missing_index_commands(ref: ReferenceSet, workflow, csh: Optional[bool] = None) -> list:

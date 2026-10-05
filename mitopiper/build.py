@@ -24,7 +24,7 @@ from .builder import (
 )
 from .config import MANIFEST, Workflow, Workspace, manifest_path
 from .metadata import load_samples, write_sample_table
-from .references import ReferenceRegistry, ReferenceSet, prepare_commands, uses_placeholder
+from .references import ReferenceRegistry, ReferenceSet, prepare_commands, prepare_job_lines, uses_placeholder
 from .schedulers import (
     ExperimentJobs, JobResources, check_resources, format_walltime, header, job_name, master_script, memory_mb,
     stage_dependencies, walltime_seconds,
@@ -258,10 +258,7 @@ def build_experiment(
     # Reference preparation: downloads/indices of managed references, derived references.
     prep_lines = []
     for organism, ref in sorted(refs.items()):
-        cmds = prepare_commands(ref, organism, str(workspace.root), workflow, steps=steps)
-        if cmds:
-            prep_lines.append(f'echo "Preparing reference of {organism}"')
-            prep_lines.extend(cmds)
+        prep_lines.extend(prepare_job_lines(ref, organism, str(workspace.root), workflow, steps=steps))
     plan["prepare_references"] = prep_lines
 
     sample_jobs = [build_sample_job(s, workflow, exp, refs[s.organism], steps) for s in samples]
@@ -418,8 +415,9 @@ def pipeline_tools(workflow: Workflow, sample_jobs: list, experiment_steps: list
         step_lines.setdefault(step.step, []).extend(step.lines)
     # Reference preparation: read the POSIX form of the commands (same tools in every shell).
     for organism, ref in refs.items():
-        step_lines.setdefault("prepare_references", []).extend(
-            prepare_commands(ref, organism, workspace_dir, workflow, csh=False, steps=steps))
+        commands = prepare_commands(ref, organism, workspace_dir, workflow, csh=False, steps=steps)
+        if commands:   # run under flock (prepare_job_lines)
+            step_lines.setdefault("prepare_references", []).extend(commands + ["flock"])
     return toolcheck.required_tools(step_lines)
 
 

@@ -254,3 +254,39 @@ def test_present_star_index_does_not_read_the_fasta(tmp_path, monkeypatch):
     monkeypatch.setattr(references, "validate_fasta", lambda path: 4)
     (command,) = prepare_commands(ReferenceSet(refpath=str(fasta)), "Homo_sapiens", str(ws.root), wf, csh=False)
     assert "genomeGenerate" in command and "--genomeSAindexNbases" in command
+
+
+SLOW_BWA = r"""#!/bin/sh
+# bwa index that takes a moment and notices another indexer running at the same time
+[ "$1" = index ] || exit 0
+if [ -e "$2.indexing" ]; then echo COLLISION >> "$2.log"; fi
+touch "$2.indexing"; echo start >> "$2.log"; sleep 1; echo index > "$2.bwt"; rm -f "$2.indexing"
+"""
+
+
+def test_reference_jobs_of_parallel_builds_take_turns(tmp_path, monkeypatch):
+    from mitopiper.references import prepare_job_lines
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, body in {"bwa": SLOW_BWA, "samtools": FAKE_SAMTOOLS,
+                       "mitopiper": f'#!/bin/sh\nPYTHONPATH="{REPO}" exec "{sys.executable}" -m mitopiper "$@"\n'}.items():
+        (bin_dir / name).write_text(body)
+        (bin_dir / name).chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    ws = Workspace(tmp_path / "ws")
+    ws.initialise()
+    (tmp_path / "mt.fa").write_text(f">NC_012920.1\n{MT}\n")
+    ref = ReferenceSet(refpath=str(tmp_path / "mt.fa"))
+    wf = ws.load_workflow("mt-variants")
+    wf.set_general("mt_rotation", 5)
+    lines = prepare_job_lines(ref, "Homo_sapiens", str(ws.root), wf, steps=["bwa-align", "align-rotated"])
+    assert lines[-1].startswith('flock "') and " sh -ec " in lines[-1]
+    scripts = []
+    for i in range(2):
+        (tmp_path / f"prep{i}.sh").write_text("set -e\n" + "\n".join(lines) + "\n")
+        scripts.append(subprocess.Popen(["bash", str(tmp_path / f"prep{i}.sh")], stdout=subprocess.DEVNULL))
+    assert [p.wait() for p in scripts] == [0, 0]
+    rotated = ws.references_dir / "derived" / "Homo_sapiens" / "mt.rotated5.fa"
+    for log in (tmp_path / "mt.fa.log", rotated.with_name(rotated.name + ".log")):
+        assert log.read_text().split() == ["start"], log      # indexed once, never two at the same time
