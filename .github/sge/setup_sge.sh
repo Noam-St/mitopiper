@@ -22,7 +22,9 @@ git clone -q https://github.com/daimh/sge "$src"
 git -C "$src" checkout -q "$SGE_COMMIT"
 cmake -S "$src" -B "$src/build" -DCMAKE_INSTALL_PREFIX=/opt/sge > /dev/null
 cmake --build "$src/build" -j "$(nproc)" > /dev/null
-sudo cmake --install "$src/build" > /dev/null
+# from the source folder: the install step runs ./CMakePostInstall.sh (the qrls/qselect/qrsh... links)
+(cd "$src" && sudo cmake --install build > /dev/null)
+test -L /opt/sge/bin/lx-amd64/qselect
 
 id sge > /dev/null 2>&1 || sudo useradd -r -d /opt/sge sge
 sudo chown -R sge /opt/sge
