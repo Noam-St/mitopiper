@@ -161,3 +161,51 @@ def test_cutadapt_reports_are_not_errors(tmp_path):
                    "length\tcount\texpect\tmax.err\terror counts\ncutadapt: error: unrecognized arguments\n")
     count, errors = mon.ErrorScanner().scan(log)
     assert count == 1 and "unrecognized" in errors[0].text
+
+
+# qacct records of a real Son of Grid Engine (8.1.9, daimh/sge) run, shortened.
+QACCT = {
+    "4": "==============================================================\nqname        all.q\njobname      check_e\n"
+         "jobnumber    4\nfailed       0    \nexit_status  0                   \nru_wallclock 6s\n"
+         "category     -q all.q -l h_rt=900,mem_free=1G -pe shared 1\n",
+    "27": "==============================================================\nqname        all.q\njobname      s_control_0\n"
+          "jobnumber    27\nfailed       37  : qmaster enforced h_rt, h_cpu, or h_vmem limit\n"
+          "exit_status  137                  (Killed)\nru_wallclock 11s\n"
+          "category     -q all.q -l h_rt=10,mem_free=1G -pe shared 1\n",
+    "30": "==============================================================\nqname        all.q\njobname      to_cancel\n"
+          "jobnumber    30\nfailed       100 : assumedly after job\nexit_status  137                  (Killed)\n"
+          "ru_wallclock 4s\ncategory     -l h_rt=600\n",
+    "31": "==============================================================\njobnumber    31\n"
+          "failed       37  : qmaster enforced h_rt, h_cpu, or h_vmem limit\nexit_status  137\nru_wallclock 50s\n"
+          "category     -l h_rt=3600,h_vmem=2G\n",
+}
+
+
+def test_sge_accounting_reads_why_a_job_ended(monkeypatch):
+    monkeypatch.setattr(mon, "_SGE_ACCOUNTING", {})
+    calls = []
+
+    def qacct(cmd):
+        calls.append(cmd)
+        return QACCT.get(cmd[2], "error: job id not found\n")
+
+    assert mon.sge_accounting("4", qacct) == (mon.DONE, "COMPLETED")
+    assert mon.sge_accounting("27", qacct) == (mon.KILLED, "TIMEOUT")          # ran its whole h_rt of 10 s
+    assert mon.sge_accounting("30", qacct) == (mon.KILLED, "CANCELLED")        # qdel
+    assert mon.sge_accounting("31", qacct) == (mon.KILLED, "OUT_OF_MEMORY")    # far below h_rt, asked h_vmem
+    assert mon.sge_accounting("99", qacct) is None                             # not (yet) in the accounting
+    mon.sge_accounting("27", qacct)
+    assert [c[2] for c in calls] == ["4", "27", "30", "31", "99"]              # finished jobs are asked once
+    assert mon.sge_accounting("12_3", lambda cmd: calls.append(cmd)) is None and calls[-1] == ["qacct", "-j", "12", "-t", "3"]
+
+
+def test_bwa_info_lines_are_not_a_missing_index():
+    from mitopiper.diagnose import diagnose
+    job = mon.JobStatus(experiment="E", name="s_a_0", kind="sample", job_id="27", script="")
+    job.state, job.step, job.scheduler_state = mon.KILLED, "bwa-align", "TIMEOUT"
+    job.errors = [mon.ErrorLine(1, "[M::bwa_idx_load_from_disk] read 0 ALT contigs")] if hasattr(mon, "ErrorLine") else []
+    from mitopiper.diagnose import Context
+    causes = [s.cause for s in diagnose(job, Context(scheduler="sge"))]
+    assert causes == ["The job hit its time limit in step 'bwa-align'"]        # no BWA index, no Eqw
+    job.scheduler_state = "Eqw"
+    assert any("Eqw" in s.cause for s in diagnose(job, Context(scheduler="sge")))

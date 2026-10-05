@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .config import Workspace, manifest_path
-from .schedulers import kind_of
+from .schedulers import kind_of, walltime_seconds
 
 # Job states, in display order.
 NOT_SUBMITTED, PENDING, RUNNING, DONE, FAILED, KILLED, UNKNOWN = (
@@ -183,6 +183,52 @@ def _run(cmd: list, timeout: int = 30) -> Optional[str]:
     except (OSError, subprocess.SubprocessError):
         return None
     return result.stdout if result.returncode == 0 else None
+
+
+#: SGE accounting of finished jobs never changes: ask qacct once per job (it reads the whole accounting file).
+_SGE_ACCOUNTING: dict = {}
+
+
+def sge_accounting(job_id: str, runner: Callable = _run) -> Optional[tuple]:
+    """How SGE ended a job, from ``qacct``: ``(state, raw)`` with raw ``COMPLETED``, ``TIMEOUT``,
+    ``OUT_OF_MEMORY``, ``CANCELLED``, ``LIMIT`` or ``FAILED``; ``None`` if qacct does not know it (yet).
+
+    ``failed 37`` ("qmaster enforced h_rt, h_cpu, or h_vmem limit") covers several limits: it is a time
+    limit when the job ran as long as the ``h_rt`` it asked for, a memory limit when it asked for ``h_vmem``.
+    """
+    if job_id in _SGE_ACCOUNTING:
+        return _SGE_ACCOUNTING[job_id]
+    array_id, _, task = job_id.partition("_")
+    out = runner(["qacct", "-j", array_id] + (["-t", task] if task else []))
+    if not out or "jobnumber" not in out:
+        return None                                  # unknown, or not written yet: ask again later
+    record = out.split("=" * 10)[-1]                 # a reused job number: the last record
+    fields = dict(line.split(None, 1) for line in record.splitlines() if len(line.split(None, 1)) == 2)
+    try:
+        failed = int(fields.get("failed", "0").split()[0])
+        exit_status = int(fields.get("exit_status", "0").split()[0])
+    except ValueError:
+        return None
+    category = fields.get("category", "")
+    requested = re.search(r"h_rt=([\d:]+)", category)
+    wall = re.match(r"[\d.]+", fields.get("ru_wallclock", "0"))
+    if failed == 0 and exit_status == 0:
+        result = (DONE, "COMPLETED")
+    elif failed == 37:
+        value = requested.group(1) if requested else ""
+        limit = int(value) if value.isdigit() else walltime_seconds(value) if value else 0   # SGE: plain = seconds
+        if limit and wall and float(wall.group()) >= limit - 1:
+            result = (KILLED, "TIMEOUT")
+        elif "h_vmem" in category:
+            result = (KILLED, "OUT_OF_MEMORY")
+        else:
+            result = (KILLED, "LIMIT")
+    elif failed == 100 and exit_status in (137, 143):      # signalled: qdel, or the kernel's OOM killer
+        result = (KILLED, "CANCELLED")
+    else:
+        result = (FAILED, "FAILED")
+    _SGE_ACCOUNTING[job_id] = result
+    return result
 
 
 def query_scheduler(scheduler: str, job_ids: list, runner: Callable = _run) -> Optional[dict]:
@@ -366,7 +412,8 @@ def collect(workspace: Workspace, experiments: list, scanner: ErrorScanner,
             names += sorted(p.stem for p in scripts.glob("*.sh") if p.stem not in submitted)
         submitting = (exp_dir / ".submitting").exists()
         tracked = experiment_tracks_status(exp_dir)
-        scheduler_info = query(experiment_scheduler(exp_dir), [submitted[n].get("job_id", "") for n in submitted])
+        scheduler = experiment_scheduler(exp_dir)
+        scheduler_info = query(scheduler, [submitted[n].get("job_id", "") for n in submitted])
         for name in names:
             row = submitted.get(name, {})
             kind = row.get("kind") or kind_of(name)
@@ -396,6 +443,10 @@ def collect(workspace: Workspace, experiments: list, scanner: ErrorScanner,
                     # it was killed before the EXIT trap could run (time/memory limit, scancel ...).
                     if scheduler_info is not None and (sched is None or sched[0] in (DONE, FAILED, KILLED)):
                         job.state = KILLED
+                        if sched is None and scheduler == "sge":   # gone from qstat: ask the accounting why
+                            accounting = sge_accounting(job.job_id)
+                            job.scheduler_state = (accounting[1] if accounting
+                                                   else "qacct record not written yet - look again in a minute")
             elif sched:
                 job.state = sched[0]
             elif row and scheduler_info is not None:
