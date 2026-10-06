@@ -564,11 +564,10 @@ def derived_paths(ref: ReferenceSet, organism: str, workspace_dir: str, shift: i
             "numt_work": f"{folder}/{stem}.numt_search"}
 
 
-def mt_shift(workflow) -> int:
-    try:
-        return int(workflow.general("mt_rotation", 500) or 500)
-    except (TypeError, ValueError):
-        return 500
+def mt_shift(workflow) -> str:
+    """The general setting mt_rotation: a number of bases, or "half" (the default) for half the mtDNA."""
+    value = str(workflow.general("mt_rotation", "half") or "half").strip()
+    return value if value.isdigit() and int(value) > 0 else "half"
 
 
 def derived_commands(ref: ReferenceSet, organism: str, workspace_dir: str, workflow, csh: Optional[bool] = None,

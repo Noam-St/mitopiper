@@ -5,7 +5,7 @@
 The single `maker.py` script was refactored into the installable `mitopiper` package.
 
 ### Added
-- mtDNA circularity, based on the original `circulize.py` / `combine_processed_pileups.py`: samples are also aligned to a rotated copy of the mtDNA (`mt_rotation`, default 500), and `mitopiper mt combine-pileups` merges both pileups so the `mt_junction_window` positions (default 400) on either side of the origin come from the rotated alignment.
+- mtDNA circularity, based on the original `circulize.py` / `combine_processed_pileups.py`: samples are also aligned to a rotated copy of the mtDNA (`mt_rotation`, default half the mtDNA length), and `mitopiper mt combine-pileups` merges both pileups so the `mt_junction_window` positions (default 400) on either side of the origin come from the rotated alignment.
 - NUMT-aware alignment: `mt-variants-numt` aligns to nuclear genome + mtDNA (`mitopiper mt combine-references` drops duplicate mitochondrial sequences of the assembly), keeps reads mapping to the mtDNA with MAPQ ≥ `numt_min_mapq`, and realigns only those to the rotated mtDNA.
 - Tutorial (`docs/tutorial.md`): `tutorial/simulate.py` makes a deterministic mtDNA dataset with a known answer: heteroplasmies of 5–20% (one next to the origin), a homoplasmic variant, a diverged NUMT plus a `chrM` copy in a synthetic nuclear genome, NUMT contamination, and reads spanning the origin. The tutorial runs it through all three mt presets and checks the result against the truth. It was run end to end with the tools of `envs/mitopiper-tools.yml`, whose pins resolve.
 - Benchmark (`benchmark/`): `run_presets.sh` builds and submits the same samples with every mt preset, and `compare.py` reports depth next to the origin (linear vs circular), reads removed as NUMTs, concordance of calls between presets, and, with a truth table, precision, recall and frequency error. Figures are drawn when matplotlib is installed.
@@ -68,6 +68,7 @@ The single `maker.py` script was refactored into the installable `mitopiper` pac
 - pandas and Biopython are no longer needed.
 
 ### Fixed
+- The rotated mtDNA is now shifted by half its length (`mt_rotation` = `half`, was 500 bases). With 500, positions 1–400 lay 100–500 bp from the end of the rotated copy, so paired reads there were lost again and depth in the circular pileup fell by up to half between positions 250 and 400 (`mt-variants`; origin depth 0.87 → 0.93 of the rest in the tutorial). Workspaces created earlier keep `mt_rotation` 500 in `config/<preset>/general_settings.json`: set it to `half`.
 - csh/tcsh jobs check every command, including pipelines starting with `echo` such as the MD5 check, so a corrupt download stops the job. With `fail_fast` off they report the exit status of the last command, like bash, instead of always `DONE`.
 - `rerun --clean` from the download step works under csh/tcsh: file patterns are removed with `find` instead of an unmatched `rm` glob ("No match").
 - Rerun jobs only wait for jobs resubmitted by the same rerun. Reruns of builds made without status files (older versions, csh/sh/dash) no longer skip themselves.

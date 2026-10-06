@@ -151,7 +151,7 @@ origin, relative to the rest of the mtDNA:
 
 | preset | linear pileup | circular pileup |
 |---|---|---|
-| plain | 0.67 | 0.87 |
+| plain | 0.67 | 0.93 |
 | mapq | 0.71 | 0.99 |
 | numtparser | 0.73 | 1.01 |
 

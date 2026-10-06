@@ -57,6 +57,20 @@ def test_combine_pileups_start_only_matches_the_original_scripts(tmp_path):
         mtdna.combine_pileups(normal, rotated, tmp_path / "x", 100, shift=50, window=60)
 
 
+def test_default_rotation_is_half_the_length(tmp_path):
+    src = fasta(tmp_path / "mt.fa", "MT", "ABCDEFGHIJ")
+    assert main(["mt", "rotate", str(src), str(tmp_path / "rot.fa")]) == 0
+    with open(tmp_path / "rot.fa") as handle:
+        assert list(mtdna.read_fasta(handle)) == [("MT", "FGHIJABCDE")]
+    # positions 1-2 and 9-10 come from the middle of the rotated copy (6-7 and 4-5), not from its ends
+    (tmp_path / "n.p").write_text("".join(pileup_line("MT", p, 1, "n") for p in range(1, 11)))
+    (tmp_path / "r.p").write_text("".join(pileup_line("MT", p, 1, f"r{p}") for p in range(1, 11)))
+    mtdna.combine_pileups(tmp_path / "n.p", tmp_path / "r.p", tmp_path / "c.p", 10, window=2)
+    tags = [line.split("\t")[4] for line in (tmp_path / "c.p").read_text().splitlines()]
+    assert tags == ["r6", "r7"] + ["n"] * 6 + ["r4", "r5"]
+    assert mtdna.resolve_shift("half", 16569) == 8284 and mtdna.resolve_shift("500", 16569) == 500
+
+
 def test_combine_references_drops_mitochondrial_copies(tmp_path):
     nuclear = tmp_path / "nuc.fa"
     nuclear.write_text(">chr1 Homo sapiens chromosome 1\nAAAA\nAAAA\n>chrM\nCCCC\n>NC_012920.1 Homo sapiens mitochondrion\nGGGG\n"

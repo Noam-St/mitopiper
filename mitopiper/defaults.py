@@ -263,8 +263,9 @@ DEFAULT_MAIN = {
     "download_queue": ["", "queue/partition of the download job with download_mode 'queue' (empty: qsub_queue)"],
     "array_jobs": [False, "submit the sample jobs of an experiment as one array job"],
     "max_running": [0, "run at most this many sample jobs at the same time (0 = no limit; uses an array job)"],
-    "mt_rotation": [500, "mtDNA: bases moved from the start to the end of the rotated reference (circularity)"],
-    "mt_junction_window": [400, "mtDNA: positions next to the origin taken from the rotated alignment (at most mt_rotation)"],
+    "mt_rotation": ["half", "mtDNA: bases moved from the start to the end of the rotated reference (circularity): "
+                            "half (of the mtDNA length) or a number"],
+    "mt_junction_window": [400, "mtDNA: positions next to the origin taken from the rotated alignment (well below mt_rotation)"],
     "numt_min_mapq": [20, "mtDNA: minimum mapping quality of reads kept after aligning to nuclear + mtDNA (NUMTs)"],
     "container_runtime": ["apptainer", "program that runs step containers ('apptainer' or 'singularity')"],
     "tool_check": [True, "run check_<exp>.sh first: it stops the pipeline if a tool the jobs call cannot be found"],

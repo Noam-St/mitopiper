@@ -721,10 +721,10 @@ sample). Example: enable the bundled `multiqc` step.
 **Circularity.** The mtDNA is circular but references are linear, so reads that span the origin of
 the sequence (inside the D-loop) align badly to both ends, and coverage and variants near the origin
 are under-called. The `mt-variants` presets therefore also align every sample to a rotated copy of
-the mtDNA, whose first `mt_rotation` bases (default 500) were moved to the end, so the origin lies
-inside the sequence. `mitopiper mt combine-pileups` then builds `pileup/<sample>.circular.pileup`
-in normal coordinates. The first and last `mt_junction_window` positions (default 400, at most
-`mt_rotation`) come from the rotated alignment, and every other position comes from the normal one.
+the mtDNA, whose first `mt_rotation` bases (default `half`: half its length, like gnomAD's shifted
+reference) were moved to the end, so the origin lies in the middle of the sequence, far from both of its
+ends. `mitopiper mt combine-pileups` then builds `pileup/<sample>.circular.pileup` in normal coordinates.
+The first and last `mt_junction_window` positions (default 400) come from the rotated alignment, and every other position comes from the normal one.
 This is the approach of the original `circulize.py` / `combine_processed_pileups.py` scripts, applied
 directly to `samtools mpileup` output and extended to both sides of the origin. For the original
 start-only behaviour, run the helper with `--tail-window 0`.
@@ -802,8 +802,8 @@ under `references/derived/<organism>/`. The helpers run inside the jobs, so mito
 installed in the job environment (the tool check verifies this). They are also available directly:
 
 ```bash
-mitopiper mt rotate mt.fa mt.rotated.fa --shift 500
-mitopiper mt combine-pileups normal.pileup rotated.pileup merged.pileup --reference mt.fa --shift 500 --window 400
+mitopiper mt rotate mt.fa mt.rotated.fa            # --shift half (default) or a number of bases
+mitopiper mt combine-pileups normal.pileup rotated.pileup merged.pileup --reference mt.fa --window 400
 mitopiper mt combine-references genome.fa mt.fa genome_with_mt.fa
 mitopiper mt contigs mt.fa
 mitopiper mt fragments mt.fa fragments.fa --size 100 --step 20

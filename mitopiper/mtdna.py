@@ -5,8 +5,8 @@ Circularity
     origin of the sequence (in the D-loop) align poorly to either end. As in
     the original ``circulize.py`` / ``combine_processed_pileups.py`` scripts,
     reads are also aligned to a *rotated* copy of the reference, whose first
-    ``shift`` bases were moved to the end so that the origin lies inside the
-    sequence. :func:`combine_pileups` then takes the positions near the origin
+    ``shift`` bases (by default half of it, as in gnomAD's shifted reference) were
+    moved to the end so that the origin lies in the middle of the sequence. :func:`combine_pileups` then takes the positions near the origin
     (the first ``window`` bases and, by default, the last ``tail_window``
     bases) from the rotated alignment, shifted back to normal coordinates,
     and every other position from the normal alignment.
@@ -79,7 +79,18 @@ def sequence_length(fasta) -> int:
 
 
 # ------------------------------------------------------------------ circularity
-def rotate_fasta(fasta, output, shift: int = 500) -> int:
+def resolve_shift(shift, length: int) -> int:
+    """``"half"`` (the default) -> ``length // 2``; a number of bases is used as given.
+
+    Half the length puts the origin as far as possible from both ends of the rotated copy:
+    with a short shift, paired reads near the origin come close to the rotated copy's end
+    and are lost there just as they are at the ends of the normal reference."""
+    if str(shift).strip().lower() in ("half", "auto", "", "0", "none"):
+        return length // 2
+    return int(shift)
+
+
+def rotate_fasta(fasta, output, shift="half") -> int:
     """Write ``fasta`` with the first ``shift`` bases of its first sequence moved to the end.
 
     The header is kept, so alignments to the rotated copy report the same
@@ -91,6 +102,7 @@ def rotate_fasta(fasta, output, shift: int = 500) -> int:
     if not records:
         raise ValueError(f"{fasta} contains no sequence")
     header, sequence = records[0]
+    shift = resolve_shift(shift, len(sequence))
     if not 0 < shift < len(sequence):
         raise ValueError(f"shift must be between 1 and {len(sequence) - 1} (the sequence has {len(sequence)} bases)")
     Path(output).parent.mkdir(parents=True, exist_ok=True)
@@ -106,7 +118,7 @@ def rotated_to_normal(position: int, length: int, shift: int) -> int:
     return position + shift if position <= length - shift else position - (length - shift)
 
 
-def combine_pileups(normal, rotated, output, length: int, shift: int = 500, window: int = 400,
+def combine_pileups(normal, rotated, output, length: int, shift="half", window: int = 400,
                     tail_window: Optional[int] = None) -> dict:
     """Merge the pileups of the normal and the rotated alignment into one, in normal coordinates.
 
@@ -119,6 +131,7 @@ def combine_pileups(normal, rotated, output, length: int, shift: int = 500, wind
     Returns counts of the lines taken from each input.
     """
     tail_window = window if tail_window is None else tail_window
+    shift = resolve_shift(shift, length)
     if window > shift:
         raise ValueError(f"window ({window}) must not exceed the rotation shift ({shift})")
     if tail_window >= length - shift:
@@ -321,13 +334,13 @@ def add_parser(sub) -> None:
     rot = msub.add_parser("rotate", help="move the first SHIFT bases of the mtDNA to its end")
     rot.add_argument("fasta")
     rot.add_argument("output")
-    rot.add_argument("--shift", type=int, default=500)
+    rot.add_argument("--shift", default="half", help="bases moved to the end: a number, or half (default)")
     comb = msub.add_parser("combine-pileups", help="merge normal and rotated pileups into one circular-aware pileup")
     comb.add_argument("normal")
     comb.add_argument("rotated")
     comb.add_argument("output")
     comb.add_argument("--reference", required=True, help="the normal (not rotated) mtDNA FASTA, for its length")
-    comb.add_argument("--shift", type=int, default=500)
+    comb.add_argument("--shift", default="half", help="the shift of the rotated reference (a number, or half)")
     comb.add_argument("--window", type=int, default=400, help="positions at the start taken from the rotated pileup")
     comb.add_argument("--tail-window", type=int, help="positions at the end taken from the rotated pileup (default: --window)")
     refs = msub.add_parser("combine-references", help="nuclear genome + mtDNA (without duplicate mt sequences)")
