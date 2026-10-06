@@ -1,10 +1,12 @@
 name: sge
 
-# A real one-machine Grid Engine (daimh/sge, built from source) on the runner, to test mitopiper's
-# SGE support end to end. Experimental: runs only on the ci-sge branch, or by hand.
+# A real one-machine Grid Engine (daimh/sge, built from source) on the runner: the tutorial's three
+# mt presets are submitted with mitopiper's sge scheduler and checked against the simulated truth.
+# About 7 minutes; runs on master, on pull requests, and by hand.
 on:
   push:
-    branches: [ci-sge]
+    branches: [master]
+  pull_request:
   workflow_dispatch:
 
 jobs:
