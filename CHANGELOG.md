@@ -68,6 +68,7 @@ The single `maker.py` script was refactored into the installable `mitopiper` pac
 - pandas and Biopython are no longer needed.
 
 ### Fixed
+- `tool_versions.tsv` no longer records Java's "Picked up JAVA_TOOL_OPTIONS" notice as FastQC's version when that variable is set, and leading spaces of version lines are removed.
 - The rotated mtDNA is now shifted by half its length (`mt_rotation` = `half`, was 500 bases). With 500, positions 1–400 lay 100–500 bp from the end of the rotated copy, so paired reads there were lost again and depth in the circular pileup fell by up to half between positions 250 and 400 (`mt-variants`; origin depth 0.87 → 0.93 of the rest in the tutorial). Workspaces created earlier keep `mt_rotation` 500 in `config/<preset>/general_settings.json`: set it to `half`.
 - csh/tcsh jobs check every command, including pipelines starting with `echo` such as the MD5 check, so a corrupt download stops the job. With `fail_fast` off they report the exit status of the last command, like bash, instead of always `DONE`.
 - `rerun --clean` from the download step works under csh/tcsh: file patterns are removed with `find` instead of an unmatched `rm` glob ("No match").

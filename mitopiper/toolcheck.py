@@ -140,10 +140,11 @@ def merge(*tool_maps: dict) -> dict:
 
 # ---------------------------------------------------------------- job script
 #: Prints the first line with a version number that ``$1 --version`` (or, for tools such as bwa
-#: that only show it in their usage text, ``$1`` alone) writes. No input, time-limited.
+#: that only show it in their usage text, ``$1`` alone) writes. No input, time-limited. Java's
+#: "Picked up JAVA_TOOL_OPTIONS ..." notice (FastQC, when the variable is set) is skipped.
 _VERSION_OF = ('v() { t=""; command -v timeout >/dev/null 2>&1 && t="timeout 20"; '
                '{ $t "$1" --version </dev/null 2>&1 || $t "$1" </dev/null 2>&1; } '
-               "| grep -m1 -E '[0-9]+\\.[0-9]+' | tr '\\t' ' '; }")
+               "| grep -v '^Picked up ' | grep -m1 -E '[0-9]+\\.[0-9]+' | tr '\\t' ' ' | sed 's/^ *//'; }")
 
 
 def lookup_script(tools: dict, versions_file: Optional[str] = None) -> str:
