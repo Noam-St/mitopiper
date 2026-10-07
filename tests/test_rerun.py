@@ -182,3 +182,13 @@ def test_corrupt_input_from_outside_the_build_gets_no_automatic_resume_point():
     (sug, *_) = diagnose(job(["gzip: /w/output/E/fastq/x_1.fastq.gz: unexpected end of file"], step="trim"), ctx)
     assert "not produced by any step of this build" in sug.advice[0]
     assert merged_rerun_options([sug]) == {}
+
+
+def test_fastqc_truncated_file_is_corrupt_input():
+    # FastQC is usually the first step to read a truncated FASTQ (seen on Grid Engine)
+    ctx = _ctx(steps=("wget", "fastqc_pre", "trim"))
+    lines = ["Failed to process file patient_1_SO_2.fastq.gz",
+             "uk.ac.babraham.FastQC.Sequence.SequenceFormatException: Ran out of data in the middle of a fastq entry.  "
+             "Your file is probably truncated"]
+    (sug, *_) = diagnose(job(lines, step="fastqc_pre"), ctx)
+    assert sug.cause.startswith("An input file is corrupt or incomplete")

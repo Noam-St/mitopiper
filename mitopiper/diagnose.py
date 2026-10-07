@@ -259,7 +259,8 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
 
     # --- inputs --------------------------------------------------------------------
     corrupt = (r"unexpected end of file|invalid compressed data|crc error|not in gzip format|"
-               r"md5sum: warning|computed checksum did not match|: FAILED$|premature end|truncated (gzip|file)")
+               r"md5sum: warning|computed checksum did not match|: FAILED$|premature end|truncated (gzip|file)|"
+               r"ran out of data in the middle of a fastq entry|file is probably truncated")  # the last two: FastQC
     if _find(corrupt, text):
         producer, path = ctx.input_producer(step, text, corrupt)
         title = "An input file is corrupt or incomplete" + (" (failed checksum)" if "md5" in text.lower() else "")
