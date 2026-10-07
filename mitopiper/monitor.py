@@ -496,14 +496,17 @@ def render_table(statuses: list, color: bool = False, width: int = 120) -> str:
         out.append(f"== {exp}: {len(jobs)} job(s) - {counts}")
         name_w = max([len(j.name) for j in jobs] + [3])
         step_w = max([len(j.step) for j in jobs] + [4])
-        head = f"{'JOB':<{name_w}}  {'ID':>9}  {'STATE':<13}  {'STEP':<{step_w}}  {'ELAPSED':>8}  {'ERR':>4}  LAST ERROR"
-        out.append(head)
+        states = []
         for job in jobs:
-            state = job.state
+            extra = ""
             if job.state in (FAILED, KILLED):
                 extra = f" rc={job.exit_code}" if job.exit_code is not None else f" {job.scheduler_state}" if job.scheduler_state else ""
-                state = (job.state + extra)[:13]
-            prefix = (f"{job.name:<{name_w}}  {job.job_id or '-':>9}  {state:<13}  {job.step or '-':<{step_w}}  "
+            states.append((job.state + extra)[:22])            # e.g. "KILLED OUT_OF_MEMORY"
+        state_w = max([len(s) for s in states] + [13])
+        head = f"{'JOB':<{name_w}}  {'ID':>9}  {'STATE':<{state_w}}  {'STEP':<{step_w}}  {'ELAPSED':>8}  {'ERR':>4}  LAST ERROR"
+        out.append(head)
+        for job, state in zip(jobs, states):
+            prefix = (f"{job.name:<{name_w}}  {job.job_id or '-':>9}  {state:<{state_w}}  {job.step or '-':<{step_w}}  "
                       f"{_fmt_duration(job.elapsed):>8}  {job.error_count or '':>4}  ")
             last = (job.last_error or (job.scheduler_state if job.state == SKIPPED else ""))[: max(10, width - len(prefix))]
             line = prefix + last
