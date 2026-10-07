@@ -5,6 +5,7 @@
 The single `maker.py` script was refactored into the installable `mitopiper` package.
 
 ### Added
+- `benchmark/sge_usage.sh`: run time, CPU time and peak memory of every job of an experiment from Grid Engine's `qacct` (failed attempts included), with core-hours per experiment.
 - `mitopiper presets set PRESET[,PRESET...] KEY=VALUE ...` changes general settings (`qsub_queue=bioinfo.q`) and step fields (`numt-parser.memory=32G`) without editing JSON. Every name is checked first, so a typo changes nothing.
 - mtDNA circularity, based on the original `circulize.py` / `combine_processed_pileups.py`: samples are also aligned to a rotated copy of the mtDNA (`mt_rotation`, default half the mtDNA length), and `mitopiper mt combine-pileups` merges both pileups so the `mt_junction_window` positions (default 400) on either side of the origin come from the rotated alignment.
 - NUMT-aware alignment: `mt-variants-numt` aligns to nuclear genome + mtDNA (`mitopiper mt combine-references` drops duplicate mitochondrial sequences of the assembly), keeps reads mapping to the mtDNA with MAPQ ≥ `numt_min_mapq`, and realigns only those to the rotated mtDNA.

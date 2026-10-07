@@ -71,3 +71,6 @@ For the manuscript:
 * report `depth.tsv` (reads removed), `concordance.tsv` (calls that disappear with NUMT filtering), and the
   positions of those calls relative to known NUMT loci;
 * report `origin_coverage.tsv`, and the heteroplasmy calls within the first and last 400 bp that exist only with the circular pileup.
+* report the cost on the cluster: `benchmark/sge_usage.sh ws/output/EXPERIMENT ... > usage.tsv` lists the run time,
+  CPU time and peak memory of every job from Grid Engine's `qacct`, including failed attempts that were rerun,
+  and prints the core-hours of each experiment.
