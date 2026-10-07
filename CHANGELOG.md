@@ -70,6 +70,7 @@ The single `maker.py` script was refactored into the installable `mitopiper` pac
 - pandas and Biopython are no longer needed.
 
 ### Fixed
+- Jobs whose Perl tools (FastQC, Trim Galore) load modules of another Perl installation (`Perl API version ... does not match`, `Can't locate ... in @INC`, caused by `PERL5LIB`) get a diagnosis and the fix `unset PERL5LIB PERL5OPT`, instead of an unrecognised failure. Seen on the BGU cluster.
 - `rerun --preset` writes the check job for the tools of that preset. It used the tools recorded at build time, so a rerun after fixing a tool path failed the check again. Found on Grid Engine.
 - A truncated FASTQ is diagnosed as corrupt input when FastQC is the step that finds it ("Ran out of data in the middle of a fastq entry"), instead of an unrecognised failure. Found by truncating a file on Grid Engine.
 - `tool_versions.tsv` no longer records Java's "Picked up JAVA_TOOL_OPTIONS" notice as FastQC's version when that variable is set, and leading spaces of version lines are removed.

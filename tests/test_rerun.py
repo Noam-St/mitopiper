@@ -57,6 +57,10 @@ CTX = _ctx()
     (dict(errors=["wget: unable to resolve host address 'ftp.sra.ebi.ac.uk'"], step="wget"), "no network access", {}),
     (dict(errors=["write error: No space left on device"]), "disk", {}),
     (dict(rc=139), "segmentation fault", {"memory": "60G"}),
+    (dict(errors=["Perl API version v5.24.0 of Cwd.c does not match v5.44.0 at /usr/lib64/perl5/XSLoader.pm line 92."],
+          step="fastqc_pre", rc=255), "another Perl installation", {"free_form_hint": "unset PERL5LIB PERL5OPT"}),
+    (dict(errors=["Can't locate FindBin.pm in @INC (you may need to install the FindBin module)"], step="trim", rc=2),
+     "another Perl installation", {"free_form_hint": "unset PERL5LIB PERL5OPT"}),
     (dict(rc=3), "Unrecognised failure", {}),
 ])
 def test_diagnosis_rules(kwargs, cause, rerun_opts):

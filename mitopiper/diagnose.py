@@ -236,6 +236,14 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
              "(mitopiper -> configuration -> modify a pipeline step).",
              "One-off fix for the rerun only: pass the line with --free-form."],
             [f"mitopiper rerun --free-form 'module load {name}'"], {"free_form_hint": f"module load {name}"}))
+    if _find(r"Perl API version \S+ of \S+ does not match|Can't locate \S+\.pm in @INC", text):
+        add(Suggestion(f"'{step or tool}' (a Perl program) loads the modules of another Perl installation",
+                       ["PERL5LIB (or PERL5OPT) is set, usually by ~/.bashrc, a 'module load' or another conda "
+                        "environment, and points the environment's Perl to modules built for another version. "
+                        "Unset it before submitting (jobs inherit your environment), or in every job through "
+                        "'free_form' ('unsetenv PERL5LIB' for csh/tcsh jobs)."],
+                       ["unset PERL5LIB PERL5OPT", "mitopiper rerun --free-form 'unset PERL5LIB PERL5OPT'"],
+                       {"free_form_hint": "unset PERL5LIB PERL5OPT"}))
     module = _find(r"ModuleNotFoundError: No module named '([\w.]+)'", text)
     if module:
         add(Suggestion(f"Python package '{module.group(1)}' is missing in the job's environment",
