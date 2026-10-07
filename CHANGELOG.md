@@ -70,6 +70,7 @@ The single `maker.py` script was refactored into the installable `mitopiper` pac
 - pandas and Biopython are no longer needed.
 
 ### Fixed
+- `rerun --preset` writes the check job for the tools of that preset. It used the tools recorded at build time, so a rerun after fixing a tool path failed the check again. Found on Grid Engine.
 - A truncated FASTQ is diagnosed as corrupt input when FastQC is the step that finds it ("Ran out of data in the middle of a fastq entry"), instead of an unrecognised failure. Found by truncating a file on Grid Engine.
 - `tool_versions.tsv` no longer records Java's "Picked up JAVA_TOOL_OPTIONS" notice as FastQC's version when that variable is set, and leading spaces of version lines are removed.
 - The rotated mtDNA is now shifted by half its length (`mt_rotation` = `half`, was 500 bases). With 500, positions 1–400 lay 100–500 bp from the end of the rotated copy, so paired reads there were lost again and depth in the circular pileup fell by up to half between positions 250 and 400 (`mt-variants`; origin depth 0.87 → 0.93 of the rest in the tutorial). Workspaces created earlier keep `mt_rotation` 500 in `config/<preset>/general_settings.json`: set it to `half`.

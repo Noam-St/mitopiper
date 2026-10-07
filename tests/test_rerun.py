@@ -8,7 +8,7 @@ from mitopiper.cli import main
 from mitopiper.config import Workspace
 from mitopiper.diagnose import Context, diagnose, double_memory, double_walltime, merged_rerun_options
 from mitopiper.references import ReferenceRegistry, ReferenceSet
-from mitopiper.rerun import RerunOptions, plan, rerun, write
+from mitopiper.rerun import RerunJob, RerunOptions, plan, rerun, write
 
 
 # ------------------------------------------------------------------ diagnosis
@@ -192,3 +192,22 @@ def test_fastqc_truncated_file_is_corrupt_input():
              "Your file is probably truncated"]
     (sug, *_) = diagnose(job(lines, step="fastqc_pre"), ctx)
     assert sug.cause.startswith("An input file is corrupt or incomplete")
+
+
+def test_rerun_with_a_fixed_preset_checks_the_preset_tools(registered, data_dir):
+    # The build used a tool path that does not exist; the check job of a rerun with the fixed
+    # preset must look for the tools of that preset, not those recorded at build time.
+    ws = registered
+    wf = ws.load_workflow("default")
+    wf.pipeline["mpileup"]["path"] = "/nonexistent/samtools"
+    ws.write_workflow(wf, "default")
+    assert main(["-w", str(ws.root), "build", "--no-check", str(data_dir / "ena_runs.tsv"), "-s", "sge"]) == 0
+    check = ws.output_dir / "ena_runs" / "scripts" / "check_ena_runs.sh"
+    assert "/nonexistent/samtools" in check.read_text()
+    wf.pipeline["mpileup"]["path"] = ""
+    ws.write_workflow(wf, "default")
+    item = RerunJob("ena_runs", "check_ena_runs", "check", mon.FAILED, "check_tools")
+    write(ws, [item], RerunOptions(preset="default"))
+    assert "/nonexistent/samtools" not in check.read_text() and "samtools" in check.read_text()
+    write(ws, [item], RerunOptions())                    # without --preset: as built
+    assert "/nonexistent/samtools" in check.read_text()

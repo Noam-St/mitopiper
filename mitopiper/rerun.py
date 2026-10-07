@@ -27,7 +27,7 @@ from typing import Optional
 from . import jobscript, toolcheck
 from .build import (
     BuildError, _write_script, download_mode, download_resources, find_experiment_metadata, job_resources, load_manifest,
-    split_downloads, uses_array, write_array,
+    pipeline_tools, split_downloads, uses_array, write_array,
 )
 from .builder import StepCommands, _join, build_experiment_steps, build_sample_job, output_paths, step_scope
 from .config import Workflow, Workspace
@@ -238,7 +238,13 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
                 jobs.download = str(path)
                 jobs.download_mode = download_mode(wf)
             elif item.kind == "check":
-                body = toolcheck.check_job_body(manifest.get("tools", {}), wf, exp_s)
+                tools = manifest.get("tools", {})
+                if options.preset:   # the edited preset may call other tools than the build did
+                    sample_jobs = [build_sample_job(s, wf, exp_s, refs[s.organism], steps) for s in samples if s.organism in refs]
+                    downloads = split_downloads(wf, sample_jobs)
+                    tools = pipeline_tools(wf, sample_jobs, build_experiment_steps(samples, wf, exp_s, steps), refs,
+                                           downloads, str(workspace.root), steps)
+                body = toolcheck.check_job_body(tools, wf, exp_s)
                 jobs.check = str(path)
             elif item.kind == "prepare":
                 commands = [c for org, ref in sorted(refs.items())
