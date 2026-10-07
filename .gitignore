@@ -25,3 +25,4 @@ dist/
 
 # Python packages downloaded by hand
 *.whl
+!manuscript/tableS1.tsv
