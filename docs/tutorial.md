@@ -178,11 +178,11 @@ The same commands work on public data. Pick a project with a few runs, and start
 mitopiper -w ws fetch-metadata PRJxxxxx               # ENA run table -> ws/metadata/PRJxxxxx.tsv
 mitopiper -w ws refs fetch-mt "Homo sapiens"          # mtDNA + GFF3 from NCBI RefSeq
 mitopiper -w ws refs fetch-genome "Homo sapiens" --nuclear-of mt    # large: needed by the NUMT presets
-mitopiper -w ws build PRJxxxxx -p mt-variants-numt -s local --samples 2
+mitopiper -w ws build PRJxxxxx -p mt-variants-numt -s local --samples 0-1      # the first two runs (rows count from 0)
 bash ws/master.sh
 ```
 
-For a whole project, compare the presets with `benchmark/run_presets.sh ws PRJxxxxx slurm bench -- --samples 1-10`.
+For a whole project, compare the presets with `benchmark/run_presets.sh ws PRJxxxxx slurm bench -- --samples 0-9`.
 Then run `compare.py` without `--truth`. `concordance.tsv` shows how many calls the presets share,
 and `depth.tsv` shows how much each NUMT filter removes.
 

@@ -309,6 +309,7 @@ mitopiper refs list
 mitopiper presets save zebrafish --from default
 $EDITOR config/zebrafish/general_settings.json   # qsub_queue, qsub_memory, walltime, account, free_form
 mitopiper presets show zebrafish                 # check the steps and settings
+mitopiper presets set zebrafish qsub_queue=short walltime=04:00:00   # change settings without editing JSON
 ```
 
 To switch steps on or off, edit `pipeline.json` (`"switch": true`) and `run_order.json`. You can also
@@ -394,6 +395,7 @@ the command line and use `mitopiper monitor -i` to handle failures.
 | `mitopiper build META… [options]` | Generate job scripts; `META` is a table, a previous experiment, or an accession |
 | `mitopiper fetch-metadata ACCESSION` | Only download the ENA run table of an accession |
 | `mitopiper presets list \| show NAME \| save NAME` | Inspect and save workflow presets |
+| `mitopiper presets set NAME[,NAME2] KEY=VALUE ...` | Change general settings (`qsub_queue=bioinfo.q`) or step fields (`trim.threads=4`) of presets |
 | `mitopiper refs list \| add \| use \| remove \| fetch-mt \| fetch-genome` | Manage reference genomes (mtDNA or whole nuclear genome from NCBI) |
 | `mitopiper make-tsv FOLDER --org NAME` | Build a metadata table for local FASTQ files |
 | `mitopiper monitor [EXP…] [options]` | Follow submitted jobs and their errors |

@@ -30,7 +30,7 @@ The script builds and submits `PREFIX_mt-variants`, `PREFIX_mt-variants-numt` an
 
 ```bash
 # e.g. ten samples of a project on SLURM
-benchmark/run_presets.sh ws PRJxxxxx slurm bench -- --samples 1-10
+benchmark/run_presets.sh ws PRJxxxxx slurm bench -- --samples 0-9
 mitopiper -w ws monitor --watch bench_mt-variants bench_mt-variants-numt bench_mt-variants-numtparser
 ```
 

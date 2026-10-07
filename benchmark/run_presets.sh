@@ -8,7 +8,7 @@
 #   SCHEDULER  slurm, sge, lsf or local (local runs everything here, one job after the other)
 #   PREFIX     experiment names are PREFIX_<preset> (default: bench)
 #
-# Example: benchmark/run_presets.sh ws PRJEB12345 slurm bench -- --samples 1-6
+# Example: benchmark/run_presets.sh ws PRJEB12345 slurm bench -- --samples 0-5
 #
 # The general settings of the presets (queue, memory, free_form...) are those of the
 # workspace: set them first. Each build writes master_<experiment>.sh; with a cluster

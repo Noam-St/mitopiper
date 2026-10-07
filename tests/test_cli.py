@@ -83,6 +83,22 @@ def test_presets_and_cleanup(registered, data_dir, capsys):
     assert (exp / "metadata.tsv").exists()
 
 
+def test_presets_set(tmp_path, capsys):
+    ws = Workspace(tmp_path / "ws")
+    assert run(ws, "init") == 0
+    assert run(ws, "presets", "set", "mt-variants,mt-variants-numt", "qsub_queue=bioinfo.q", "qsub_threads=2",
+               "array_jobs=true", "index.path=/opt/bin/samtools", "index.memory=4G") == 0
+    assert "mt-variants: qsub_queue = 'bioinfo.q' (was 'bioinfo.q')" in capsys.readouterr().out
+    for preset in ("mt-variants", "mt-variants-numt"):
+        wf = ws.load_workflow(preset)
+        assert (wf.general("qsub_threads"), wf.general("array_jobs")) == (2, True)
+        assert wf.pipeline["index"]["path"] == "/opt/bin/samtools" and wf.pipeline["index"]["memory"] == "4G"
+    # a typo, or a step one preset lacks, changes nothing in any preset
+    assert run(ws, "presets", "set", "mt-variants", "qsub_mem=8G") == 1
+    assert run(ws, "presets", "set", "mt-variants,mt-variants-numt", "walltime=1:00:00", "nosuchstep.threads=2") == 1
+    assert ws.load_workflow("mt-variants").general("walltime") != "1:00:00"
+
+
 def test_end_of_input_exits_cleanly(tmp_path, monkeypatch, capsys):
     import io
     import sys

@@ -33,8 +33,9 @@ release instead (`tar xzf mitopiper-latest.tar.gz && cd mitopiper`). It is rebui
 mitopiper -w ws init && mitopiper -w ws presets list
 ```
 
-For every preset you'll test, edit `ws/config/<preset>/general_settings.json`. Each entry is
-`[value, description]`; change only the value.
+For every preset you'll test, set these general settings, e.g.
+`mitopiper -w ws presets set mt-variants,mt-variants-numt,mt-variants-numtparser qsub_queue=short qsub_memory=8G`
+(or edit `ws/config/<preset>/general_settings.json`, where each entry is `[value, description]`).
 
 - [ ] `qsub_queue`: your partition. The default `bioinfo.q` probably doesn't exist.
 - [ ] `account`, if your cluster needs one.
@@ -46,7 +47,7 @@ For every preset you'll test, edit `ws/config/<preset>/general_settings.json`. E
 ```bash
 mitopiper -w ws fetch-metadata PRJxxxxx
 mitopiper -w ws refs fetch-mt "Homo sapiens" && mitopiper -w ws refs list
-mitopiper -w ws build PRJxxxxx -p mt-variants -s slurm --samples 2 --dry-run   # writes plan.json only
+mitopiper -w ws build PRJxxxxx -p mt-variants -s slurm --samples 0-1 --dry-run   # rows 0-1 (counted from 0); writes plan.json only
 ```
 
 - [ ] The ENA table lists the runs, the layout and the FASTQ links. The mtDNA and its GFF3 downloaded
@@ -63,7 +64,7 @@ mitopiper -w ws build PRJxxxxx -p mt-variants -s slurm --samples 2 --dry-run   #
 ## 5. First run: 2 samples
 
 ```bash
-mitopiper -w ws build PRJxxxxx -p mt-variants -s slurm --samples 2
+mitopiper -w ws build PRJxxxxx -p mt-variants -s slurm --samples 0-1
 bash ws/master.sh && mitopiper -w ws monitor --watch 30
 ```
 
@@ -94,7 +95,7 @@ For each case, `mitopiper -w ws monitor -e` should give the right diagnosis, and
 
 - [ ] `download_mode` = `login`: `master.sh` downloads before submitting. `queue`: one `dl_<exp>` job, and the samples wait for it.
 - [ ] Without internet on compute nodes, `job` mode fails, and the diagnosis points to `download_mode`.
-- [ ] `max_running` = `2` with `--samples 4`: one array job, at most 2 tasks running at once, each sample still monitored on its own.
+- [ ] `max_running` = `2` with `--samples 0-3`: one array job, at most 2 tasks running at once, each sample still monitored on its own.
 - [ ] `environment` = `tcsh`: Phase 5 again. Killed jobs must still be reported.
 - [ ] SGE/LSF, if available: dependencies appear in `qstat -j` / `bjobs -l`, and time limits as `h_rt` / `-W`.
 
@@ -103,7 +104,7 @@ For each case, `mitopiper -w ws monitor -e` should give the right diagnosis, and
 ```bash
 mitopiper -w ws refs fetch-genome "Homo sapiens" --nuclear-of mt       # read the size warning first
 export PATH=/path/to/NuMt_parser/bin:$PATH                              # also in free_form
-benchmark/run_presets.sh ws PRJxxxxx slurm bench -- --samples 2
+benchmark/run_presets.sh ws PRJxxxxx slurm bench -- --samples 0-1
 ```
 
 - [ ] The genome downloads, and its MD5 check passes. `*.with_nuclear.fa` is built, with the assembly's `chrM` left out.

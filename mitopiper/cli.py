@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -71,12 +72,18 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument("accession", help="e.g. PRJEB12345, PRJNA67890, SRP012345, SAMN01234567")
     f.add_argument("-o", "--output", help="output TSV (default: metadata/<ACCESSION>.tsv in the workspace)")
 
-    p = sub.add_parser("presets", help="list, show or save workflow presets")
+    p = sub.add_parser("presets", help="list, show, change or save workflow presets")
     psub = p.add_subparsers(dest="action", required=True)
     psub.add_parser("list")
     ps = psub.add_parser("show")
     ps.add_argument("name", nargs="?", default="default")
     ps.add_argument("--json", action="store_true", help="dump the full preset as JSON")
+    pset = psub.add_parser("set", help="change general settings or step fields of presets",
+                           description="Examples: presets set mt-variants qsub_queue=bioinfo.q walltime=02:00:00; "
+                                       "presets set mt-variants,mt-variants-numt numt-parser.memory=32G mpileup.path=/opt/bin/samtools")
+    pset.add_argument("names", help="preset, or several separated by commas")
+    pset.add_argument("assignments", nargs="+", metavar="KEY=VALUE",
+                      help="a general setting (qsub_memory=8G), or STEP.FIELD=VALUE for a step (trim.threads=4)")
     psave = psub.add_parser("save", help="copy a preset (default: last_used) to a new name")
     psave.add_argument("name")
     psave.add_argument("--from", dest="source", default="last_used")
@@ -251,9 +258,50 @@ def cmd_presets(ws: Workspace, args) -> int:
             rows.append([step, "on" if step in wf.active_order() else "off", conf.get("scope", "sample"), conf.get("key", ""), conf.get("description", "")])
         print(table(rows, ["Step", "State", "Scope", "Command", "Description"]))
         print(table([[k, v[0] if isinstance(v, list) else v] for k, v in wf.general_settings.items()], ["General setting", "Value"]))
+    elif args.action == "set":
+        return _set_preset_values(ws, args.names.split(","), args.assignments)
     elif args.action == "save":
         ws.save_preset(args.name, args.source)
         print(f"Saved preset '{args.name}' from '{args.source}'")
+    return 0
+
+
+def _setting_value(text: str):
+    """``true``/``false`` -> bool and whole numbers -> int, like the values the presets store; else the text."""
+    if text.lower() in ("true", "false"):
+        return text.lower() == "true"
+    return int(text) if re.fullmatch(r"-?\d+", text) else text
+
+
+def _set_preset_values(ws: Workspace, presets: list, assignments: list) -> int:
+    """``presets set``: every assignment is checked against every preset before anything is written."""
+    workflows = {name: ws.load_workflow(name) for name in presets}
+    changes = []
+    for item in assignments:
+        key, sep, value = item.partition("=")
+        if not sep or not key:
+            log.error("'%s' is not KEY=VALUE", item)
+            return 1
+        for name, wf in workflows.items():
+            step, dot, field = key.partition(".")
+            if dot:
+                if step not in wf.pipeline:
+                    log.error("preset '%s' has no step '%s' (see 'mitopiper presets show %s')", name, step, name)
+                    return 1
+            elif key not in wf.general_settings:
+                log.error("'%s' is not a general setting of preset '%s' (see 'mitopiper presets show %s')", key, name, name)
+                return 1
+            changes.append((name, wf, step if dot else None, field if dot else key, _setting_value(value)))
+    for name, wf, step, field, value in changes:
+        old = wf.pipeline[step].get(field, "") if step else wf.general(field)
+        if step:
+            wf.pipeline[step][field] = str(value) if field in ("memory", "threads") else value
+        else:
+            wf.set_general(field, value)
+        off = " - this step is off in this preset" if step and step not in wf.active_order() else ""
+        print(f"{name}: {step + '.' if step else ''}{field} = {value!r} (was {old!r}){off}")
+    for name, wf in workflows.items():
+        ws.write_workflow(wf, name)
     return 0
 
 
