@@ -26,14 +26,16 @@ from typing import Optional
 
 from . import jobscript, toolcheck
 from .build import (
-    BuildError, _write_script, download_mode, download_resources, find_experiment_metadata, job_resources, load_manifest,
+    BuildError, _write_script, download_mode, max_running, download_resources, find_experiment_metadata, job_resources, load_manifest,
     pipeline_tools, split_downloads, uses_array, write_array,
 )
 from .builder import StepCommands, _join, build_experiment_steps, build_sample_job, output_paths, step_scope
 from .config import Workflow, Workspace
 from .diagnose import Context, diagnose, merged_rerun_options
 from .metadata import load_samples
-from .monitor import DONE, FAILED, KILLED, PENDING, RUNNING, SKIPPED, UNKNOWN, ErrorScanner, collect, default_experiments
+from .monitor import (
+    DONE, FAILED, KILLED, PENDING, RUNNING, SKIPPED, UNKNOWN, ErrorScanner, collect, default_experiments, stranded,
+)
 from .references import ReferenceSet, prepare_job_lines
 from .schedulers import STAGES, ExperimentJobs, check_resources, header, job_name, master_script, stage_dependencies
 
@@ -125,14 +127,14 @@ def plan(workspace: Workspace, experiments: Optional[list] = None, options: Opti
         ctx = Context.from_manifest(manifest, str(exp_dir))
         sample_steps = [s for s in manifest.get("steps", []) if ctx.pipeline.get(s, {}).get("scope", "sample") == "sample"]
         chosen = [j for j in jobs if (j.name in options.jobs or j.job_id in options.jobs)] if options.jobs else \
-                 [j for j in jobs if j.state in wanted]
+                 [j for j in jobs if j.state in wanted or stranded(j)]
         if chosen:  # jobs of later stages than the earliest rerun one did not run properly: rerun them too
             earliest = min(STAGES.index(j.kind) for j in chosen)
             chosen += [j for j in jobs if STAGES.index(j.kind) > earliest and j.state not in (DONE, RUNNING)
                        and j not in chosen]
         for job in chosen:
             item = RerunJob(exp, job.name, job.kind, job.state, job.step, job.job_id)
-            item.suggestions = diagnose(job, ctx) if job.state in RERUN_STATES else []
+            item.suggestions = diagnose(job, ctx) if job.state in RERUN_STATES or stranded(job) else []
             auto = merged_rerun_options(item.suggestions) if options.auto_fix else {}
             if job.kind == "sample":
                 if options.from_start or auto.get("from_start"):
@@ -268,6 +270,7 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
         if jobs.samples and uses_array(base, scheduler):
             sample_steps = [s for s in steps if step_scope(base, s) == "sample"]
             jobs.array = write_array(scripts, exp, exp_s, jobs.samples, base, scheduler, job_resources(base, sample_steps))
+            jobs.array_limit = max_running(base)
         experiments.append(jobs)
         record = {"created": _dt.datetime.now().astimezone().isoformat(timespec="seconds"),
                   "jobs": [{"name": i.name, "start_step": i.start_step, "overrides": i.overrides, "clean": i.clean}

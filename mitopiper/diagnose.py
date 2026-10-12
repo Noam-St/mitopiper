@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from .schedulers import format_walltime, walltime_seconds
-from .monitor import FAILED, KILLED, SKIPPED, UNKNOWN, JobStatus, tail
+from .monitor import FAILED, KILLED, NEVER_SUBMITTED, NOT_SUBMITTED, SKIPPED, UNKNOWN, JobStatus, tail
 
 
 @dataclass
@@ -166,6 +166,12 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
         if s.cause not in [f.cause for f in found]:
             found.append(s)
 
+    if job.state == NOT_SUBMITTED and job.scheduler_state == NEVER_SUBMITTED:
+        return [Suggestion("Never submitted: master.sh stopped before this job",
+                           ["master.sh submitted the jobs before this one and then stopped on an error (its output "
+                            "names it, e.g. a qsub option this cluster does not know). Fix the cause, then submit the "
+                            "missing jobs: they wait for the jobs that already ran."],
+                           ["mitopiper rerun --submit"], {})]
     if job.state == SKIPPED:
         return [Suggestion("Not run because a job it depends on failed",
                            ["It is rerun automatically together with the failed job."], ["mitopiper rerun"], {})]

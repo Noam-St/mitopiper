@@ -70,6 +70,8 @@ The single `maker.py` script was refactored into the installable `mitopiper` pac
 - pandas and Biopython are no longer needed.
 
 ### Fixed
+- **`max_running` broke every Grid Engine build on SGE before 6.2** (no `-tc`; seen on the BGU cluster, N1GE 6.0u8): `master.sh` stopped after the check and reference jobs. When the array job is rejected, `master.sh` now submits the sample jobs one by one, each waiting for the job `max_running` places before it, so the limit still holds.
+- Jobs that `master.sh` never submitted because it stopped on an error are shown as such by the monitor ("never submitted", with a diagnosis), and `rerun` submits them. Before, the monitor reported no failures and `rerun` had nothing to do.
 - **`refs fetch-mt "Homo sapiens"` downloaded the Denisovan mtDNA** (NC_013993.1, "Homo sp. Altai"): the NCBI search includes related taxa and the first hit was taken. Common model organisms now have their RefSeq mitogenome built in (human: NC_012920.1, the rCRS), the search is restricted to the exact taxon and checks every hit's organism, and the downloaded record's title is printed, with a warning when it names another organism. Found on the BGU cluster.
 - Jobs whose Perl tools (FastQC, Trim Galore) load modules of another Perl installation (`Perl API version ... does not match`, `Can't locate ... in @INC`, caused by `PERL5LIB`) get a diagnosis and the fix `unset PERL5LIB PERL5OPT`, instead of an unrecognised failure. Seen on the BGU cluster.
 - `rerun --preset` writes the check job for the tools of that preset. It used the tools recorded at build time, so a rerun after fixing a tool path failed the check again. Found on Grid Engine.

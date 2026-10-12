@@ -216,6 +216,7 @@ class ExperimentJobs:
     directory: str = ""
     check: Optional[str] = None      # tool check, submitted before everything else
     array: Optional[str] = None      # array job running the sample scripts (instead of one job each)
+    array_limit: int = 0             # max_running of the array (0 = no limit)
     download: Optional[str] = None   # staged downloads (download_mode "login" or "queue")
     download_mode: str = "job"
 
@@ -313,13 +314,33 @@ def master_script(scheduler: str, experiments: list, delay: float = 0.5, shell: 
         lines.append("jobs=()")
         if exp.samples and exp.array:
             # One array job runs every sample script; each task is recorded under the sample's name.
-            lines.append(f'jid=$(submit {shlex.quote(exp.array)} ${{prep[@]+"${{prep[@]}}"}})')
-            lines.append('jobs=("$jid")')
-            lines.append("task=0")
-            lines.append(f"for script in {' '.join(shlex.quote(s) for s in exp.samples)}; do")
-            lines.append('    task=$((task + 1))')
-            lines.append('    record "${jid}_${task}" "$script" sample')
-            lines.append("done")
+            # If the scheduler rejects it (Grid Engine before 6.2 has no -tc), the sample scripts are
+            # submitted one by one instead, each waiting for the one max_running places before it.
+            quoted = " ".join(shlex.quote(s) for s in exp.samples)
+            limit = max(0, int(exp.array_limit or 0))
+            lines.append(f'if jid=$(submit {shlex.quote(exp.array)} ${{prep[@]+"${{prep[@]}}"}}); then')
+            lines.append('    jobs=("$jid")')
+            lines.append("    task=0")
+            lines.append(f"    for script in {quoted}; do")
+            lines.append('        task=$((task + 1))')
+            lines.append('        record "${jid}_${task}" "$script" sample')
+            lines.append("    done")
+            lines.append("else")
+            lines.append(f'    echo "[mitopiper] the array job was rejected (see above): submitting the {len(exp.samples)} '
+                         f'sample jobs one by one{f", at most {limit} at a time" if limit else ""}" >&2')
+            lines.append("    i=0")
+            lines.append(f"    for script in {quoted}; do")
+            lines.append('        deps=(${prep[@]+"${prep[@]}"})')
+            if limit:
+                lines.append(f'        [ "$i" -lt {limit} ] || deps+=("${{jobs[$((i - {limit}))]}}")')
+            lines.append('        jid=$(submit "$script" ${deps[@]+"${deps[@]}"})')
+            lines.append('        jobs+=("$jid")')
+            lines.append('        record "$jid" "$script" sample')
+            lines.append("        i=$((i + 1))")
+            if pause:
+                lines.append(f"        {pause}")
+            lines.append("    done")
+            lines.append("fi")
         elif exp.samples:
             quoted = " ".join(shlex.quote(s) for s in exp.samples)
             lines.append(f"for script in {quoted}; do")

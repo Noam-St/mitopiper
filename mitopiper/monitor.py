@@ -39,6 +39,9 @@ SKIPPED = "SKIPPED"  # not run because a job it depends on failed (local schedul
 # (no status tracking for that shell): finished, outcome unknown.
 ENDED = "ENDED"
 FINAL_STATES = (NOT_SUBMITTED, DONE, FAILED, KILLED, SKIPPED, ENDED)
+#: scheduler_state of a job that master.sh never submitted although it submitted others of the build
+#: (it stopped on an error, e.g. a qsub option the cluster rejects).
+NEVER_SUBMITTED = "never submitted: master.sh stopped before it"
 STATE_ORDER = (FAILED, KILLED, SKIPPED, RUNNING, PENDING, UNKNOWN, ENDED, DONE, NOT_SUBMITTED)
 
 DEFAULT_ERROR_PATTERNS = (
@@ -424,6 +427,8 @@ def collect(workspace: Workspace, experiments: list, scanner: ErrorScanner,
                 job.state = PENDING
             elif submitting:
                 job.state, job.scheduler_state = PENDING, "waiting for master.sh"
+            elif submitted:
+                job.scheduler_state = NEVER_SUBMITTED
             status = read_status_file(exp_dir, name)
             sched = task_state(scheduler_info, job.job_id) if scheduler_info else None
             if sched:
@@ -568,11 +573,21 @@ def _contexts(workspace: Workspace, experiments: list) -> dict:
     return contexts
 
 
+def needs_attention(job: "JobStatus") -> bool:
+    """Failed, killed, skipped, or never submitted although the rest of its build was."""
+    return job.state in (FAILED, KILLED, SKIPPED) or stranded(job)
+
+
+def stranded(job: "JobStatus") -> bool:
+    return job.state == NOT_SUBMITTED and job.scheduler_state == NEVER_SUBMITTED
+
+
 def rerun_hint(failed: list, contexts: dict, shortcuts: bool = True) -> str:
     """Footer under the table: one-line cause per failed job and the rerun shortcuts."""
     from .diagnose import diagnose, merged_rerun_options
 
-    out = [f"{len(failed)} job(s) failed:"]
+    out = [f"{len(failed)} job(s) failed or were never submitted:" if any(stranded(j) for j in failed)
+           else f"{len(failed)} job(s) failed:"]
     auto = {}
     for job in failed:
         suggestions = diagnose(job, contexts.get(job.experiment))
@@ -634,7 +649,7 @@ def monitor(
                 print(f"No job named '{job}'", file=stream)
                 return 1
         if errors_only:
-            statuses = [s for s in statuses if s.state in (FAILED, KILLED, SKIPPED) or s.error_count]
+            statuses = [s for s in statuses if needs_attention(s) or s.error_count]
         if as_json:
             payload = [dict(asdict(s), elapsed=s.elapsed) for s in statuses]
             text = json.dumps(payload, indent=2, default=str)
@@ -642,7 +657,7 @@ def monitor(
             from .diagnose import diagnose
 
             text = "\n".join(
-                render_detail(s, tail_lines, diagnose(s, contexts.get(s.experiment)) if s.state in (FAILED, KILLED, UNKNOWN, SKIPPED) else None)
+                render_detail(s, tail_lines, diagnose(s, contexts.get(s.experiment)) if s.state in (FAILED, KILLED, UNKNOWN, SKIPPED) or stranded(s) else None)
                 for s in statuses) or "No failed jobs and no errors in stderr.\n"
         else:
             width = shutil.get_terminal_size((120, 40)).columns
@@ -665,7 +680,7 @@ def monitor(
             time.sleep(watch)
         except KeyboardInterrupt:
             break
-    failed = [s for s in statuses if s.state in (FAILED, KILLED)]
+    failed = [s for s in statuses if s.state in (FAILED, KILLED) or stranded(s)]
     if failed and not (job or errors_only or as_json):
         stream.write(rerun_hint(failed, contexts))
     return 1 if failed else 0
