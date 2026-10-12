@@ -422,8 +422,8 @@ def pipeline_tools(workflow: Workflow, sample_jobs: list, experiment_steps: list
     # Reference preparation: read the POSIX form of the commands (same tools in every shell).
     for organism, ref in refs.items():
         commands = prepare_commands(ref, organism, workspace_dir, workflow, csh=False, steps=steps)
-        if commands:   # run under flock (prepare_job_lines)
-            step_lines.setdefault("prepare_references", []).extend(commands + ["flock"])
+        if commands:   # run under a lock (prepare_job_lines), made with mkdir/find/touch
+            step_lines.setdefault("prepare_references", []).extend(commands)
     return toolcheck.required_tools(step_lines)
 
 

@@ -6,6 +6,8 @@ for the normal and 2 for the rotated reference, so the merged pileup shows where
 came from. `mitopiper mt ...` runs for real.
 """
 import os
+import shutil
+import time
 import subprocess
 import sys
 from pathlib import Path
@@ -168,7 +170,8 @@ def test_numt_parser_preset_finds_numts_in_the_nuclear_genome(cluster, shell):
     assert all(s == mon.DONE for s in states.values()), states
     derived = ws.references_dir / "derived" / "Homo_sapiens"
     assert (derived / "mt.numt_search.regions.txt").read_text() == "chr1:1-10\n"   # hit at 3..62, flanked, clipped
-    assert (derived / "mt.numts.fa.bwt").exists() and (tmp_path / "nuc.fa.bwt").exists()
+    assert (derived / "mt.numts.fa.bwt").exists() and (derived / "mt.with_nuclear.fa.bwt").exists()
+    assert not (tmp_path / "nuc.fa.bwt").exists()        # nothing is written next to the user's genome
     numt = ws.output_dir / "exp" / "numt"
     assert (numt / "a_0_HS.cymt_reads.txt").read_text() == "r1\n"                 # both mates of r3 must be cymt
     script = (ws.output_dir / "exp" / "scripts" / "s_a_0.sh").read_text()
@@ -274,6 +277,7 @@ def test_reference_jobs_of_parallel_builds_take_turns(tmp_path, monkeypatch):
         (bin_dir / name).write_text(body)
         (bin_dir / name).chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    monkeypatch.setenv("MITOPIPER_LOCK_WAIT", "1")          # look at the lock every second, not every minute
     ws = Workspace(tmp_path / "ws")
     ws.initialise()
     (tmp_path / "mt.fa").write_text(f">NC_012920.1\n{MT}\n")
@@ -281,12 +285,42 @@ def test_reference_jobs_of_parallel_builds_take_turns(tmp_path, monkeypatch):
     wf = ws.load_workflow("mt-variants")
     wf.set_general("mt_rotation", 5)
     lines = prepare_job_lines(ref, "Homo_sapiens", str(ws.root), wf, steps=["bwa-align", "align-rotated"])
-    assert lines[-1].startswith('flock "') and " sh -ec " in lines[-1]
+    assert lines[-1].startswith("sh -c ") and "\n" not in lines[-1]
+    shells = ["bash"] + [s for s in ("tcsh", "csh") if shutil.which(s)][:1]     # the job shell may be csh
     scripts = []
-    for i in range(2):
-        (tmp_path / f"prep{i}.sh").write_text("set -e\n" + "\n".join(lines) + "\n")
-        scripts.append(subprocess.Popen(["bash", str(tmp_path / f"prep{i}.sh")], stdout=subprocess.DEVNULL))
-    assert [p.wait() for p in scripts] == [0, 0]
+    for i, shell in enumerate(shells + ["bash"]):
+        (tmp_path / f"prep{i}.sh").write_text("\n".join(lines) + "\n")
+        scripts.append(subprocess.Popen([shell, str(tmp_path / f"prep{i}.sh")], stdout=subprocess.DEVNULL))
+    assert [p.wait() for p in scripts] == [0] * len(scripts)
+    assert not (ws.references_dir / "derived" / "Homo_sapiens" / ".prepare.lock.d").exists()      # released
     rotated = ws.references_dir / "derived" / "Homo_sapiens" / "mt.rotated5.fa"
     for log in (tmp_path / "mt.fa.log", rotated.with_name(rotated.name + ".log")):
         assert log.read_text().split() == ["start"], log      # indexed once, never two at the same time
+
+
+def test_a_stale_reference_lock_is_taken_over(tmp_path, monkeypatch):
+    # A reference job killed by the scheduler (SIGKILL: no trap) leaves its lock behind.
+    from mitopiper.references import prepare_job_lines
+
+    ws = Workspace(tmp_path / "ws")
+    ws.initialise()
+    (tmp_path / "mt.fa").write_text(f">NC_012920.1\n{MT}\n")
+    wf = ws.load_workflow("mt-variants")
+    wf.set_general("mt_rotation", 5)
+    lines = prepare_job_lines(ReferenceSet(refpath=str(tmp_path / "mt.fa")), "Homo_sapiens", str(ws.root), wf,
+                              steps=["align-rotated"])
+    lock = ws.references_dir / "derived" / "Homo_sapiens" / ".prepare.lock.d"
+    lock.mkdir(parents=True)
+    old = time.time() - 20 * 60
+    os.utime(lock, (old, old))
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, body in {"bwa": "#!/bin/sh\n[ \"$1\" = index ] && echo x > \"$2.bwt\"\nexit 0\n", "samtools": FAKE_SAMTOOLS,
+                       "mitopiper": f'#!/bin/sh\nPYTHONPATH="{REPO}" exec "{sys.executable}" -m mitopiper "$@"\n'}.items():
+        (bin_dir / name).write_text(body)
+        (bin_dir / name).chmod(0o755)
+    env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", MITOPIPER_LOCK_WAIT="1")
+    (tmp_path / "prep.sh").write_text("\n".join(lines) + "\n")
+    out = subprocess.run(["bash", str(tmp_path / "prep.sh")], env=env, capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    assert "taking over the stale lock" in out.stderr and not lock.exists()

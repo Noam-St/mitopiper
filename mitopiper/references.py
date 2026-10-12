@@ -622,30 +622,33 @@ def derived_commands(ref: ReferenceSet, organism: str, workspace_dir: str, workf
         commands.append(_unless_exists(paths["rotated"], f'mitopiper mt rotate "{ref.refpath}" "{paths["rotated"]}" '
                                                          f"--shift {mt_shift(workflow)}", csh))
         commands += _fasta_index_commands(paths["rotated"], workflow, csh, star=False)
-    if uses_placeholder(workflow, "fasta_combined", steps) and paths["combined"]:
+    # The NUMT search uses the nuclear + mtDNA reference too: one genome index in the workspace, shared
+    # with mt-variants-numt, and nothing written next to the user's nuclear FASTA.
+    numt_search = uses_placeholder(workflow, "numt_fasta", steps) and paths["numt"] and not ref.numt_refpath
+    if (uses_placeholder(workflow, "fasta_combined", steps) or numt_search) and paths["combined"]:
         commands.append(_unless_exists(paths["combined"], f'mitopiper mt combine-references "{ref.nuc_refpath}" '
                                                           f'"{ref.refpath}" "{paths["combined"]}"', csh))
         commands += _fasta_index_commands(paths["combined"], workflow, csh, star=False)
     if uses_placeholder(workflow, "numt_fasta", steps) and paths["numt"]:
-        if not ref.numt_refpath:
+        if numt_search:
             commands += numt_reference_commands(ref, paths, workflow, csh)
         commands += _fasta_index_commands(paths["numt"], workflow, csh, star=False)
     return commands
 
 
 def numt_reference_commands(ref: ReferenceSet, paths: dict, workflow, csh: bool) -> list:
-    """Find the NUMTs of the nuclear genome: align overlapping mtDNA fragments to it
-    (``bwa mem -a``) and extract the regions they hit (``samtools faidx -r``)."""
-    work, nuclear = paths["numt_work"], ref.nuc_refpath
+    """Find the NUMTs of the nuclear genome: align overlapping mtDNA fragments to the nuclear + mtDNA
+    reference (``bwa mem -a``; built and indexed by :func:`derived_commands`), keep the regions they hit
+    outside the mtDNA, and extract them (``samtools faidx -r``)."""
+    work, genome = paths["numt_work"], paths["combined"]
     bwa_steps = _steps_running(workflow, "bwa")
     bwa = (workflow.pipeline[bwa_steps[0]].get("path") or "bwa") if bwa_steps else "bwa"
-    commands = [] if nuclear in ref.downloads else _fasta_index_commands(nuclear, workflow, csh, star=False)
-    return commands + [
+    return [
         _unless_exists(f"{work}.fragments.fa", f'mitopiper mt fragments "{ref.refpath}" "{work}.fragments.fa"', csh),
-        _unless_exists(f"{work}.sam", f'{bwa} mem -a "{nuclear}" "{work}.fragments.fa" > "{work}.sam"', csh),
+        _unless_exists(f"{work}.sam", f'{bwa} mem -a "{genome}" "{work}.fragments.fa" > "{work}.sam"', csh),
         _unless_exists(f"{work}.regions.txt",
                        f'mitopiper mt numt-regions "{work}.sam" "{ref.refpath}" "{work}.regions.txt"', csh),
-        _unless_exists(paths["numt"], f'samtools faidx "{nuclear}" -r "{work}.regions.txt" -o "{paths["numt"]}"', csh),
+        _unless_exists(paths["numt"], f'samtools faidx "{genome}" -r "{work}.regions.txt" -o "{paths["numt"]}"', csh),
     ]
 
 
@@ -661,23 +664,44 @@ def prepare_commands(ref: ReferenceSet, organism: str, workspace_dir: str, workf
     return base + derived_commands(ref, organism, workspace_dir, workflow, csh, steps)
 
 
+#: A lock that works across the nodes of a cluster. flock() does not lock across nodes on some
+#: network file systems (seen on the BGU cluster's GPFS: two reference jobs indexed the same genome at
+#: the same time), but mkdir is atomic on all of them. The owner touches the lock every minute; a lock
+#: left by a killed job (no trap runs on SIGKILL) is taken over once it is 10 minutes old.
+_LOCKED = (
+    'lock={lock}; '
+    'until mkdir "$lock" 2>/dev/null; do '
+    'if [ -n "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then '
+    'echo "[mitopiper] taking over the stale lock $lock" >&2; rm -rf "$lock"; '
+    'else echo "[mitopiper] waiting for another reference job: $(cat "$lock/owner" 2>/dev/null)" >&2; '
+    'sleep ${{MITOPIPER_LOCK_WAIT:-60}}; fi; '
+    'done; '
+    'echo "$(hostname) pid $$ job ${{JOB_ID:-${{SLURM_JOB_ID:-${{LSB_JOBID:-}}}}}}" > "$lock/owner"; '
+    'owner=$$; (while sleep 60; do kill -0 $owner 2>/dev/null || exit 0; touch -c "$lock"; done) >/dev/null 2>&1 & '
+    'beat=$!; '
+    'trap \'kill $beat 2>/dev/null; rm -rf "$lock"\' EXIT; '
+    'set -e; {commands}'
+)
+
+
 def prepare_job_lines(ref: ReferenceSet, organism: str, workspace_dir: str, workflow,
                       steps: Optional[list] = None) -> list:
     """The reference job's lines for one organism: :func:`prepare_commands` under a lock.
 
     Several builds of the same workspace (e.g. the three mt presets submitted together) share the
     derived references and the indices of the reference. Their reference jobs can run at the same
-    time, and two ``bwa index`` writing the same files corrupt them. ``flock`` lets one job prepare
-    an organism at a time; the next one then finds everything built and skips it. The commands run
-    as one POSIX ``sh -ec`` script, so the lock works whatever the job shell (csh/tcsh included).
+    time, and two ``bwa index`` writing the same files corrupt them, so one job prepares an organism
+    at a time (``_LOCKED``); the next one then finds everything built and skips it. Everything runs
+    as one POSIX ``sh`` script on one line, so it works whatever the job shell (csh/tcsh included).
     """
     commands = prepare_commands(ref, organism, workspace_dir, workflow, csh=False, steps=steps)
     if not commands:
         return []
     lock_dir = f"{workspace_dir}/references/derived/{organism}"
+    script = _LOCKED.format(lock=shlex.quote(f"{lock_dir}/.prepare.lock.d"), commands="; ".join(commands))
     return [f'echo "Preparing reference of {organism}"',
             f'mkdir -p "{lock_dir}"',
-            f'flock "{lock_dir}/.prepare.lock" sh -ec {shlex.quote("; ".join(commands))}']
+            f"sh -c {shlex.quote(script)}"]
 
 
 def missing_index_commands(ref: ReferenceSet, workflow, csh: Optional[bool] = None) -> list:
