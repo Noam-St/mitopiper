@@ -135,3 +135,45 @@ def test_large_fasta_is_read_once_per_file_version(tmp_path, monkeypatch):
     for _ in range(3):
         assert any("--genomeSAindexNbases 6" in c for c in index_commands(ref, wf))
     assert len(reads) == 1
+
+
+def test_human_mtdna_is_the_rcrs_without_searching(workspace):
+    client = FakeClient()
+    assert fetch_mt_reference(workspace, "Homo_sapiens", client=client).accession == "NC_012920.1"
+    assert client.calls == []
+
+
+def test_mitogenome_search_keeps_only_the_exact_organism(monkeypatch, caplog):
+    # NCBI listed the Denisovan mtDNA first for "Homo sapiens"[Organism] (seen on the BGU cluster)
+    from mitopiper.references import NCBIClient
+    import json as _json
+
+    answers = {
+        "esearch": {"esearchresult": {"idlist": ["1", "2", "3"]}},
+        "esummary": {"result": {
+            "1": {"accessionversion": "NC_013993.1", "organism": "Homo sp. Altai"},
+            "2": {"accessionversion": "NC_012920.1", "organism": "Homo sapiens"},
+            "3": {"accessionversion": "NC_011137.1", "organism": "Homo sapiens neanderthalensis"}}},
+    }
+    seen = []
+
+    def get(self, url):
+        seen.append(url)
+        return _json.dumps(answers["esearch" if "esearch" in url else "esummary"])
+
+    monkeypatch.setattr(NCBIClient, "get", get)
+    assert NCBIClient().search_mitogenome("Homo_sapiens") == "NC_012920.1"
+    assert "noexp" in seen[0] and "id=1%2C2%2C3" in seen[1]
+    answers["esummary"]["result"] = {"1": {"accessionversion": "NC_013993.1", "organism": "Homo sp. Altai"}}
+    answers["esearch"]["esearchresult"]["idlist"] = ["1"]
+    assert NCBIClient().search_mitogenome("Homo_sapiens") is None      # no exact match: refuse, ask for --accession
+    assert "--accession" in caplog.text
+
+
+def test_downloaded_record_of_another_organism_is_reported(workspace, caplog):
+    class Wrong(FakeClient):
+        def fetch_fasta(self, acc):
+            return f">{acc} Homo sp. Altai mitochondrion, complete genome\nACGT\n"
+    caplog.set_level("INFO")
+    fetch_mt_reference(workspace, "Homo_sapiens", accession="NC_013993.1", client=Wrong())
+    assert "Downloaded: NC_013993.1 Homo sp. Altai" in caplog.text and "does not name Homo sapiens" in caplog.text

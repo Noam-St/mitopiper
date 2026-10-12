@@ -215,6 +215,22 @@ def validate_fasta(path) -> int:
     return length
 
 
+#: RefSeq mitogenomes of common model organisms, used when the workspace has no lookup table entry.
+#: An NCBI search for a species also matches related taxa (for "Homo sapiens", the Denisovan
+#: NC_013993.1 "Homo sp. Altai"), so the usual reference is fixed here.
+KNOWN_MT_ACCESSIONS = {
+    "Homo_sapiens": "NC_012920.1",               # rCRS
+    "Mus_musculus": "NC_005089.1",
+    "Rattus_norvegicus": "NC_001665.2",
+    "Danio_rerio": "NC_002333.2",
+    "Drosophila_melanogaster": "NC_024511.2",
+    "Caenorhabditis_elegans": "NC_001328.1",
+    "Saccharomyces_cerevisiae": "NC_001224.1",
+    "Bos_taurus": "NC_006853.1",
+    "Sus_scrofa": "NC_000845.1",
+}
+
+
 def load_accession_table(workspace: Workspace) -> dict:
     """Read an ``organism -> accession`` lookup table if one is present."""
     candidates = [workspace.references_dir / "mt_accessions.csv", workspace.root / "src" / "final.csv"]
@@ -267,16 +283,37 @@ class NCBIClient:
         raise RefError(f"Request to NCBI failed: {last_error}")
 
     def search_mitogenome(self, organism: str) -> Optional[str]:
-        """Return the accession of the RefSeq complete mitochondrial genome of ``organism``."""
-        species = organism.replace("_", " ")
-        term = f'"{species}"[Organism] AND mitochondrion[Filter] AND refseq[Filter] AND "complete genome"[Title]'
-        text = self.get(f"{EUTILS}/esearch.fcgi?" + self._params(db="nuccore", term=term, retmode="json", retmax=5))
+        """Return the accession of the RefSeq complete mitochondrial genome of ``organism``.
+
+        Only records of exactly that organism count: ``[Organism:noexp]`` leaves out the taxa below
+        it, and the organism of every hit is checked, because NCBI's order of the hits is no guide
+        (a search for Homo sapiens returned the Denisovan mtDNA first).
+        """
+        species = organism.replace("_", " ").strip()
+        term = (f'"{species}"[Organism:noexp] AND mitochondrion[Filter] AND refseq[Filter] '
+                f'AND "complete genome"[Title]')
+        text = self.get(f"{EUTILS}/esearch.fcgi?" + self._params(db="nuccore", term=term, retmode="json", retmax=20))
         ids = json.loads(text).get("esearchresult", {}).get("idlist", [])
         if not ids:
             return None
-        summary = json.loads(self.get(f"{EUTILS}/esummary.fcgi?" + self._params(db="nuccore", id=ids[0], retmode="json")))
-        record = summary.get("result", {}).get(ids[0], {})
-        return record.get("accessionversion") or record.get("caption") or ids[0]
+        summary = json.loads(self.get(f"{EUTILS}/esummary.fcgi?" + self._params(db="nuccore", id=",".join(ids),
+                                                                                  retmode="json")))
+        result = summary.get("result", {})
+        records = [result.get(i, {}) for i in ids]
+        exact = [r for r in records if str(r.get("organism", "")).strip().lower() == species.lower()]
+        if not exact:
+            log.warning("NCBI has no RefSeq mitogenome whose organism is exactly '%s' (hits: %s); give the "
+                        "accession with --accession", species,
+                        ", ".join(f"{r.get('accessionversion', '?')} {r.get('organism', '?')}" for r in records[:5]))
+            return None
+        # NC_ (curated RefSeq) first, then the lowest number: the long-standing reference
+        exact.sort(key=lambda r: (not str(r.get("accessionversion", "")).startswith("NC_"),
+                                  str(r.get("accessionversion", ""))))
+        if len(exact) > 1:
+            log.warning("Several RefSeq mitogenomes for %s: %s; using %s (choose another with --accession)", species,
+                        ", ".join(str(r.get("accessionversion")) for r in exact), exact[0].get("accessionversion"))
+        record = exact[0]
+        return record.get("accessionversion") or record.get("caption")
 
     def genome_reports(self, organism: str = "", accession: str = "", reference_only: bool = True) -> list:
         """Assembly reports from the NCBI Genome database (NCBI Datasets API)."""
@@ -317,7 +354,7 @@ def fetch_mt_reference(
         email, api_key = workspace.ncbi_credentials()
         client = NCBIClient(email, api_key)
     if not accession:
-        accession = load_accession_table(workspace).get(organism)
+        accession = load_accession_table(workspace).get(organism) or KNOWN_MT_ACCESSIONS.get(organism)
     if not accession:
         log.info("Searching NCBI for the mitochondrial genome of %s", organism)
         accession = client.search_mitogenome(organism)
@@ -334,6 +371,11 @@ def fetch_mt_reference(
         raise RefError(f"NCBI returned no FASTA for {accession}: {fasta_text[:120]!r}")
     fasta.write_text(fasta_text, encoding="utf-8")
     validate_fasta(fasta)
+    title = fasta_text.splitlines()[0][1:].strip()
+    log.info("Downloaded: %s", title)
+    if organism.replace("_", " ").lower() not in title.lower():
+        log.warning("The record's title does not name %s: '%s'. Check that this is the mtDNA you want "
+                    "(another one: --accession).", organism.replace("_", " "), title)
     gff_text = client.fetch_gff3(accession)
     if "##gff-version" not in gff_text:
         log.warning("NCBI returned an unexpected GFF3 for %s; annotations may be unavailable", accession)
