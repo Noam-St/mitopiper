@@ -84,8 +84,10 @@ class MonitorSession:
         query: Callable = query_scheduler,
         color: Optional[bool] = None,
         launcher: Callable = launch,
+        stay_when_done: bool = False,
     ):
         self.ws = workspace
+        self.stay_when_done = stay_when_done   # 'monitor -i': keep offering j/e/q once every job is done
         self.experiments = experiments
         self.interval = interval
         self.poll = poll
@@ -289,7 +291,12 @@ class MonitorSession:
                     return 1
                 if not problems:
                     self.draw("All jobs finished successfully.")
-                    return 0
+                    if not self.stay_when_done:
+                        return 0
+                    answer = self.ask("j NAME details | e errors | q quit\n> ")
+                    if not self.handle(answer or "q"):
+                        return self._leave(done=True)
+                    continue
                 failed = [s for s in problems if s.state in (FAILED, KILLED)]
                 hint = rerun_hint(failed, self.contexts, shortcuts=False) if failed else ""
                 advice = ""

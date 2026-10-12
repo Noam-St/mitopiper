@@ -428,8 +428,8 @@ def cmd_monitor(ws: Workspace, args) -> int:
         if not experiments:
             print("No submitted experiments found. Build and run master.sh first.")
             return 1
-        return MonitorSession(ws, experiments, interval=args.watch or 15.0,
-                              color=False if args.no_color else None).run()
+        return MonitorSession(ws, experiments, interval=args.watch or 15.0, color=False if args.no_color else None,
+                              stay_when_done=sys.stdin.isatty()).run()
     if args.rerun:
         from .rerun import RerunOptions, rerun
 

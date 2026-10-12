@@ -70,6 +70,9 @@ The single `maker.py` script was refactored into the installable `mitopiper` pac
 - pandas and Biopython are no longer needed.
 
 ### Fixed
+- `tool_versions.tsv` says `unknown` for a tool that prints no version (Numt Parser) instead of leaving the column empty.
+- A tool given as an absolute path in a step's `path` that does not exist gets the right advice (correct the step's path with `presets set`, rerun with `-p`) instead of `module load /nonexistent/samtools`.
+- `mitopiper monitor -i` stays open when every job is done, so `j` and `e` can still be used; it left at once before.
 - `fetch-metadata` sorts the ENA run table by run accession. ENA returns the runs in no fixed order, so `--samples 0-1` named different runs depending on when the table was fetched.
 - A download with the full size but a wrong MD5 (seen on the BGU cluster) could not be fixed by the suggested rerun: `wget -c` found the file complete and the checksum failed again. The download step now deletes the file and downloads it once more when the checksum fails, and a checksum failure in the download step is always diagnosed as "resume at `wget`, deleting its output first".
 - **The reference jobs' lock did not work across nodes** on the BGU cluster's GPFS (`flock`): two reference jobs indexed whole genomes at the same time. The lock is now a directory (`mkdir` is atomic on network file systems), kept fresh by its owner and taken over when a killed job left it behind for 10 minutes. `flock` is no longer needed.

@@ -221,6 +221,17 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
 
     # --- environment -------------------------------------------------------------
     listed = re.findall(r"^MISSING (\S+)", text, re.MULTILINE)  # written by the tool check job
+    paths = {tool: used for tool, used in re.findall(r"^MISSING (/\S+) \(used by: ([^)]*)\)", text, re.MULTILINE)}
+    if listed and len(paths) == len(set(listed)):
+        # Only absolute paths: they come from steps' 'path' settings, which module load cannot fix.
+        steps = sorted({s.split(" (")[0].strip() for used in paths.values() for s in used.split(",")} - {""})
+        add(Suggestion(
+            f"The tool check found {len(paths)} missing tool path(s): {', '.join(paths)}",
+            ["Nothing else was run. These paths are set in the 'path' field of step(s) " + ", ".join(steps) +
+             ". Correct them (or empty them to use the tool on the PATH), then rerun with the fixed preset."],
+            [f"mitopiper presets set PRESET {steps[0] if steps else 'STEP'}.path=", "mitopiper rerun -p PRESET --submit"],
+            {}))
+        return found
     if listed:
         tools = list(dict.fromkeys(listed))
         add(Suggestion(

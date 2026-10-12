@@ -144,3 +144,19 @@ def test_monitor_interactive_flag(tmp_path):
     (ws.experiment_dir("E") / "jobs.tsv").write_text("job_id\tjob_name\tscript\tsubmitted\tkind\n1\ts_a_0\t/a.sh\t1\tsample\n")
     (ws.experiment_dir("E") / "status" / "s_a_0.status").write_text("DONE count 1 2 0\n")
     assert main(["-w", str(ws.root), "monitor", "-i", "E", "--no-color"]) == 0
+
+
+def test_interactive_monitor_stays_when_every_job_is_done(tmp_path):
+    # 'monitor -i' left at once when all jobs were done, so its commands could not be used (BGU test)
+    from mitopiper.session import MonitorSession
+
+    ws = setup_ws(tmp_path)
+    (ws.experiment_dir("E") / "status").mkdir(parents=True)
+    (ws.experiment_dir("E") / "jobs.tsv").write_text("job_id\tjob_name\tscript\tsubmitted\tkind\n1\ts_a_0\t/a.sh\t1\tsample\n")
+    (ws.experiment_dir("E") / "status" / "s_a_0.status").write_text("DONE count 1 2 0\n")
+    answers = iter(["j s_a_0", "", "q"])               # details, Enter to return, quit
+    out = io.StringIO()
+    session = MonitorSession(ws, ["E"], ask=lambda prompt: next(answers), stream=out, color=False,
+                             query=lambda s, i: None, stay_when_done=True)
+    assert session.run() == 0
+    assert "### E / s_a_0" in out.getvalue() and "Leaving the monitor" in out.getvalue()

@@ -63,6 +63,8 @@ CTX = _ctx()
           step="fastqc_pre", rc=255), "another Perl installation", {"free_form_hint": "unset PERL5LIB PERL5OPT"}),
     (dict(errors=["Can't locate FindBin.pm in @INC (you may need to install the FindBin module)"], step="trim", rc=2),
      "another Perl installation", {"free_form_hint": "unset PERL5LIB PERL5OPT"}),
+    (dict(errors=["MISSING /nonexistent/samtools (used by: mpileup)"], step="check_tools", rc=1),
+     "missing tool path", {}),                                     # a step's path: no 'module load' advice
     (dict(rc=3), "Unrecognised failure", {}),
 ])
 def test_diagnosis_rules(kwargs, cause, rerun_opts):
