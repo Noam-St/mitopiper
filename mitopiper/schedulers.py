@@ -356,8 +356,13 @@ def master_script(scheduler: str, experiments: list, delay: float = 0.5, shell: 
             lines.append(f"jid=$(submit {shlex.quote(exp.experiment)} ${{jobs[@]+\"${{jobs[@]}}\"}})")
             lines.append(f"record \"$jid\" {shlex.quote(exp.experiment)} experiment")
         lines.append('rm -f "$marker"')
-        count = f"{len(exp.samples)} sample job(s) in one array job" if exp.array else "${#jobs[@]} sample job(s)"
+        count = f"{len(exp.samples)} sample job(s)" if exp.array else "${#jobs[@]} sample job(s)"
         lines.append(f'echo "Submitted {exp.name}: {count}"')
         lines.append("")
-    lines.append('echo "Follow the jobs with: mitopiper monitor -i   (or, from the mitopiper folder: python monitor.py -i)"')
+    # The workspace is the folder above output/<experiment>: name it, so the command works from anywhere.
+    folders = [e.directory for e in experiments if e.directory]
+    workspace = posixpath.dirname(posixpath.dirname(folders[0].rstrip("/"))) if folders else ""
+    names = " ".join(e.name for e in experiments)
+    target = f"-w {shlex.quote(workspace)} " if workspace else ""
+    lines.append(f"echo {shlex.quote(f'Follow the jobs with: mitopiper {target}monitor -i {names}')}")
     return "\n".join(lines) + "\n"

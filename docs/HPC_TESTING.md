@@ -123,4 +123,4 @@ benchmark/run_presets.sh ws PRJxxxxx slurm bench -- --samples 0-1
 ## When something is wrong
 
 Send the command, the output of `mitopiper -w ws monitor -j <job>`, the job script
-(`output/<exp>/scripts/`) and its stderr (`output/<exp>/stderr/<job>.err`).
+(`output/<exp>/scripts/`) and its stderr (`output/<exp>/stderr/`: `<job>.e<id>` on Grid Engine, `<job>.err` for `-s local`).
