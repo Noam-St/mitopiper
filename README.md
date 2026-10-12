@@ -756,10 +756,13 @@ The NUMT reference comes from one of two places:
   `mitopiper refs add ORGANISM --fasta mt.fa --numt-fasta numts.fa`.
 * **Found in the nuclear genome**, when the reference set has one. This happens once, in the
   reference job. Overlapping 100 bp fragments of the mtDNA (`mitopiper mt fragments`) are aligned
-  to the genome with `bwa mem -a`. The regions they hit, at least 50 bp long, merged within 200 bp
+  with `bwa mem -a` to the nuclear + mtDNA reference that mitopiper builds in the workspace (the same one
+  as `mt-variants-numt`; nothing is written next to your genome FASTA), and hits on the mtDNA are ignored. The regions they hit, at least 50 bp long, merged within 200 bp
   and extended by 100 bp (`mitopiper mt numt-regions`), are extracted with `samtools faidx`
   into `references/derived/<organism>/<mt>.numts.fa`. If the genome has no NUMT, the job stops and
-  says so; use `mt-variants` for such species.
+  says so; use `mt-variants` for such species. With bwa's default scoring this finds the NUMTs similar
+  enough to the mtDNA (about 90% identity and up) to attract its reads: 65 regions in GRCh38, far fewer
+  than the several hundred NUMTs of published catalogues, most of which are old and diverged.
 
 Numt Parser is not packaged on conda or PyPI. Install it with
 `git clone https://github.com/adeflamingh/NuMt_parser` and put its `bin/` on the `PATH`, or set the
