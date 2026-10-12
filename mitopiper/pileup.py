@@ -101,8 +101,9 @@ def parse_bases(ref: str, bases: str) -> dict:
 
 
 def read_pileup(path) -> Iterable[tuple]:
-    """Yield ``(chrom, position, ref, depth, bases)`` of a pileup file."""
-    with open(path, encoding="utf-8") as handle:
+    """Yield ``(chrom, position, ref, depth, bases)`` of a pileup file (read byte for byte: quality
+    strings may hold bytes that are not UTF-8)."""
+    with open(path, encoding="latin-1") as handle:
         for line in handle:
             fields = line.rstrip("\n").split("\t")
             if len(fields) < 5 or not fields[1].isdigit():

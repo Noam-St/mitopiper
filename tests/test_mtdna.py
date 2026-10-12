@@ -134,3 +134,16 @@ def test_numt_read_list(tmp_path, keep, pairs, expected):
     counts = mtdna.numt_read_list(tmp_path / "t.tsv", tmp_path / "keep.txt", keep, pairs)
     assert (tmp_path / "keep.txt").read_text().split() == expected
     assert counts["cymt"] == 3 and counts["kept"] == len(expected)
+
+
+def test_pileups_with_non_utf8_bytes(tmp_path):
+    # Seen on real data: "'utf-8' codec can't decode byte 0x81" in circular-merge.
+    from mitopiper import pileup
+    odd = b"\x81"
+    normal = b"".join(b"MT\t%d\tA\t2\t.,\tI" % p + odd + b"\n" for p in range(1, 11))
+    (tmp_path / "n.p").write_bytes(normal)
+    (tmp_path / "r.p").write_bytes(normal)
+    mtdna.combine_pileups(tmp_path / "n.p", tmp_path / "r.p", tmp_path / "c.p", 10, window=2)
+    out = (tmp_path / "c.p").read_bytes()
+    assert out.count(odd) == 10 and out.splitlines()[4] == normal.splitlines()[4]      # bytes kept as they were
+    assert len(list(pileup.read_pileup(tmp_path / "c.p"))) == 10

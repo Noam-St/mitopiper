@@ -46,7 +46,7 @@ def read_table(path):
 def pileup_depths(path) -> dict:
     """Position -> depth of the first contig of a pileup."""
     depths, contig = {}, None
-    with open(path, encoding="utf-8") as handle:
+    with open(path, encoding="latin-1") as handle:     # any byte may occur in quality strings
         for line in handle:
             fields = line.split("\t")
             if len(fields) < 4 or not fields[1].isdigit():

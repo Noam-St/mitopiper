@@ -70,6 +70,7 @@ The single `maker.py` script was refactored into the installable `mitopiper` pac
 - pandas and Biopython are no longer needed.
 
 ### Fixed
+- `mt combine-pileups`, `mt annotate` and `benchmark/compare.py` crashed on pileups with bytes that are not UTF-8 (`'utf-8' codec can't decode byte 0x81`, seen on real data in `circular-merge`). Pileups and SAM files are now read byte for byte.
 - **Grid Engine reuses job numbers**, so `qacct -j ID` can return other users' jobs from months ago (seen on the BGU cluster): the monitor and `benchmark/sge_usage.sh` now only use records with the job's name, submitted after the job was. Before, `sge_usage.sh` added those jobs' run time and memory to the experiment's totals, and the monitor could take an old record for a job whose own record was not written yet.
 - On Grid Engines that record a time limit as `failed 100` with no `category` line (N1GE 6.0), a job killed by its `h_rt` was reported as cancelled, with a plain rerun as the fix. The requested `h_rt` is now read from the job script, and a kill at that limit is a time limit (fix: more time).
 - `benchmark/sge_usage.sh` is now a wrapper of `sge_usage.py`: one row per submission, array tasks counted once each.

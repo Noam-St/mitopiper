@@ -143,7 +143,8 @@ def combine_pileups(normal, rotated, output, length: int, shift="half", window: 
     contig = None
     rows = []
     counts = {"normal": 0, "rotated": 0, "other": 0}
-    with open(normal, encoding="utf-8") as handle:
+    # Pileups are read and written byte for byte: quality strings may hold any byte (seen: 0x81).
+    with open(normal, encoding="latin-1") as handle:
         for line in handle:
             fields = line.rstrip("\n").split("\t")
             if len(fields) < 2 or not fields[1].isdigit():
@@ -155,7 +156,7 @@ def combine_pileups(normal, rotated, output, length: int, shift="half", window: 
             elif not from_rotated(int(fields[1])):
                 rows.append(((0, fields[0], int(fields[1])), line))
                 counts["normal"] += 1
-    with open(rotated, encoding="utf-8") as handle:
+    with open(rotated, encoding="latin-1") as handle:
         for line in handle:
             fields = line.rstrip("\n").split("\t")
             if len(fields) < 2 or not fields[1].isdigit():
@@ -170,7 +171,7 @@ def combine_pileups(normal, rotated, output, length: int, shift="half", window: 
                 counts["rotated"] += 1
     rows.sort(key=lambda row: row[0])
     Path(output).parent.mkdir(parents=True, exist_ok=True)
-    with open(output, "w", encoding="utf-8") as out:
+    with open(output, "w", encoding="latin-1") as out:
         out.writelines(line for _, line in rows)
     return counts
 
@@ -288,7 +289,7 @@ def numt_reference(sam, mt, output, **options) -> int:
     with open(mt, encoding="utf-8") as handle:
         names = {h.split()[0] for h, _ in read_fasta(handle)}
     names |= {n.split(".")[0] for n in names}
-    with open(sam, encoding="utf-8") as handle:
+    with open(sam, encoding="latin-1") as handle:
         regions = numt_regions(handle, names, **options)
     if not regions:
         raise ValueError(f"no NUMT found in {sam}: the nuclear genome has no copy of the mtDNA fragments; "
