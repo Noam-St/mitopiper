@@ -84,3 +84,24 @@ def test_compare_reports_origin_concordance_and_accuracy(tmp_path):
 def test_run_presets_usage():
     result = subprocess.run(["bash", str(REPO / "benchmark" / "run_presets.sh")], capture_output=True, text=True)
     assert result.returncode == 2 and "run_presets.sh WORKSPACE METADATA SCHEDULER" in result.stdout
+
+
+def test_sge_usage_counts_only_the_experiments_own_jobs(tmp_path):
+    from test_monitor import N1GE_17163
+
+    from mitopiper.monitor import _qacct_time
+
+    usage = load(REPO / "benchmark" / "sge_usage.py")
+    exp = tmp_path / "fail_time"
+    exp.mkdir()
+    submitted = int(_qacct_time("Mon Oct 12 15:38:09 2026"))
+    rerun = N1GE_17163.replace("17163", "17166").replace("15:38:10", "15:40:43").replace(
+        "failed       100 : assumedly after job\nexit_status  137\nru_wallclock 6", "failed       0\nexit_status  0\nru_wallclock 13")
+    (exp / "jobs.tsv").write_text("job_id\tjob_name\tscript\tsubmitted\tkind\n"
+                                  f"17163\ts_control_0\t/s.sh\t{submitted}\tsample\n"
+                                  f"17166\ts_control_0\t/s.sh\t{submitted + 150}\tsample\n"
+                                  "17170\ts_patient_1\t/p.sh\t9999999999\tsample\n")
+    answers = {"17163": N1GE_17163, "17166": rerun, "17170": ""}
+    rows = usage.usage(exp, lambda job_id, task="": answers[job_id])
+    assert [(r["job_id"], r.get("wallclock_s"), r.get("maxvmem_GB"), r["failed"]) for r in rows] == [
+        ("17163", 6, 4.4, "100"), ("17166", 13, 4.4, "0"), ("17170", None, None, "no accounting record")]

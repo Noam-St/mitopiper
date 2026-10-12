@@ -192,45 +192,103 @@ def _run(cmd: list, timeout: int = 30) -> Optional[str]:
 _SGE_ACCOUNTING: dict = {}
 
 
-def sge_accounting(job_id: str, runner: Callable = _run) -> Optional[tuple]:
+def qacct_records(text: str) -> list:
+    """The records of a ``qacct -j`` answer, as ``{field: value}`` dicts."""
+    records = []
+    for chunk in (text or "").split("=" * 10):
+        fields = {}
+        for line in chunk.splitlines():
+            parts = line.split(None, 1)
+            if len(parts) == 2:
+                fields[parts[0]] = parts[1].strip()
+        if "jobnumber" in fields:
+            records.append(fields)
+    return records
+
+
+def _qacct_time(value: str) -> float:
+    """Epoch seconds of a qacct time ("Wed Oct  7 06:57:53 2026" or "10/07/2026 06:57:53.123"); 0 if unknown."""
+    value = " ".join((value or "").split())
+    for pattern in ("%a %b %d %H:%M:%S %Y", "%m/%d/%Y %H:%M:%S"):
+        try:
+            return time.mktime(time.strptime(value.split(".")[0], pattern))
+        except ValueError:
+            continue
+    return 0.0
+
+
+def own_records(records: list, job_name: str = "", submitted: float = 0) -> list:
+    """The records of *this* job. Grid Engine reuses job numbers, so ``qacct -j ID`` can also return
+    jobs of other users from months ago (seen on the BGU cluster): keep the records with the job's
+    name, submitted no earlier than the job was (5 minutes' slack for clocks)."""
+    keep = []
+    for record in records:
+        if job_name and record.get("jobname") != job_name:
+            continue
+        queued = _qacct_time(record.get("qsub_time", ""))
+        if submitted and queued and queued < submitted - 300:
+            continue
+        keep.append(record)
+    return keep
+
+
+def script_walltime(script: str) -> int:
+    """The h_rt (seconds) a Grid Engine job script asks for; 0 if none."""
+    try:
+        with open(script, encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if not line.startswith("#"):
+                    break
+                match = re.search(r"^#\$ -l .*\bh_rt=([\d:]+)", line)
+                if match:
+                    value = match.group(1)
+                    return int(value) if value.isdigit() else walltime_seconds(value)
+    except OSError:
+        pass
+    return 0
+
+
+def sge_accounting(job_id: str, runner: Callable = _run, job_name: str = "", submitted: float = 0,
+                   requested: int = 0) -> Optional[tuple]:
     """How SGE ended a job, from ``qacct``: ``(state, raw)`` with raw ``COMPLETED``, ``TIMEOUT``,
     ``OUT_OF_MEMORY``, ``CANCELLED``, ``LIMIT`` or ``FAILED``; ``None`` if qacct does not know it (yet).
 
-    ``failed 37`` ("qmaster enforced h_rt, h_cpu, or h_vmem limit") covers several limits: it is a time
-    limit when the job ran as long as the ``h_rt`` it asked for, a memory limit when it asked for ``h_vmem``.
+    Only records of this job count (``own_records``). A job killed by a signal (exit status 137/143)
+    hit its time limit when it ran as long as the ``h_rt`` it asked for: from qacct's ``category``,
+    or ``requested`` (the job script's h_rt) on Grid Engines without a category line, which also
+    record a time limit as ``failed 100`` instead of 37 (N1GE 6.0). ``failed 37`` that is not a time
+    limit is a memory limit when the job asked for ``h_vmem``.
     """
-    if job_id in _SGE_ACCOUNTING:
-        return _SGE_ACCOUNTING[job_id]
+    key = (job_id, job_name, submitted)
+    if key in _SGE_ACCOUNTING:
+        return _SGE_ACCOUNTING[key]
     array_id, _, task = job_id.partition("_")
     out = runner(["qacct", "-j", array_id] + (["-t", task] if task else []))
-    if not out or "jobnumber" not in out:
+    records = own_records(qacct_records(out), job_name, submitted)
+    if not records:
         return None                                  # unknown, or not written yet: ask again later
-    record = out.split("=" * 10)[-1]                 # a reused job number: the last record
-    fields = dict(line.split(None, 1) for line in record.splitlines() if len(line.split(None, 1)) == 2)
+    fields = records[-1]
     try:
         failed = int(fields.get("failed", "0").split()[0])
         exit_status = int(fields.get("exit_status", "0").split()[0])
     except ValueError:
         return None
     category = fields.get("category", "")
-    requested = re.search(r"h_rt=([\d:]+)", category)
+    match = re.search(r"h_rt=([\d:]+)", category)
+    value = match.group(1) if match else ""
+    limit = (int(value) if value.isdigit() else walltime_seconds(value)) if value else requested  # SGE: plain = s
     wall = re.match(r"[\d.]+", fields.get("ru_wallclock", "0"))
+    timed_out = bool(limit and wall and float(wall.group()) >= limit - 1)
     if failed == 0 and exit_status == 0:
         result = (DONE, "COMPLETED")
     elif failed == 37:
-        value = requested.group(1) if requested else ""
-        limit = int(value) if value.isdigit() else walltime_seconds(value) if value else 0   # SGE: plain = seconds
-        if limit and wall and float(wall.group()) >= limit - 1:
-            result = (KILLED, "TIMEOUT")
-        elif "h_vmem" in category:
-            result = (KILLED, "OUT_OF_MEMORY")
-        else:
-            result = (KILLED, "LIMIT")
-    elif failed == 100 and exit_status in (137, 143):      # signalled: qdel, or the kernel's OOM killer
-        result = (KILLED, "CANCELLED")
+        result = (KILLED, "TIMEOUT") if timed_out else (KILLED, "OUT_OF_MEMORY") if "h_vmem" in category \
+            else (KILLED, "LIMIT")
+    elif failed == 100 and exit_status in (137, 143):      # signalled: h_rt (old SGE), qdel, or the OOM killer
+        result = (KILLED, "TIMEOUT") if timed_out else (KILLED, "CANCELLED")
     else:
         result = (FAILED, "FAILED")
-    _SGE_ACCOUNTING[job_id] = result
+    _SGE_ACCOUNTING[key] = result
     return result
 
 
@@ -449,7 +507,10 @@ def collect(workspace: Workspace, experiments: list, scanner: ErrorScanner,
                     if scheduler_info is not None and (sched is None or sched[0] in (DONE, FAILED, KILLED)):
                         job.state = KILLED
                         if sched is None and scheduler == "sge":   # gone from qstat: ask the accounting why
-                            accounting = sge_accounting(job.job_id)
+                            array_task = "_" in job.job_id   # qacct names array tasks after the array
+                            accounting = sge_accounting(job.job_id, job_name="" if array_task else job.name,
+                                                        submitted=job.submitted or 0,
+                                                        requested=script_walltime(job.script) if job.script else 0)
                             job.scheduler_state = (accounting[1] if accounting
                                                    else "qacct record not written yet - look again in a minute")
             elif sched:
