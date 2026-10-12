@@ -32,11 +32,10 @@ def test_single_end_default_pipeline():
     job = build_sample_job(se_sample(), Workflow.default(), EXP, REF)
     got = lines(job)
     assert job.job_name == "s_SRR1_3"
-    assert got["wget"] == [
-        "wget -c -O /data/output/EXP/fastq/SRR1_3_HS.fastq.gz ftp/SRR1.fastq.gz",
-        'echo "abc  /data/output/EXP/fastq/SRR1_3_HS.fastq.gz" | md5sum -c -',
-        "sleep 30",
-    ]
+    assert got["wget"][0] == "wget -c -O /data/output/EXP/fastq/SRR1_3_HS.fastq.gz ftp/SRR1.fastq.gz"
+    assert got["wget"][1].startswith("sh -c ") and 'echo "abc  /data/output/EXP/fastq/SRR1_3_HS.fastq.gz" | md5sum -c -' \
+        in got["wget"][1]
+    assert got["wget"][2:] == ["sleep 30"]
     assert got["trim"] == ["trim_galore -q 20 -o /data/output/EXP/post_trim /data/output/EXP/fastq/SRR1_3_HS.fastq.gz"]
     assert got["bwa-align"] == [
         "bwa mem -k 19 /refs/chrM.fa /data/output/EXP/post_trim/SRR1_3_HS_trimmed.fq.gz > /data/output/EXP/alignment/SRR1_3_HS.sam"
@@ -197,3 +196,33 @@ def test_star_uses_the_step_threads():
     wf.run_order = ["STAR-alignment"]
     (cmd,) = lines(build_sample_job(se_sample(), wf, EXP, REF))["STAR-alignment"]
     assert "--runThreadN 8" in cmd
+
+
+def test_a_corrupt_download_is_downloaded_once_more(tmp_path):
+    # Seen on the BGU cluster: full size, wrong MD5; 'wget -c' then kept the corrupt file.
+    import hashlib
+    import shutil
+    import subprocess
+
+    good = b"good data\n"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "wget").write_text("#!/bin/sh\n# first download corrupt, then right\n"
+                                  'while [ "$1" != -O ]; do shift; done; out=$2\n'
+                                  f'if [ -e "{tmp_path}/once" ]; then printf "good data\\n" > "$out"; '
+                                  f'else touch "{tmp_path}/once"; printf "bad! data\\n" > "$out"; fi\n')
+    (bin_dir / "wget").chmod(0o755)
+    sample = Sample(index=0, accession="SAMN1", organism="Danio_rerio",
+                    runs=[Run("SRR1", ["ftp/SRR1.fastq.gz"], md5=[hashlib.md5(good).hexdigest()])])
+    wf = Workflow.default()
+    wf.set_general("download_delay", 0)
+    for shell in ["bash"] + [s for s in ("tcsh",) if shutil.which(s)]:
+        (tmp_path / "once").unlink(missing_ok=True)
+        job = build_sample_job(sample, wf, str(tmp_path / "exp"), REF, steps=["wget"])
+        (tmp_path / "exp" / "fastq").mkdir(parents=True, exist_ok=True)
+        script = tmp_path / "dl.sh"
+        script.write_text("\n".join(lines(job)["wget"]) + "\n")
+        env = dict(__import__("os").environ, PATH=f"{bin_dir}:" + __import__("os").environ["PATH"])
+        out = subprocess.run([shell, str(script)], env=env, capture_output=True, text=True)
+        assert out.returncode == 0 and "downloading" in out.stderr, (shell, out.stderr)
+        assert (tmp_path / "exp" / "fastq" / "SAMN1_0_DR.fastq.gz").read_bytes() == good

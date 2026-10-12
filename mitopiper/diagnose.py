@@ -277,6 +277,10 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
                r"ran out of data in the middle of a fastq entry|file is probably truncated")  # the last two: FastQC
     if _find(corrupt, text):
         producer, path = ctx.input_producer(step, text, corrupt)
+        if not producer and step == "wget" and (not path or path.startswith(ctx.exp_dir.rstrip("/") + "/")):
+            # The download step checks its own files: a full-size but corrupt download must be deleted,
+            # or 'wget -c' finds it complete and the checksum fails again (seen on the BGU cluster).
+            producer = "wget"
         title = "An input file is corrupt or incomplete" + (" (failed checksum)" if "md5" in text.lower() else "")
         if producer:
             add(Suggestion(title, [f"Delete the output of '{producer}'" + (f" ({path})" if path else "") + " and produce it again."],

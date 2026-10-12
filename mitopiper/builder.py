@@ -316,9 +316,15 @@ def _fetch_lines(key: str, settings: str, source: str, dest: str, md5: str, veri
         if source.endswith(".gz"):
             return [f'ln -sf "{source}" "{dest}"']
         return [f'gzip -c "{source}" > "{dest}"']
-    lines = [" ".join(p for p in (key, settings, "-O", dest, source) if p)]
+    fetch = " ".join(p for p in (key, settings, "-O", dest, source) if p)
+    lines = [fetch]
     if verify and md5:
-        lines.append(f'echo "{md5}  {dest}" | md5sum -c -')
+        # A wrong checksum gets one fresh download (deleted first: 'wget -c' would take a full-size
+        # corrupt file as complete), then fails the job. POSIX sh, whatever the job shell.
+        check = f'echo "{md5}  {dest}" | md5sum -c -'
+        retry = (f'{check} || {{ echo "[mitopiper] checksum failed: downloading {dest} again" >&2; '
+                 f'rm -f "{dest}"; {fetch} && {check}; }}')
+        lines.append(f"sh -c {shlex.quote(retry)}")
     if delay:
         lines.append(f"sleep {delay}")
     return lines

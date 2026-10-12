@@ -43,6 +43,8 @@ CTX = _ctx()
           step="mpileup"), "damaged input from 'sort'", {"from_step": "sort", "clean": True}),   # not index (.bai)
     (dict(errors=["md5sum: /w/output/E/fastq/x_1.fastq.gz: FAILED", "md5sum: WARNING: 1 computed checksum did NOT match"],
           step="wget"), "failed checksum", {"from_step": "wget", "clean": True}),
+    (dict(errors=["md5sum: WARNING: 1 computed checksum did NOT match"], step="wget"), "failed checksum",
+     {"from_step": "wget", "clean": True}),                        # the FAILED line with the path was not seen
     (dict(errors=["[E::bwa_idx_load_from_disk] fail to locate the index files"]), "BWA index", {}),
     (dict(errors=["[main_samview] fail to read the header from \"/w/output/E/alignment/x.sam\"."], step="view"),
      "empty or damaged input", {"from_step": "bwa-align", "clean": True}),
