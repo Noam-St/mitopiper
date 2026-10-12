@@ -68,3 +68,11 @@ def test_interactive_accepts_accession(tmp_path, fake_ena):
     ws = Workspace(tmp_path / "ws")
     assert run_interactive(ws, lambda prompt="": next(answers)) == 0
     assert (ws.output_dir / "PRJEB1" / "scripts" / "s_SAMEA1_0.sh").exists()
+
+
+def test_run_report_rows_are_sorted_by_run(tmp_path):
+    # ENA's order changes between requests, and --samples selects rows by number
+    text = "run_accession\tfastq_ftp\nSRR23446173\ta\nSRR9\tb\nSRR23446168\tc\nERR5\td\n"
+    path = ena.fetch_run_report("PRJNA1", tmp_path / "x.tsv", fetch=lambda url: text)
+    assert [line.split("\t")[0] for line in path.read_text().splitlines()[1:]] == \
+        ["ERR5", "SRR9", "SRR23446168", "SRR23446173"]

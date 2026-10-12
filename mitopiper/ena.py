@@ -86,6 +86,16 @@ def fetch_run_report(accession: str, dest: Path, fetch=None) -> Path:
         raise MetadataError(f"Unexpected answer from ENA for {accession}: {text[:200]!r}")
     if len(lines) == 1:
         raise MetadataError(f"ENA has no sequencing runs for {accession} (is it public yet?)")
+    # ENA returns the runs in no fixed order (seen: two fetches of PRJNA934362 two hours apart), and
+    # --samples picks rows by number: sort by run accession so the same rows mean the same runs.
+    column = lines[0].split("\t").index("run_accession")
+
+    def run_key(line):
+        run = (line.split("\t") + [""] * column)[column]
+        match = re.fullmatch(r"([A-Za-z]+)(\d+)", run)
+        return (match.group(1), int(match.group(2))) if match else (run, 0)
+
+    lines = [lines[0]] + sorted(lines[1:], key=run_key)
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
