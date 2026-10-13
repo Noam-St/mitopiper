@@ -18,7 +18,9 @@ data=$out/tutorial_data
 ws=$out/tutorial_ws
 
 for tool in mitopiper bwa samtools trim_galore numt_parser.py; do
-    command -v "$tool" >/dev/null || { echo "$tool is not on the PATH (see docs/tutorial.md, step 1)" >&2; exit 2; }
+    command -v "$tool" >/dev/null || { echo "$tool is not on the PATH (see docs/tutorial.md, step 1). In a job: was it" \
+        "submitted from the shell where the tools work, with -V, and with -S /bin/bash on Grid Engines whose" \
+        "queue shell is csh (its ~/.cshrc can reset PATH)?" >&2; exit 2; }
 done
 
 python "$here/simulate.py" "$data"
