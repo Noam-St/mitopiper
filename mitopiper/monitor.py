@@ -42,6 +42,8 @@ FINAL_STATES = (NOT_SUBMITTED, DONE, FAILED, KILLED, SKIPPED, ENDED)
 #: scheduler_state of a job that master.sh never submitted although it submitted others of the build
 #: (it stopped on an error, e.g. a qsub option the cluster rejects).
 NEVER_SUBMITTED = "never submitted: master.sh stopped before it"
+#: scheduler_state of a Grid Engine job that ended before qacct had a record of it
+ACCOUNTING_PENDING = "qacct record not written yet - look again in a minute"
 STATE_ORDER = (FAILED, KILLED, SKIPPED, RUNNING, PENDING, UNKNOWN, ENDED, DONE, NOT_SUBMITTED)
 
 DEFAULT_ERROR_PATTERNS = (
@@ -512,7 +514,7 @@ def collect(workspace: Workspace, experiments: list, scanner: ErrorScanner,
                                                         submitted=job.submitted or 0,
                                                         requested=script_walltime(job.script) if job.script else 0)
                             job.scheduler_state = (accounting[1] if accounting
-                                                   else "qacct record not written yet - look again in a minute")
+                                                   else ACCOUNTING_PENDING)
             elif sched:
                 job.state = sched[0]
             elif row and scheduler_info is not None:

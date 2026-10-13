@@ -71,6 +71,7 @@ The single `maker.py` script was refactored into the installable `mitopiper` pac
 - pandas and Biopython are no longer needed.
 
 ### Fixed
+- While Grid Engine had not yet written a finished job's accounting record, the monitor's summary called it an unrecognised failure; it now says to look again in a minute.
 - **Homoplasmic variants (`alt_major`) had no depth threshold**: a single read with an error at a barely covered position was reported as a variant. Variants now need the heteroplasmy calls' minimum depth (50) and more than half of the reads. On the BGU RNA-seq data the Numt Parser preset, which removes the most reads, reported up to 28 such positions per sample against 18-20 for the other presets.
 - `tool_versions.tsv` says `unknown` for a tool that prints no version (Numt Parser) instead of leaving the column empty.
 - A tool given as an absolute path in a step's `path` that does not exist gets the right advice (correct the step's path with `presets set`, rerun with `-p`) instead of `module load /nonexistent/samtools`.

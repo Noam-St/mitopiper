@@ -65,6 +65,8 @@ CTX = _ctx()
      "another Perl installation", {"free_form_hint": "unset PERL5LIB PERL5OPT"}),
     (dict(errors=["MISSING /nonexistent/samtools (used by: mpileup)"], step="check_tools", rc=1),
      "missing tool path", {}),                                     # a step's path: no 'module load' advice
+    (dict(sched="qacct record not written yet - look again in a minute", state=mon.KILLED, step="trim"),
+     "not written its accounting record yet", {}),                # not 'unrecognised failure' (BGU test)
     (dict(rc=3), "Unrecognised failure", {}),
 ])
 def test_diagnosis_rules(kwargs, cause, rerun_opts):

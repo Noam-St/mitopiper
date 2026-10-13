@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from .schedulers import format_walltime, walltime_seconds
-from .monitor import FAILED, KILLED, NEVER_SUBMITTED, NOT_SUBMITTED, SKIPPED, UNKNOWN, JobStatus, tail
+from .monitor import ACCOUNTING_PENDING, FAILED, KILLED, NEVER_SUBMITTED, NOT_SUBMITTED, SKIPPED, UNKNOWN, JobStatus, tail
 
 
 @dataclass
@@ -166,6 +166,11 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
         if s.cause not in [f.cause for f in found]:
             found.append(s)
 
+    if job.scheduler_state == ACCOUNTING_PENDING and not job.errors:
+        # Grid Engine writes its accounting record a little after the job ends: why it ended is not known yet.
+        return [Suggestion("The job ended; Grid Engine has not written its accounting record yet",
+                           ["Look again in a minute: the record says whether it hit a time or memory limit or was "
+                            "cancelled."], ["mitopiper monitor"], {})]
     if job.state == NOT_SUBMITTED and job.scheduler_state == NEVER_SUBMITTED:
         return [Suggestion("Never submitted: master.sh stopped before this job",
                            ["master.sh submitted the jobs before this one and then stopped on an error (its output "
