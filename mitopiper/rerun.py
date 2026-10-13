@@ -301,7 +301,8 @@ def describe(items: list) -> str:
     for item in items:
         where = f"from step '{item.start_step}'" if item.start_step else "whole job"
         extras = [f"{k}={v}" for k, v in item.overrides.items()] + (["clean"] if item.clean else [])
-        out.append(f"  {item.experiment}/{item.name:<22} {item.state:<8} failed at {item.failed_step or '-':<12} -> rerun {where}"
+        at = "last step" if item.state == DONE else "failed at"
+        out.append(f"  {item.experiment}/{item.name:<22} {item.state:<8} {at} {item.failed_step or '-':<12} -> rerun {where}"
                    + (f"  [{', '.join(extras)}]" if extras else ""))
     return "\n".join(out)
 
