@@ -147,3 +147,16 @@ def test_pileups_with_non_utf8_bytes(tmp_path):
     out = (tmp_path / "c.p").read_bytes()
     assert out.count(odd) == 10 and out.splitlines()[4] == normal.splitlines()[4]      # bytes kept as they were
     assert len(list(pileup.read_pileup(tmp_path / "c.p"))) == 10
+
+
+def test_consensus_takes_the_samples_major_alleles(tmp_path):
+    mt = fasta(tmp_path / "mt.fa", "MT human", "AAAAAAAAAA")
+    rows = [("MT", 2, "A", 60, "G" * 30 + "g" * 30),        # the sample's allele: substituted
+            ("MT", 4, "A", 10, "G" * 10),                     # too little depth
+            ("MT", 6, "A", 60, "G" * 30 + "." * 30),          # no majority
+            ("MT", 8, "A", 60, "." * 60)]                     # the reference allele
+    (tmp_path / "s.pileup").write_text("".join(f"{c}\t{p}\t{r}\t{d}\t{b}\t{'I' * d}\n" for c, p, r, d, b in rows))
+    changes = mtdna.consensus(tmp_path / "s.pileup", mt, tmp_path / "c.fa")
+    assert changes == [(2, "A", "G")]
+    with open(tmp_path / "c.fa") as handle:
+        assert list(mtdna.read_fasta(handle)) == [("MT human", "AGAAAAAAAA")]   # same length, same name

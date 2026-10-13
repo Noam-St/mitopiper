@@ -6,9 +6,12 @@ It writes, into OUTDIR:
 * ``reference/mt.fa`` and ``reference/mt.gff3``: a synthetic circular mtDNA with a
   few annotated genes (on both strands, two of them overlapping).
 * ``reference/nuclear.fa``: a synthetic nuclear genome. It contains a NUMT (a 3%
-  diverged copy of part of the mtDNA) and a ``chrM`` copy of the mtDNA, as many
-  real assemblies do. mitopiper leaves the latter out of the nuclear + mtDNA
-  reference.
+  diverged copy of part of the mtDNA) whose reads contaminate the samples, a
+  recent, nearly identical NUMT (``RECENT``) that carries the samples' allele
+  where the reference has another one (as human NUMTs carry the common allele at
+  the rCRS's rare-allele positions 4769 and 8860), and a ``chrM`` copy of the
+  mtDNA, as many real assemblies do. mitopiper leaves the latter out of the
+  nuclear + mtDNA reference.
 * ``fastq/<sample>_1.fastq.gz`` / ``_2``: paired-end reads of each sample. Fragments
   are drawn from the *circular* mtDNA, so some span the origin. A fraction of
   them come from the NUMT, and every base has a small sequencing error rate.
@@ -33,9 +36,14 @@ COMPLEMENT = str.maketrans("ACGT", "TGCA")
 #: sample -> {position: allele frequency of a transition there}; frequency 1.0 = homoplasmic variant.
 #: Position 60 is next to the origin, 3000 inside the NUMT region, 12000 in a gene on the minus strand.
 SAMPLES = {
-    "patient": {60: 0.15, 3000: 0.20, 9000: 0.10, 12000: 0.05, 7000: 1.0},
-    "control": {7000: 1.0},
+    "patient": {60: 0.15, 3000: 0.20, 9000: 0.10, 12000: 0.05, 7000: 1.0, 10000: 1.0},
+    "control": {7000: 1.0, 10000: 1.0},
 }
+#: The recent NUMT: a copy of mtDNA 9501..10500 with few differences, inserted into chr3. At 10000 it has
+#: the samples' allele (both samples differ from the reference there), so a read with that allele is closer
+#: to this NUMT than to the reference. It is made with its own random generator, so that adding it changed
+#: none of the simulated reads.
+RECENT = {"start": 9500, "end": 10500, "divergence": 0.004, "shared": 10000, "chr3_at": 50_000}
 TRANSITION = {"A": "G", "G": "A", "C": "T", "T": "C"}
 GENES = [("RNR1", 700, 1600, "+"), ("ND1", 2800, 3800, "+"), ("ATP8", 8400, 8600, "+"), ("ATP6", 8560, 9240, "+"),
          ("ND6", 11500, 12000, "-"), ("CYTB", 13000, 14100, "+")]
@@ -108,6 +116,12 @@ def main(argv=None) -> None:
     numt, numt_diffs = mutate(rng, mt[numt_start:numt_end], 0.03)
     chromosomes = [random_seq(rng, 150_000, gc=0.40) for _ in range(3)]
     chromosomes[1] = chromosomes[1][:60_000] + numt + chromosomes[1][60_000:]
+    recent_rng = random.Random(args.seed + 1)
+    recent, recent_diffs = mutate(recent_rng, mt[RECENT["start"]:RECENT["end"]], RECENT["divergence"])
+    shared = RECENT["shared"] - RECENT["start"] - 1
+    recent = recent[:shared] + TRANSITION[mt[RECENT["shared"] - 1]] + recent[shared + 1:]
+    at = RECENT["chr3_at"]
+    chromosomes[2] = chromosomes[2][:at] + recent + chromosomes[2][at:]
     write_fasta(out / "reference" / "mt.fa", [("synthMT", mt)])
     write_fasta(out / "reference" / "nuclear.fa",
                 [(f"chr{i + 1}", c) for i, c in enumerate(chromosomes)] + [("chrM", mt)])

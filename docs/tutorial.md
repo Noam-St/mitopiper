@@ -10,9 +10,9 @@ The simulated dataset (`tutorial/simulate.py`, standard library only) contains:
 | | |
 |---|---|
 | mtDNA | a synthetic circular genome of 16,000 bp (`synthMT`), with 6 annotated genes (one on the minus strand, two overlapping) |
-| nuclear genome | 3 chromosomes of 150 kb. `chr2` carries a **NUMT**: a 3% diverged copy of mtDNA 2,001–5,000 (90 differences). There is also a `chrM` copy of the mtDNA, as in many real assemblies. |
+| nuclear genome | 3 chromosomes of 150 kb. `chr2` carries a **NUMT**: a 3% diverged copy of mtDNA 2,001–5,000 (90 differences), whose reads contaminate the samples. `chr3` carries a **recent NUMT**: a nearly identical copy of mtDNA 9,501–10,500 (0.4% diverged) that has the samples' allele at 10,000, where the reference has another, as human NUMTs carry the common allele at the rCRS's rare-allele positions (4769, 8860). There is also a `chrM` copy of the mtDNA, as in many real assemblies. |
 | samples | `patient` and `control`, about 25,000 read pairs each (2×100 bp, ≈300× mtDNA depth, 0.2% sequencing errors), and 6% of the pairs come from the NUMT |
-| truth | `patient` has heteroplasmies of **15%** at position 60 (next to the origin), **20%** at 3,000 (inside the NUMT region), **10%** at 9,000 and **5%** at 12,000. Both samples carry a homoplasmic variant at 7,000. |
+| truth | `patient` has heteroplasmies of **15%** at position 60 (next to the origin), **20%** at 3,000 (inside the NUMT region), **10%** at 9,000 and **5%** at 12,000. Both samples carry homoplasmic variants at 7,000 and at 10,000 (the allele of the recent NUMT). |
 
 Fragments are drawn from the *circular* mtDNA, so some reads span the origin, just as in
 real data.
@@ -132,9 +132,11 @@ It takes about 2 minutes. The presets are:
 * **`mt-variants`** (`plain`) aligns to the mtDNA only.
 * **`mt-variants-numt`** (`mapq`) aligns to the nuclear genome + mtDNA, leaving the `chrM` copy out, and keeps the
   reads that map to the mtDNA with MAPQ ≥ 20.
-* **`mt-variants-numtparser`** (`numtparser`) finds the NUMT in the nuclear genome: it reports
-  `chr2:59901-63100`, which is the inserted 60,001–63,000 plus 100 bp flanks. It then keeps the reads that
-  [Numt Parser](https://github.com/adeflamingh/NuMt_parser) classifies as mtDNA.
+* **`mt-variants-numtparser`** (`numtparser`) finds the NUMTs in the nuclear genome: it reports
+  `chr2:59901-63100` and `chr3:49901-51100`, the two insertions plus 100 bp flanks. It builds each sample's own
+  mtDNA (the reference with the sample's major alleles; here 7,000 and 10,000) and lets
+  [Numt Parser](https://github.com/adeflamingh/NuMt_parser) compare each read with that sequence and with the
+  NUMTs. It drops the reads closer to a NUMT, and keeps the others.
 
 `tutorial_ws/benchmark/accuracy.tsv` (sample `patient`):
 
@@ -142,9 +144,21 @@ It takes about 2 minutes. The presets are:
 |---|---|---|---|---|---|---|---|
 | plain | 4 | 77 | 0 | 0.05 | 1 | 0.019 | 77 |
 | mapq | 4 | 0 | 0 | 1 | 1 | 0.007 | 0 |
-| numtparser | 4 | 0 | 0 | 1 | 1 | 0.006 | 0 |
+| numtparser | 4 | 0 | 0 | 1 | 1 | 0.007 | 0 |
 
-The homoplasmic variant at 7,000 is found in both samples with every preset (`alt_major`).
+The homoplasmic variants (`alt_major`, and `variants_found` in `accuracy.tsv`):
+
+| position | plain | mapq | numtparser |
+|---|---|---|---|
+| 7,000 | found (depth 315) | found | found |
+| 10,000 (shared with the recent NUMT) | found (depth 275) | **lost** (depth 8) | found (depth 274) |
+
+At 10,000 the reads carry the same allele as the recent NUMT, which is nearly identical to the mtDNA there.
+`mapq` loses them: they map equally well to both copies, so their mapping quality is low. Numt Parser *against
+the reference* loses them too (depth 0): a read with the samples' allele is closer to the NUMT than to the
+reference, so it is labelled NUMT. That is why the preset compares the reads with the sample's own mtDNA instead.
+On human data the same happens at positions where the rCRS has a rare allele and NUMTs the common one (4769, 8860):
+with the reference, those variants were lost in every sample of an RNA-seq project.
 
 `origin_coverage.tsv` shows the effect of circularity. It gives the depth of the 400 positions on each side of the
 origin, relative to the rest of the mtDNA:
@@ -152,11 +166,12 @@ origin, relative to the rest of the mtDNA:
 | preset | linear pileup | circular pileup |
 |---|---|---|
 | plain | 0.67 | 0.93 |
-| mapq | 0.71 | 0.99 |
-| numtparser | 0.73 | 1.01 |
+| mapq | 0.73 | 1.01 |
+| numtparser | 0.71 | 0.99 |
 
 In the linear pileup, reads that span the origin are clipped or lost, so coverage drops by about 30%. The
-circular pileup restores it. For `plain` the ratio stays lower only because NUMT reads inflate the depth elsewhere. With
+circular pileup restores it. For `plain` the ratio stays lower only because NUMT reads inflate the depth elsewhere
+(and for `mapq` it is slightly above 1 because the region of the recent NUMT loses depth). With
 matplotlib installed, `compare.py` also draws `origin_coverage.png`, `calls.png` and `af_truth.png`
 (called vs true frequency).
 

@@ -593,7 +593,7 @@ prompt; `mitopiper presets show NAME` describes each one:
 | --- | --- | --- |
 | `mt-variants` | mtDNA coverage, heteroplasmy and variants | trim → align to the mtDNA *and* to a rotated copy → pileups (all positions, no depth cap) → merged circular pileup |
 | `mt-variants-numt` | the same, without false heteroplasmy from nuclear mtDNA copies | trim → align to nuclear genome + mtDNA → keep reads mapping to the mtDNA with MAPQ ≥ 20 → pileup → the same rotated alignment of those reads → merged circular pileup |
-| `mt-variants-numtparser` | the same, with NUMT reads removed by [Numt Parser](https://github.com/adeflamingh/NuMt_parser) | trim → align to the mtDNA and to NUMT sequences → Numt Parser classifies each read → keep the reads classified as mtDNA → pileup → rotated alignment of those reads → merged circular pileup |
+| `mt-variants-numtparser` | the same, with NUMT reads removed by [Numt Parser](https://github.com/adeflamingh/NuMt_parser) | trim → align to the mtDNA → the sample's own mtDNA (consensus) → align to it and to NUMT sequences → Numt Parser classifies each read → drop the reads closer to a NUMT → pileup → rotated alignment of those reads → merged circular pileup |
 | `rnaseq-expression` | gene expression | trim → STAR (splice-aware) → featureCounts → MultiQC |
 
 `bwa mem` is not splice-aware. That is fine for the mtDNA, which has no introns, but use
@@ -752,12 +752,24 @@ FASTA in the reference set: `mitopiper refs fetch-genome ORGANISM --nuclear-of m
 **NUMTs with Numt Parser.** `mt-variants-numtparser` uses the published classifier
 [Numt Parser](https://github.com/adeflamingh/NuMt_parser) (de Flamingh *et al.* 2023,
 [*J. Hered.* 114:120](https://doi.org/10.1093/jhered/esac065)) instead of a mapping-quality cut-off.
-Each sample is aligned to the mtDNA and, separately, to a NUMT reference. The primary alignments go to
-`numt_parser.py` as SAM, and it labels every read `cymt` (cytoplasmic mtDNA), `numt` or
-`undetermined` by its identity to each reference (table in `numt/<sample>.numt_parser.tsv`).
-`mitopiper mt numt-reads` turns the table into a read list: step `cymt-reads`, `--keep cymt|not-numt`
-and `--pairs all|any` (whether both mates must qualify). `samtools view -N` (samtools ≥ 1.12) then
-keeps those reads for the pileups and the rotated realignment.
+It labels every read `cymt` (cytoplasmic mtDNA), `numt` or `undetermined` by its identity to the mtDNA
+and to a NUMT reference.
+
+The comparison is **haplotype-aware**. Against the reference itself, a read carrying the sample's allele
+where the reference has a rare one can be closer to a NUMT that carries the common allele, and is labelled
+NUMT although it is mtDNA. The rCRS has such rare alleles (e.g. 4769A and 8860A), and on a human RNA-seq
+project the plain comparison removed nearly all reads at 4769 and 8860, and with them two real homoplasmic
+variants, in every sample. So each sample is first aligned to the mtDNA (`align-mt`), and
+`mitopiper mt consensus` builds the sample's own mtDNA: the reference with every major allele that differs from
+it (depth ≥ 50, more than half of the reads; substitutions only, so positions keep their numbers;
+`numt/<sample>.consensus.fa`). The reads are aligned to that sequence and, separately, to the NUMT reference;
+the primary alignments go to `numt_parser.py` as SAM (table in `numt/<sample>.numt_parser.tsv`).
+
+`mitopiper mt numt-reads` turns the table into a read list: step `cymt-reads`, `--keep not-numt|cymt` and
+`--pairs all|any` (whether both mates must qualify). The default keeps the `undetermined` reads too: they are
+as close to the sample's mtDNA as to a NUMT, which happens where a NUMT is identical to the mtDNA, and dropping
+them removed about a quarter of the depth. `samtools view -N` (samtools ≥ 1.12) then keeps those reads, from the
+alignment to the reference, for the pileups and the rotated realignment.
 
 The NUMT reference comes from one of two places:
 

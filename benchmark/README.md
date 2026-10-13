@@ -60,7 +60,9 @@ spanning the origin. It writes `truth.tsv` for `--truth`. Change the difficulty 
 shows the results. In short:
 * without NUMT handling, 77 of the 90 positions where the NUMT differs become false heteroplasmies, and a true 20% heteroplasmy is
   called at 14%;
-* both NUMT presets remove every false call and keep all true ones;
+* both NUMT presets remove every false call and keep all true heteroplasmies;
+* at a homoplasmic variant shared with a recent, nearly identical NUMT, the MAPQ filter loses the reads (depth 8 of 275);
+  Numt Parser against the reference loses them too (depth 0), against the sample's own mtDNA it keeps them (274);
 * the circular pileup brings the depth next to the origin from about 70% of the rest to about 100%.
 
 ## Suggested real-data benchmark

@@ -157,7 +157,7 @@ def test_numt_preset_needs_a_nuclear_genome(cluster, caplog):
     assert "NUMT-aware" in caplog.text and "refs fetch-genome Homo_sapiens --nuclear-of" in caplog.text
 
 
-NUMT_PARSER = ["wget", "align-mt", "mt-sam", "align-numt", "numt-parser", "cymt-reads", "mt-reads", "index-mt", "mpileup"]
+NUMT_PARSER = ["wget", "align-mt", "pileup-mtref", "consensus", "index-consensus", "mt-sam", "align-numt", "numt-parser", "cymt-reads", "mt-reads", "index-mt", "mpileup"]
 
 
 @pytest.mark.parametrize("shell", ["bash"] + (["tcsh"] if __import__("shutil").which("tcsh") else []))
@@ -179,7 +179,10 @@ def test_numt_parser_preset_finds_numts_in_the_nuclear_genome(cluster, shell):
     numt = ws.output_dir / "exp" / "numt"
     assert (numt / "a_0_HS.cymt_reads.txt").read_text() == "r1\n"                 # both mates of r3 must be cymt
     script = (ws.output_dir / "exp" / "scripts" / "s_a_0.sh").read_text()
-    assert f"numt_parser.py --mt-fasta {tmp_path}/mt.fa --numt-fasta {derived}/mt.numts.fa --mt-sam {numt}/a_0_HS.mtref.sam" in script
+    # haplotype-aware: Numt Parser compares the reads with the sample's own mtDNA, which is kept
+    assert (f"numt_parser.py --mt-fasta {numt}/a_0_HS.consensus.fa --numt-fasta {derived}/mt.numts.fa "
+            f"--mt-sam {numt}/a_0_HS.consensus.sam") in script
+    assert (numt / "a_0_HS.consensus.fa").read_text().startswith(">")
     assert f"-N {numt}/a_0_HS.cymt_reads.txt" in script and "-h -F 0x904" in script
     assert [p for p, d in merged_depths(ws).items() if d == 2] == [1, 2, 3, 28, 29, 30]
 

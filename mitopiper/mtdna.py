@@ -327,6 +327,44 @@ def numt_read_list(table, output, keep: str = "cymt", pairs: str = "all") -> dic
     return counts
 
 
+def consensus(pileup_file, fasta, output, min_depth: int = 50, min_fraction: float = 0.5) -> list:
+    """The sample's own mtDNA: ``fasta`` (the reference) with every position whose major allele differs
+    from the reference, at depth >= ``min_depth`` and in more than ``min_fraction`` of the reads,
+    replaced by that allele. Substitutions only, so every position keeps its number.
+
+    Numt Parser labels a read by whether it is closer to the mtDNA or to a NUMT. Against the reference,
+    a read carrying the sample's common allele where the reference has a rare one (rCRS 4769A, 8860A)
+    can be closer to a NUMT that also carries the common allele, and is removed although it is
+    mtDNA (seen in every sample of a human RNA-seq project). Against the consensus it is not.
+    Returns the substitutions as ``(position, reference, allele)``.
+    """
+    with open(fasta, encoding="utf-8") as handle:
+        records = list(read_fasta(handle))
+    if not records:
+        raise ValueError(f"{fasta} contains no sequence")
+    header, sequence = records[0]
+    name = header.split()[0]
+    bases = list(sequence)
+    changes = []
+    for contig, position, ref, depth, pile in pileup.read_pileup(pileup_file):
+        if contig != name or not depth or not 1 <= position <= len(bases):
+            continue
+        counts = pileup.parse_bases(ref, pile)
+        alleles = {a: counts["fwd"][a] + counts["rev"][a] for a in pileup.ALLELES}
+        total = sum(alleles.values())
+        major = max(alleles, key=alleles.get)
+        if (major in "ACGT" and major != bases[position - 1].upper() and total >= min_depth
+                and alleles[major] > total * min_fraction):
+            changes.append((position, bases[position - 1].upper(), major))
+            bases[position - 1] = major
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    with open(output, "w", encoding="utf-8") as out:
+        write_record(out, header, "".join(bases))
+        for other_header, other in records[1:]:
+            write_record(out, other_header, other)
+    return changes
+
+
 # ------------------------------------------------------------------------- CLI
 def add_parser(sub) -> None:
     """Register ``mitopiper mt ...``."""
@@ -360,6 +398,11 @@ def add_parser(sub) -> None:
     regions.add_argument("--min-length", type=int, default=50)
     regions.add_argument("--flank", type=int, default=100)
     regions.add_argument("--merge", type=int, default=200)
+    cons = msub.add_parser("consensus", help="the sample's own mtDNA: the reference with its major alleles (for Numt Parser)")
+    cons.add_argument("pileup", help="pileup of the sample's reads aligned to the reference")
+    cons.add_argument("fasta", help="the mtDNA reference FASTA")
+    cons.add_argument("output")
+    cons.add_argument("--min-depth", type=int, default=50, help="minimum depth for a substitution (default 50)")
     reads = msub.add_parser("numt-reads", help="reads to keep from a Numt Parser table (for samtools view -N)")
     reads.add_argument("table")
     reads.add_argument("output")
@@ -394,6 +437,10 @@ def run(args) -> int:
             print(f"[mitopiper] {exc}", file=sys.stderr)
             return 1
         print(f"[mitopiper] {count} NUMT regions", file=sys.stderr)
+    elif args.action == "consensus":
+        changes = consensus(args.pileup, args.fasta, args.output, args.min_depth)
+        print(f"[mitopiper] consensus: {len(changes)} substitution(s)"
+              + (": " + ", ".join(f"{r}{p}{a}" for p, r, a in changes) if changes else ""), file=sys.stderr)
     elif args.action == "numt-reads":
         counts = numt_read_list(args.table, args.output, args.keep, args.pairs)
         print("[mitopiper] Numt Parser: " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())), file=sys.stderr)

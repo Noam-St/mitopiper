@@ -58,6 +58,7 @@ The single `maker.py` script was refactored into the installable `mitopiper` pac
 - Test suite and CI.
 
 ### Changed
+- **`mt-variants-numtparser` is haplotype-aware.** Numt Parser compared each read with the reference mtDNA, so a read carrying the sample's common allele where the rCRS has a rare one (4769, 8860) was closer to a NUMT carrying that allele and was removed: on a human RNA-seq project two real homoplasmic variants were lost in every sample. Each sample's own mtDNA (`mitopiper mt consensus`: the reference with its major alleles) is now what Numt Parser compares the reads with, and `undetermined` reads are kept by default (`cymt-reads.keep=not-numt`). The tutorial reproduces the case with a recent NUMT on chr3 that carries the samples' allele at 10,000: the old comparison lost that variant (depth 0), the new one keeps it (depth 274, as without filtering); the MAPQ filter loses it too (depth 8).
 - Scripts are written to `output/<exp>/scripts/<job name>.sh` (`prep_<exp>.sh`, `s_<sample>_<i>.sh`, `e_<exp>.sh`). The submit script is `master.sh`.
 - With the `local` scheduler, a failing job no longer stops the remaining jobs.
 - The user's metadata file is copied into the experiment, not moved and rewritten.

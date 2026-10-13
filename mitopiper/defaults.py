@@ -398,18 +398,28 @@ def _mt_variants(numt: str = "") -> dict:
             "(refs fetch-genome --nuclear-of / refs add --nuc-fasta)", "what this preset is for"]
     else:
         # Numt Parser (de Flamingh et al. 2023) wants SAM files of primary alignments to the mtDNA and to the NUMTs.
-        primary = (("header", "Keep the header", "-h", ""),
-                   ("primary only", "Drop unmapped, secondary and supplementary alignments", "-F", "0x904"))
         pipe.update({
             "align-mt": _step("bwa mem", "Align to the mtDNA", "alignment", "post_trim", ".fq.gz", ".mtref.sorted.bam",
                               "key settings _fasta _fastq | samtools sort -o output -"),
-            "mt-sam": _step("samtools view", "Primary mtDNA alignments as SAM, for Numt Parser", "numt", "alignment",
-                            ".mtref.sorted.bam", ".mtref.sam", "key settings -o output input"),
+            # Haplotype-aware: Numt Parser compares each read with the sample's own mtDNA (the reference with
+            # the sample's major alleles), not with the reference itself. Against the reference, reads with the
+            # common allele where the rCRS has a rare one (4769, 8860 ...) can be closer to a NUMT carrying that
+            # allele, and real variants are lost (seen in every sample of a human RNA-seq project).
+            "pileup-mtref": _step("samtools mpileup", "Pileup of the unfiltered mtDNA alignment, for the consensus",
+                                  "numt", "alignment", ".mtref.sorted.bam", ".mtref.pileup",
+                                  "key settings command_input output_pipe"),
+            "consensus": _step("mitopiper mt consensus", "The sample's own mtDNA: the reference with its major alleles",
+                               "numt", "", "", ".consensus.fa", "key settings output_pileup-mtref _fasta output"),
+            "index-consensus": _step("bwa index", "Index the sample's mtDNA", "numt", "", "", ".consensus.fa.bwt",
+                                     "key output_consensus"),
+            "mt-sam": _step("bwa mem", "Align to the sample's own mtDNA, for Numt Parser", "numt", "post_trim",
+                            ".fq.gz", ".consensus.sam",
+                            "key settings output_consensus _fastq | samtools view -h -F 0x904 -o output -"),
             "align-numt": _step("bwa mem", "Align to the NUMT reference", "numt", "post_trim", ".fq.gz", ".numt.sam",
                                 "key settings _numt_fasta _fastq | samtools view -h -F 0x904 -o output -"),
             "numt-parser": _step("numt_parser.py", "Classify reads as mtDNA (cymt) or NUMT (Numt Parser)", "numt", "", "",
                                  ".numt_parser.tsv",
-                                 "key --mt-fasta _fasta --numt-fasta _numt_fasta --mt-sam output_mt-sam "
+                                 "key --mt-fasta output_consensus --numt-fasta _numt_fasta --mt-sam output_mt-sam "
                                  "--numt-sam output_align-numt --outfile output", memory="16G"),
             "cymt-reads": _step("mitopiper mt numt-reads", "Names of the reads classified as mtDNA", "numt", "", "",
                                 ".cymt_reads.txt", "key output_numt-parser output settings"),
@@ -419,17 +429,21 @@ def _mt_variants(numt: str = "") -> dict:
         })
         settings.update({
             "align-mt": _params(*_BWA),
-            "mt-sam": _params(*primary),
+            "pileup-mtref": _params(*_PILEUP, ("reference", "mtDNA FASTA", "-f", "_fasta")),
+            "consensus": _params(("min depth", "Minimum depth for a substitution", "--min-depth", 50)),
+            "index-consensus": {},
+            "mt-sam": _params(*_BWA),
             "align-numt": _params(*_BWA),
             "numt-parser": {},
             "cymt-reads": _params(
-                ("keep", "cymt: only reads classified as mtDNA; not-numt: also the undetermined ones", "--keep", "cymt"),
+                ("keep", "not-numt: reads classified as mtDNA and the undetermined ones (as close to the sample's mtDNA "
+                         "as to a NUMT); cymt: only the reads classified as mtDNA", "--keep", "not-numt"),
                 ("pairs", "all: both mates must qualify; any: one qualifying mate keeps the pair", "--pairs", "all")),
             "mt-reads": _params(("bam", "Output BAM", "-b", "")),
             "index-mt": {},
         })
-        order = trimmed + ["align-mt", "mt-sam", "align-numt", "numt-parser", "cymt-reads", "mt-reads", "index-mt",
-                           "mpileup"]
+        order = trimmed + ["align-mt", "pileup-mtref", "consensus", "index-consensus", "mt-sam", "align-numt",
+                           "numt-parser", "cymt-reads", "mt-reads", "index-mt", "mpileup"]
         general["preset_description"] = [
             "mtDNA coverage/variants, NUMTs removed with Numt Parser (github.com/adeflamingh/NuMt_parser): reads are "
             "aligned to the mtDNA and to NUMT sequences, only reads more similar to the mtDNA are kept, then "
@@ -445,7 +459,8 @@ def _mt_variants(numt: str = "") -> dict:
         step["switch"] = name in active
     # Intermediate alignments only the next steps read: deleted when the sample job has finished (a full
     # run of 10 RNA-seq samples kept 93 GB of them on the BGU cluster). Remove the flag to keep them.
-    for name in ("bwa-align", "view", "align-combined", "index-combined", "align-mt", "mt-sam", "align-numt"):
+    for name in ("bwa-align", "view", "align-combined", "index-combined", "align-mt", "pileup-mtref", "mt-sam",
+                 "align-numt"):
         if name in order:
             pipe[name]["temporary"] = True
     config["run_order"] = active

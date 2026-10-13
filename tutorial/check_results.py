@@ -42,7 +42,13 @@ def main(argv=None) -> int:
               f"{preset}: no false heteroplasmy (patient {patient['false_positives']}, control {control['false_positives']})")
         check(float(patient["af_mean_abs_error"]) < 0.02, f"{preset}: frequency error {patient['af_mean_abs_error']} < 0.02")
     for (preset, sample), r in sorted(accuracy.items()):
-        check(r["variants_found"] == r["variants_expected"], f"{preset}/{sample}: homoplasmic variant found")
+        found, expected = int(r["variants_found"]), int(r["variants_expected"])
+        if preset == "mapq":
+            # 10000 is shared with a nearly identical NUMT: its reads get a low mapping quality and are dropped
+            check(found == expected - 1, f"mapq/{sample}: {found} of {expected} homoplasmic variants found; the one "
+                                         "shared with the recent NUMT is lost to the MAPQ filter, as expected")
+        else:
+            check(found == expected, f"{preset}/{sample}: all {expected} homoplasmic variants found")
     plain = accuracy[("plain", "patient")]
     check(int(plain["false_calls_at_numt_differences"]) >= 20,
           f"plain: NUMT reads fake heteroplasmy ({plain['false_calls_at_numt_differences']} calls), as the simulation intends")
@@ -56,7 +62,7 @@ def main(argv=None) -> int:
 
     regions = list((ws / "references" / "derived").glob("*/*.numt_search.regions.txt"))
     found = regions[0].read_text().split() if regions else []
-    check(found == ["chr2:59901-63100"], f"NUMT search finds the planted NUMT (found: {found})")
+    check(found == ["chr2:59901-63100", "chr3:49901-51100"], f"NUMT search finds both planted NUMTs (found: {found})")
     combined = list((ws / "references" / "derived").glob("*/*.with_nuclear.fa"))
     names = contigs(combined[0]) if combined else []
     check(names == ["chr1", "chr2", "chr3", "synthMT"], f"nuclear + mtDNA reference leaves chrM out ({names})")
