@@ -219,3 +219,14 @@ def test_rerun_with_a_fixed_preset_checks_the_preset_tools(registered, data_dir)
     assert "/nonexistent/samtools" not in check.read_text() and "samtools" in check.read_text()
     write(ws, [item], RerunOptions())                    # without --preset: as built
     assert "/nonexistent/samtools" in check.read_text()
+
+
+def test_a_finished_job_named_for_a_rerun_runs_again_from_the_start(tmp_path):
+    from mitopiper.rerun import describe
+
+    ws = make_ws(tmp_path, fail_cmd="echo")                         # 'echo count': every job finishes
+    assert states(ws)["s_a_0"] == mon.DONE
+    item = next(i for i in plan(ws, ["demo"], RerunOptions(jobs=["s_a_0"]), query=lambda s, i: None) if i.name == "s_a_0")
+    assert item.start_step == "wget"                                 # from the start, not its last step
+    text = describe([item])
+    assert "at step" in text and "failed at" not in text
