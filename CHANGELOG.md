@@ -5,6 +5,7 @@
 The single `maker.py` script was refactored into the installable `mitopiper` package.
 
 ### Added
+- Steps can be marked `"temporary": true`: their outputs are deleted at the end of a successful sample job. The mt presets mark their intermediate SAM/BAM files, which took 93 GB of the 116 GB of one preset's full run (10 RNA-seq samples) on the BGU cluster.
 - `benchmark/sge_usage.sh`: run time, CPU time and peak memory of every job of an experiment from Grid Engine's `qacct` (failed attempts included), with core-hours per experiment.
 - `mitopiper presets set PRESET[,PRESET...] KEY=VALUE ...` changes general settings (`qsub_queue=bioinfo.q`) and step fields (`numt-parser.memory=32G`) without editing JSON. Every name is checked first, so a typo changes nothing.
 - mtDNA circularity, based on the original `circulize.py` / `combine_processed_pileups.py`: samples are also aligned to a rotated copy of the mtDNA (`mt_rotation`, default half the mtDNA length), and `mitopiper mt combine-pileups` merges both pileups so the `mt_junction_window` positions (default 400) on either side of the origin come from the rotated alignment.

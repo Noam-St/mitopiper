@@ -172,6 +172,10 @@ def test_numt_parser_preset_finds_numts_in_the_nuclear_genome(cluster, shell):
     assert (derived / "mt.numt_search.regions.txt").read_text() == "chr1:1-10\n"   # hit at 3..62, flanked, clipped
     assert (derived / "mt.numts.fa.bwt").exists() and (derived / "mt.with_nuclear.fa.bwt").exists()
     assert not (tmp_path / "nuc.fa.bwt").exists()        # nothing is written next to the user's genome
+    out = ws.output_dir / "exp"
+    # intermediates marked temporary are gone once the job finished; what the results need is kept
+    assert not list(out.glob("numt/*.sam")) and not list(out.glob("alignment/*.mtref.sorted.bam"))
+    assert list(out.glob("alignment/*.mt.bam")) and list(out.glob("numt/*.numt_parser.tsv"))
     numt = ws.output_dir / "exp" / "numt"
     assert (numt / "a_0_HS.cymt_reads.txt").read_text() == "r1\n"                 # both mates of r3 must be cymt
     script = (ws.output_dir / "exp" / "scripts" / "s_a_0.sh").read_text()
@@ -324,3 +328,22 @@ def test_a_stale_reference_lock_is_taken_over(tmp_path, monkeypatch):
     out = subprocess.run(["bash", str(tmp_path / "prep.sh")], env=env, capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
     assert "taking over the stale lock" in out.stderr and not lock.exists()
+
+
+def test_temporary_outputs_are_removed_last_and_only_on_success():
+    from mitopiper.builder import TEMPORARY_STEP, build_sample_job
+    from mitopiper.metadata import Run, Sample
+
+    from mitopiper.defaults import bundled_presets
+    from mitopiper.config import Workflow
+    preset = Workflow(**bundled_presets()["mt-variants"])
+    sample = Sample(index=0, accession="S", organism="Homo_sapiens", runs=[Run("R", ["/f_1.fq.gz", "/f_2.fq.gz"])])
+    job = build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa"))
+    last = job.steps[-1]
+    assert last.step == TEMPORARY_STEP and [s.step for s in job.steps].index("annotate") < len(job.steps) - 1
+    assert last.lines == ['rm -f "/w/output/E/alignment/S_0_HS.sam"', 'rm -f "/w/output/E/alignment/S_0_HS.bam"']
+    # a rerun resumed late still removes what the first attempt left
+    late = build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa"), steps=["annotate"])
+    assert late.steps[-1].lines == last.lines
+    preset.set_general("fail_fast", False)               # the job goes on after errors: delete nothing
+    assert build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa")).steps[-1].step == "annotate"

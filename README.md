@@ -636,6 +636,15 @@ still work per sample. The experiment-level job waits for the whole array. Many 
 many jobs one user may queue, so this is the recommended mode for large projects. (The `local`
 scheduler always runs jobs one after another.)
 
+### Intermediate files
+
+A step marked `"temporary": true` in `pipeline.json` has its outputs deleted at the end of each sample job,
+once every step has succeeded (and only with `fail_fast` on): a failed job keeps what a rerun needs. The mt
+presets mark the alignments that only the next steps read: the SAM and unsorted BAM (`mt-variants`), the
+whole-genome BAM (`mt-variants-numt`), and the SAMs and full mtDNA alignment given to Numt Parser
+(`mt-variants-numtparser`). The sorted, filtered and rotated BAMs, pileups and tables are kept. Remove the
+flag from a step to keep its files.
+
 ### Resources per step
 A step can declare what it needs with the optional fields `threads`, `memory` and `walltime` in
 `pipeline.json` (or in *modify a pipeline step*):

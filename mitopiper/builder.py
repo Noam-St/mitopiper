@@ -220,6 +220,22 @@ def first_ext(conf: dict) -> str:
     return next(iter(output_exts(conf).values()))
 
 
+#: Name of the last step of a sample job when some steps are marked temporary.
+TEMPORARY_STEP = "remove-temporary"
+
+
+def temporary_outputs(workflow: Workflow, exp_dir: str, sample_name: str) -> list:
+    """Outputs of the active sample steps marked ``"temporary": true`` (e.g. a SAM file that only the next
+    step reads), deleted at the end of the sample job. All active steps count, not only those of a
+    resumed job, so a rerun also removes what the first attempt left."""
+    paths = []
+    for step in workflow.active_order():
+        conf = workflow.pipeline.get(step, {})
+        if step_scope(workflow, step) == "sample" and _truthy(conf.get("temporary", False)):
+            paths += list(output_paths(conf, exp_dir, sample_name).values())
+    return paths
+
+
 def output_paths(conf: dict, exp_dir: str, sample_name: str) -> dict:
     outdir = _join(exp_dir, conf.get("outdir", ""))
     return {name: _join(outdir, f"{sample_name}{ext}") for name, ext in output_exts(conf).items()}
@@ -420,6 +436,12 @@ def build_sample_job(
             lines = [render_structure(structure, variables, lookups)]
         binds = [workspace_of(exp_dir)] + [posixpath.dirname(p) for p in (ref.refpath, ref.nuc_refpath, ref.numt_refpath, ref.gtfpath) if p]
         job.steps.append(StepCommands(step, conf.get("description", ""), in_environment(conf, lines, workflow, binds)))
+    temporary = temporary_outputs(workflow, exp_dir, sample.name)
+    if temporary and job.steps and workflow.flag("fail_fast", True):
+        # Reached only when every step before succeeded (fail_fast stops the job at the first error), so a
+        # failed job keeps what a rerun needs. Without fail_fast nothing is deleted.
+        job.steps.append(StepCommands(TEMPORARY_STEP, "Delete intermediate files of steps marked temporary",
+                                      [f'rm -f "{path}"' for path in temporary]))
     return job
 
 

@@ -443,6 +443,11 @@ def _mt_variants(numt: str = "") -> dict:
     active = order + circ_order + ann_order + ["multiqc"]
     for name, step in pipe.items():
         step["switch"] = name in active
+    # Intermediate alignments only the next steps read: deleted when the sample job has finished (a full
+    # run of 10 RNA-seq samples kept 93 GB of them on the BGU cluster). Remove the flag to keep them.
+    for name in ("bwa-align", "view", "align-combined", "index-combined", "align-mt", "mt-sam", "align-numt"):
+        if name in order:
+            pipe[name]["temporary"] = True
     config["run_order"] = active
     return config
 
