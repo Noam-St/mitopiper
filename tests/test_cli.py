@@ -129,3 +129,14 @@ def test_step_resources_reach_the_job_header(registered, data_dir):
     assert run(ws, "build", "--no-check", str(data_dir / "ena_runs.tsv"), "-s", "slurm", "-p", "star") == 0
     text = (ws.output_dir / "ena_runs" / "scripts" / "s_SAMEA1_0.sh").read_text()
     assert "#SBATCH --mem=32G" in text and "#SBATCH --cpus-per-task=8" in text and "--runThreadN 8" in text
+
+
+def test_presets_reset_restores_the_bundled_version(tmp_path, capsys):
+    ws = Workspace(tmp_path / "ws")
+    assert run(ws, "init") == 0
+    assert run(ws, "presets", "set", "mt-variants-numtparser", "qsub_queue=old.q") == 0
+    assert run(ws, "presets", "reset", "mt-variants-numtparser") == 0
+    assert ws.load_workflow("mt-variants-numtparser").general("qsub_queue") != "old.q"
+    kept = [p for p in ws.list_presets() if p.startswith("mt-variants-numtparser_old_")]
+    assert kept and ws.load_workflow(kept[0]).general("qsub_queue") == "old.q"
+    assert run(ws, "presets", "reset", "no-such-preset") == 1

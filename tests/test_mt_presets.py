@@ -350,3 +350,20 @@ def test_temporary_outputs_are_removed_last_and_only_on_success():
     assert late.steps[-1].lines == last.lines
     preset.set_general("fail_fast", False)               # the job goes on after errors: delete nothing
     assert build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa")).steps[-1].step == "annotate"
+
+
+def test_existing_numt_reference_is_reused_without_the_genome_index(tmp_path):
+    # After a run, the 3 GB nuclear + mtDNA copy and its index can be deleted; the NUMT reference is kept.
+    from mitopiper.references import derived_commands, derived_paths
+
+    ws = Workspace(tmp_path / "ws")
+    ws.initialise()
+    ref = ReferenceSet(refpath=str(tmp_path / "mt.fa"), nuc_refpath=str(tmp_path / "nuc.fa"))
+    wf = ws.load_workflow("mt-variants-numtparser")
+    before = " ".join(derived_commands(ref, "Homo_sapiens", str(ws.root), wf))
+    assert "combine-references" in before and "numt-regions" in before
+    numts = derived_paths(ref, "Homo_sapiens", str(ws.root), "half")["numt"]
+    Path(numts).parent.mkdir(parents=True)
+    Path(numts).write_text(">chr1:1-10\nACGT\n")
+    after = " ".join(derived_commands(ref, "Homo_sapiens", str(ws.root), wf))
+    assert "combine-references" not in after and "numt-regions" not in after and "numts.fa" in after

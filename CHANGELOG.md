@@ -5,6 +5,7 @@
 The single `maker.py` script was refactored into the installable `mitopiper` package.
 
 ### Added
+- `mitopiper presets reset NAME ...` restores bundled presets to the version of the installed mitopiper (workspaces keep their own copies, so upgrades did not reach them); the old copy is kept as `NAME_old_DATE`.
 - Steps can be marked `"temporary": true`: their outputs are deleted at the end of a successful sample job. The mt presets mark their intermediate SAM/BAM files, which took 93 GB of the 116 GB of one preset's full run (10 RNA-seq samples) on the BGU cluster.
 - `benchmark/sge_usage.sh`: run time, CPU time and peak memory of every job of an experiment from Grid Engine's `qacct` (failed attempts included), with core-hours per experiment.
 - `mitopiper presets set PRESET[,PRESET...] KEY=VALUE ...` changes general settings (`qsub_queue=bioinfo.q`) and step fields (`numt-parser.memory=32G`) without editing JSON. Every name is checked first, so a typo changes nothing.
@@ -72,6 +73,7 @@ The single `maker.py` script was refactored into the installable `mitopiper` pac
 - pandas and Biopython are no longer needed.
 
 ### Fixed
+- A workspace whose NUMT reference was already found does not search again, so deleting the nuclear + mtDNA copy and its index after a run does not cost a new 1-hour index at the next build.
 - While Grid Engine had not yet written a finished job's accounting record, the monitor's summary called it an unrecognised failure; it now says to look again in a minute.
 - **Homoplasmic variants (`alt_major`) had no depth threshold**: a single read with an error at a barely covered position was reported as a variant. Variants now need the heteroplasmy calls' minimum depth (50) and more than half of the reads. On the BGU RNA-seq data the Numt Parser preset, which removes the most reads, reported up to 28 such positions per sample against 18-20 for the other presets.
 - `tool_versions.tsv` says `unknown` for a tool that prints no version (Numt Parser) instead of leaving the column empty.

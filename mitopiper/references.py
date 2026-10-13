@@ -624,7 +624,9 @@ def derived_commands(ref: ReferenceSet, organism: str, workspace_dir: str, workf
         commands += _fasta_index_commands(paths["rotated"], workflow, csh, star=False)
     # The NUMT search uses the nuclear + mtDNA reference too: one genome index in the workspace, shared
     # with mt-variants-numt, and nothing written next to the user's nuclear FASTA.
-    numt_search = uses_placeholder(workflow, "numt_fasta", steps) and paths["numt"] and not ref.numt_refpath
+    # ... unless an earlier build of this workspace already found the NUMTs (the genome index may be deleted).
+    numt_search = (uses_placeholder(workflow, "numt_fasta", steps) and paths["numt"] and not ref.numt_refpath
+                   and not Path(paths["numt"]).is_file())
     if (uses_placeholder(workflow, "fasta_combined", steps) or numt_search) and paths["combined"]:
         commands.append(_unless_exists(paths["combined"], f'mitopiper mt combine-references "{ref.nuc_refpath}" '
                                                           f'"{ref.refpath}" "{paths["combined"]}"', csh))

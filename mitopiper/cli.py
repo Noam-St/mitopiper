@@ -84,6 +84,9 @@ def build_parser() -> argparse.ArgumentParser:
     pset.add_argument("names", help="preset, or several separated by commas")
     pset.add_argument("assignments", nargs="+", metavar="KEY=VALUE",
                       help="a general setting (qsub_memory=8G), or STEP.FIELD=VALUE for a step (trim.threads=4)")
+    preset_reset = psub.add_parser("reset", help="restore bundled presets to the version of this mitopiper (after an "
+                                                 "upgrade); the old copy is kept as NAME_old_DATE")
+    preset_reset.add_argument("names", nargs="+", help="bundled presets, e.g. mt-variants-numtparser")
     psave = psub.add_parser("save", help="copy a preset (default: last_used) to a new name")
     psave.add_argument("name")
     psave.add_argument("--from", dest="source", default="last_used")
@@ -260,6 +263,22 @@ def cmd_presets(ws: Workspace, args) -> int:
         print(table([[k, v[0] if isinstance(v, list) else v] for k, v in wf.general_settings.items()], ["General setting", "Value"]))
     elif args.action == "set":
         return _set_preset_values(ws, args.names.split(","), args.assignments)
+    elif args.action == "reset":
+        from .defaults import bundled_presets
+        from .config import Workflow
+
+        bundled = bundled_presets()
+        unknown = [n for n in args.names if n not in bundled]
+        if unknown:
+            log.error("Not a bundled preset: %s (bundled: %s)", ", ".join(unknown), ", ".join(sorted(bundled)))
+            return 1
+        stamp = __import__("datetime").date.today().strftime("%Y%m%d")
+        for name in args.names:
+            old = f"{name}_old_{stamp}"
+            if name in ws.list_presets():
+                ws.save_preset(old, name)
+            ws.write_workflow(Workflow(**bundled[name]), name)
+            print(f"Reset preset '{name}' to this version of mitopiper" + (f" (previous copy: '{old}')" if name in ws.list_presets() else ""))
     elif args.action == "save":
         ws.save_preset(args.name, args.source)
         print(f"Saved preset '{args.name}' from '{args.source}'")
