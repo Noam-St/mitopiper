@@ -334,7 +334,9 @@ def _allele_fields(ref: str, p: dict, n: dict, thresholds: tuple) -> dict:
     major, minor = sorted(ALLELES, key=lambda a: -alleles[a])[:2]
     af = alleles[minor] / depth
     het = depth >= min_depth and af >= min_af and p[minor] >= min_strand and n[minor] >= min_strand
-    alt = ref in "ACGT" and major != ref
+    # A variant needs the same depth as a heteroplasmy and a true majority: without them one read with an
+    # error at a barely covered position counted as a homoplasmic variant (seen in RNA-seq on BGU data).
+    alt = ref in "ACGT" and major != ref and depth >= min_depth and alleles[major] > depth / 2
     return dict(fields, major=major, minor=minor if alleles[minor] else "", minor_count=alleles[minor],
                 minor_pos=p[minor], minor_neg=n[minor], minor_af=af,
                 heteroplasmic="yes" if het else "no", alt_major="yes" if alt else "no")

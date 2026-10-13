@@ -797,7 +797,8 @@ Please cite Numt Parser when you use this preset.
   * the minor allele has at least `--min-strand` reads (default 2) on *each* strand, which filters out
     strand-specific errors.
 
-  `alt_major` marks positions whose major allele differs from the reference.
+  `alt_major` marks positions whose major allele differs from the reference, at the same minimum depth and held by
+  more than half of the reads (one read with an error at a barely covered position is not a variant).
 * `heteroplasmy` runs once per experiment: `mitopiper mt heteroplasmy` collects these positions from all samples into
   `heteroplasmy/heteroplasmy_sites.tsv`. It also writes `heteroplasmy/heteroplasmy_matrix.tsv`, the minor allele
   frequency of every called position in every sample.

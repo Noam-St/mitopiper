@@ -105,3 +105,19 @@ def test_annotate_cli(tmp_path, capsys):
     assert main(["mt", "annotate", str(tmp_path / "x_0_HS.circular.pileup"), str(tmp_path / "o.tsv")]) == 0
     assert rows(tmp_path / "o.tsv")[0]["sample"] == "x_0_HS"
     assert "1 positions" in capsys.readouterr().err
+
+
+def test_variant_needs_depth_and_a_majority():
+    # A single read with an error at a barely covered position was called a homoplasmic variant.
+    def counts(**alleles):
+        base = {a: 0 for a in pileup.COUNTED}
+        base.update(ins=0)
+        pos = dict(base, **{a: v // 2 for a, v in alleles.items()})
+        neg = dict(base, **{a: v - v // 2 for a, v in alleles.items()})
+        return pos, neg
+
+    thresholds = (50, 0.03, 2)
+    assert pileup._allele_fields("A", *counts(G=1), thresholds)["alt_major"] == "no"          # depth 1
+    assert pileup._allele_fields("A", *counts(G=60), thresholds)["alt_major"] == "yes"        # a real variant
+    assert pileup._allele_fields("A", *counts(G=40, A=40), thresholds)["alt_major"] == "no"   # a tie is no majority
+    assert pileup._allele_fields("A", *counts(G=45, A=40, C=15), thresholds)["alt_major"] == "no"  # 45%: no majority
