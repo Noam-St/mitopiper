@@ -332,8 +332,10 @@ def cmd_refs(ws: Workspace, args) -> int:
         for org in registry.organisms():
             for name in registry.names(org):
                 ref = registry.get(org, name)
-                rows.append([org, name, "*" if registry.active_name(org) == name else "", ref.refpath, ref.gtfpath, ref.source, ref.accession])
-        print(table(rows, ["Organism", "Name", "Active", "FASTA", "GTF/GFF", "Source", "Accession"]) if rows else "No references registered.")
+                rows.append([org, name, "*" if registry.active_name(org) == name else "", ref.refpath, ref.gtfpath,
+                             ref.nuc_refpath or "", ref.numt_refpath or "", ref.source, ref.accession])
+        print(table(rows, ["Organism", "Name", "Active", "FASTA", "GTF/GFF", "Nuclear FASTA", "NUMT FASTA", "Source",
+                           "Accession"]) if rows else "No references registered.")
     elif args.action == "add":
         ref = ReferenceSet(refpath=args.fasta, gtfpath=args.gtf, nuc_refpath=args.nuc_fasta,
                            numt_refpath=args.numt_fasta, chrominfopath=args.chrominfo)

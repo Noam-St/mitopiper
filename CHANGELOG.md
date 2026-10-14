@@ -73,6 +73,7 @@ The single `maker.py` script was refactored into the installable `mitopiper` pac
 - pandas and Biopython are no longer needed.
 
 ### Fixed
+- Clearer output on the BGU test: Numt Parser's summary line says it counts read mates per label and read pairs kept, and `refs list` labels its nuclear and NUMT columns (`Nuclear FASTA`, `NUMT FASTA`).
 - A workspace whose NUMT reference was already found does not search again, so deleting the nuclear + mtDNA copy and its index after a run does not cost a new 1-hour index at the next build.
 - While Grid Engine had not yet written a finished job's accounting record, the monitor's summary called it an unrecognised failure; it now says to look again in a minute.
 - **Homoplasmic variants (`alt_major`) had no depth threshold**: a single read with an error at a barely covered position was reported as a variant. Variants now need the heteroplasmy calls' minimum depth (50) and more than half of the reads. On the BGU RNA-seq data the Numt Parser preset, which removes the most reads, reported up to 28 such positions per sample against 18-20 for the other presets.

@@ -401,7 +401,7 @@ def add_parser(sub) -> None:
     cons = msub.add_parser("consensus", help="the sample's own mtDNA: the reference with its major alleles (for Numt Parser)")
     cons.add_argument("pileup", help="pileup of the sample's reads aligned to the reference")
     cons.add_argument("fasta", help="the mtDNA reference FASTA")
-    cons.add_argument("output")
+    cons.add_argument("output", help="the sample's mtDNA FASTA to write")
     cons.add_argument("--min-depth", type=int, default=50, help="minimum depth for a substitution (default 50)")
     reads = msub.add_parser("numt-reads", help="reads to keep from a Numt Parser table (for samtools view -N)")
     reads.add_argument("table")
@@ -443,7 +443,9 @@ def run(args) -> int:
               + (": " + ", ".join(f"{r}{p}{a}" for p, r, a in changes) if changes else ""), file=sys.stderr)
     elif args.action == "numt-reads":
         counts = numt_read_list(args.table, args.output, args.keep, args.pairs)
-        print("[mitopiper] Numt Parser: " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())), file=sys.stderr)
+        kept = counts.pop("kept")
+        print("[mitopiper] Numt Parser: read mates labelled " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items()))
+              + f"; reads (pairs) kept: {kept}", file=sys.stderr)
     elif args.action == "contigs":
         print(" ".join(contigs(args.fasta)))
     return 0
