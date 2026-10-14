@@ -45,7 +45,7 @@ PLACEHOLDERS = (
     "fastq", "fastq_pre", "fastq1", "fastq2", "fastq_dir", "fastq_pre_dir", "fastq_sample_path_no_ext",
     "sample", "org_name", "bam", "sam", "STAR_out", "STAR_final_log", "tsv_dir", "threads",
     "fasta_rotated", "fasta_combined", "mt_contigs", "mt_shift", "mt_window", "mt_mapq",
-    "numt_fasta",
+    "numt_fasta", "numt_alleles",
 )
 
 #: Structure shorthands inherited from maker.py (``input`` -> ``command_input``...).
@@ -168,6 +168,7 @@ def sample_variables(sample: Sample, workflow: Workflow, exp_dir: str, ref: Refe
         "fasta_rotated": derived["rotated"],
         "fasta_combined": derived["combined"],
         "numt_fasta": derived["numt"],
+        "numt_alleles": derived["numt_alleles"],
         # Names of the mtDNA sequences, looked up when the job runs (works in sh and csh).
         "mt_contigs": f"`mitopiper mt contigs {fasta}`" if fasta else "",
         "mt_shift": str(mt_shift(workflow)),

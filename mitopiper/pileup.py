@@ -46,6 +46,9 @@ COLUMNS = [
     "minor_pos", "minor_neg", "minor_af", "heteroplasmic", "alt_major",
     "feature", "gene", "length", "strand",
 ]
+#: With a NUMT allele table (``mitopiper mt numt-alleles``): the bases NUMTs carry at the position, and
+#: whether the minor allele is one of them (a heteroplasmy that NUMT reads can explain).
+NUMT_COLUMNS = ["numt_bases", "numt_minor"]
 RPM_COLUMNS = ["RPM", "pos_RPM", "neg_RPM", "read_end_RPM", "pos_read_end_RPM", "neg_read_end_RPM",
                "read_start_RPM", "pos_read_start_RPM", "neg_read_start_RPM"]
 
@@ -259,19 +262,21 @@ def _fmt(value) -> str:
 # ---------------------------------------------------------------- annotate
 def annotate_pileup(pileup, output, annotation=None, sample: str = "", flip_strands: bool = False,
                     total_reads: Optional[int] = None, min_depth: int = 50, min_af: float = 0.03,
-                    min_strand: int = 2) -> dict:
+                    min_strand: int = 2, numt_alleles=None) -> dict:
     """Write the per-position table of ``pileup`` to ``output`` (TSV). Returns counts of positions,
-    heteroplasmic positions and positions whose major allele is not the reference."""
+    heteroplasmic positions (and of those whose minor allele a NUMT carries, with ``numt_alleles``)
+    and positions whose major allele is not the reference."""
     sample = sample or Path(pileup).name.split(".")[0]
     rows_by_contig = {}
     for chrom, position, ref, depth, bases in read_pileup(pileup):
         rows_by_contig.setdefault(chrom, {})[position] = (ref, depth, parse_bases(ref, bases))
     genes = read_annotation(annotation) if annotation else []
     seqid_of = annotation_contigs(genes, rows_by_contig)
-    columns = COLUMNS + (RPM_COLUMNS if total_reads else [])
+    numt = read_numt_alleles(numt_alleles) if numt_alleles else None
+    columns = COLUMNS + (NUMT_COLUMNS if numt is not None else []) + (RPM_COLUMNS if total_reads else [])
     pos_s, neg_s = ("rev", "fwd") if flip_strands else ("fwd", "rev")
     thresholds = (min_depth, min_af, min_strand)
-    summary = {"positions": 0, "heteroplasmic": 0, "alt_major": 0}
+    summary = {"positions": 0, "heteroplasmic": 0, "alt_major": 0, **({"numt_minor": 0} if numt is not None else {})}
     empty = ("N", 0, parse_bases("N", ""))
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     with open(output, "w", encoding="utf-8", newline="") as out:
@@ -297,6 +302,11 @@ def annotate_pileup(pileup, output, annotation=None, sample: str = "", flip_stra
                             name = "RPM" if k == "coverage" else f"{k}_RPM"
                             row[f"{prefix}{name}"] = c[k] * 1e6 / total_reads
                 row.update(_allele_fields(ref.upper(), counts[pos_s], counts[neg_s], thresholds))
+                if numt is not None:
+                    bases = numt.get((chrom, position), "")
+                    row["numt_bases"] = bases
+                    row["numt_minor"] = "yes" if row["minor"] in tuple(bases) and row["minor"] != row["major"] else "no"
+                    summary["numt_minor"] += row["heteroplasmic"] == "yes" and row["numt_minor"] == "yes"
                 summary["heteroplasmic"] += row["heteroplasmic"] == "yes"
                 summary["alt_major"] += row["alt_major"] == "yes"
                 hits = gene_table.get(position, [])
@@ -308,6 +318,12 @@ def annotate_pileup(pileup, output, annotation=None, sample: str = "", flip_stra
 
 
 STRAND_PREFIXES = ("", "pos_", "neg_")
+
+
+def read_numt_alleles(path) -> dict:
+    """``{(chrom, position): bases}`` from a ``mitopiper mt numt-alleles`` table."""
+    with open(path, encoding="utf-8") as handle:
+        return {(r["chrom"], int(r["position"])): r["numt_bases"] for r in csv.DictReader(handle, delimiter="\t")}
 
 
 def _strand_counts(depth: int, p: dict, n: dict) -> dict:
@@ -344,7 +360,7 @@ def _allele_fields(ref: str, p: dict, n: dict, thresholds: tuple) -> dict:
 
 # ------------------------------------------------------------ heteroplasmy
 SITE_COLUMNS = ["sample", "chrom", "position", "ref", "gene", "type", "major", "minor", "minor_af",
-                "allele_depth", "minor_pos", "minor_neg"]
+                "allele_depth", "minor_pos", "minor_neg", "numt_minor"]
 
 
 def _read_tables(tables: list):
@@ -404,6 +420,8 @@ def add_parsers(msub) -> None:
     ann.add_argument("--min-depth", type=int, default=50, help="heteroplasmy: minimum depth of A/C/G/T/deletions")
     ann.add_argument("--min-af", type=float, default=0.03, help="heteroplasmy: minimum minor allele frequency")
     ann.add_argument("--min-strand", type=int, default=2, help="heteroplasmy: minimum minor allele reads on each strand")
+    ann.add_argument("--numt-alleles", default="", help="table of mitopiper mt numt-alleles: flag positions whose minor "
+                                                         "allele a NUMT carries (numt_minor)")
     het = msub.add_parser("heteroplasmy", help="collect heteroplasmic sites of annotated tables of many samples")
     het.add_argument("tables", nargs="+")
     het.add_argument("-o", "--outdir", required=True)
@@ -415,8 +433,9 @@ def run(args) -> int:
     if args.action == "annotate":
         total = args.total_reads or (htseq_total(args.counts, args.include_unaligned, args.extra_reads) if args.counts else None)
         summary = annotate_pileup(args.pileup, args.output, args.annotation or None, args.sample, args.flip_strands,
-                                  total, args.min_depth, args.min_af, args.min_strand)
-        print(f"[mitopiper] {summary['positions']} positions, {summary['heteroplasmic']} heteroplasmic, "
+                                  total, args.min_depth, args.min_af, args.min_strand, args.numt_alleles or None)
+        numt = f" ({summary['numt_minor']} with a minor allele that a NUMT carries)" if args.numt_alleles else ""
+        print(f"[mitopiper] {summary['positions']} positions, {summary['heteroplasmic']} heteroplasmic{numt}, "
               f"{summary['alt_major']} with a non-reference major allele", file=sys.stderr)
     else:
         tables = [t for t in args.tables if Path(t).exists()]

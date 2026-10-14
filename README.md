@@ -811,8 +811,16 @@ Please cite Numt Parser when you use this preset.
 
   `alt_major` marks positions whose major allele differs from the reference, at the same minimum depth and held by
   more than half of the reads (one read with an error at a barely covered position is not a variant).
+
+  With `--numt-alleles TABLE` (set by the two NUMT-aware presets), two more columns tell which heteroplasmies NUMT
+  reads can explain: `numt_bases`, the bases the NUMTs carry at the position, and `numt_minor`, `yes` when the
+  minor allele is one of them. No filter removes every NUMT read (the Numt Parser preset keeps reads identical to a
+  NUMT and to the mtDNA), so a low-frequency heteroplasmy with `numt_minor` = `yes` deserves a second look. The
+  table is made once per organism by the reference job: the mtDNA fragments of the NUMT search aligned to the NUMT
+  reference (`bwa mem -a`), read by `mitopiper mt numt-alleles` (`references/derived/<organism>/<numts>.alleles.tsv`).
+  On the tutorial's mtDNA-only pileup it flags all 77 NUMT-made heteroplasmies and none of the 4 true ones.
 * `heteroplasmy` runs once per experiment: `mitopiper mt heteroplasmy` collects these positions from all samples into
-  `heteroplasmy/heteroplasmy_sites.tsv`. It also writes `heteroplasmy/heteroplasmy_matrix.tsv`, the minor allele
+  `heteroplasmy/heteroplasmy_sites.tsv` (with the `numt_minor` flag when the tables have it). It also writes `heteroplasmy/heteroplasmy_matrix.tsv`, the minor allele
   frequency of every called position in every sample.
 
 Compared with `process_pileup.py`, pandas and Biopython are no longer needed, and three things are corrected:

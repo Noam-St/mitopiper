@@ -600,10 +600,13 @@ def derived_paths(ref: ReferenceSet, organism: str, workspace_dir: str, shift: i
     for ext in (".gz", ".fasta", ".fa", ".fna", ".fas"):
         stem = stem[: -len(ext)] if stem.endswith(ext) else stem
     folder = f"{workspace_dir}/references/derived/{organism}"
+    numt = ref.numt_refpath or (f"{folder}/{stem}.numts.fa" if ref.nuc_refpath else "")
     return {"rotated": f"{folder}/{stem}.rotated{shift}.fa",
             "combined": f"{folder}/{stem}.with_nuclear.fa" if ref.nuc_refpath else "",
-            "numt": ref.numt_refpath or (f"{folder}/{stem}.numts.fa" if ref.nuc_refpath else ""),
-            "numt_work": f"{folder}/{stem}.numt_search"}
+            "numt": numt,
+            "numt_work": f"{folder}/{stem}.numt_search",
+            # named after the NUMT reference it was made from, so another --numt-fasta gets its own table
+            "numt_alleles": f"{folder}/{Path(numt).name}.alleles.tsv" if numt else ""}
 
 
 def mt_shift(workflow) -> str:
@@ -625,17 +628,34 @@ def derived_commands(ref: ReferenceSet, organism: str, workspace_dir: str, workf
     # The NUMT search uses the nuclear + mtDNA reference too: one genome index in the workspace, shared
     # with mt-variants-numt, and nothing written next to the user's nuclear FASTA.
     # ... unless an earlier build of this workspace already found the NUMTs (the genome index may be deleted).
-    numt_search = (uses_placeholder(workflow, "numt_fasta", steps) and paths["numt"] and not ref.numt_refpath
-                   and not Path(paths["numt"]).is_file())
+    wants_numts = uses_placeholder(workflow, "numt_fasta", steps) or uses_placeholder(workflow, "numt_alleles", steps)
+    numt_search = (wants_numts and paths["numt"] and not ref.numt_refpath and not Path(paths["numt"]).is_file())
     if (uses_placeholder(workflow, "fasta_combined", steps) or numt_search) and paths["combined"]:
         commands.append(_unless_exists(paths["combined"], f'mitopiper mt combine-references "{ref.nuc_refpath}" '
                                                           f'"{ref.refpath}" "{paths["combined"]}"', csh))
         commands += _fasta_index_commands(paths["combined"], workflow, csh, star=False)
-    if uses_placeholder(workflow, "numt_fasta", steps) and paths["numt"]:
+    if wants_numts and paths["numt"]:
         if numt_search:
             commands += numt_reference_commands(ref, paths, workflow, csh)
         commands += _fasta_index_commands(paths["numt"], workflow, csh, star=False)
+    if uses_placeholder(workflow, "numt_alleles", steps) and paths["numt_alleles"]:
+        commands += numt_allele_commands(ref, paths, workflow, csh)
     return commands
+
+
+def numt_allele_commands(ref: ReferenceSet, paths: dict, workflow, csh: bool) -> list:
+    """The bases the NUMTs carry at each mtDNA position (``mitopiper mt numt-alleles``): the mtDNA
+    fragments aligned to the NUMT reference, for ``mitopiper mt annotate --numt-alleles``."""
+    work, table = paths["numt_work"], paths["numt_alleles"]
+    bwa_steps = _steps_running(workflow, "bwa")
+    bwa = (workflow.pipeline[bwa_steps[0]].get("path") or "bwa") if bwa_steps else "bwa"
+    lines = [_unless_exists(f"{work}.fragments.fa", f'mitopiper mt fragments "{ref.refpath}" "{work}.fragments.fa"', csh)]
+    if not bwa_steps:                               # the NUMT reference is indexed only for presets that run bwa
+        lines.append(_unless_exists(f'{paths["numt"]}.bwt', f'{bwa} index "{paths["numt"]}"', csh))
+    lines.append(_unless_exists(table, f'{bwa} mem -a "{paths["numt"]}" "{work}.fragments.fa" > "{table}.sam" && '
+                                       f'mitopiper mt numt-alleles "{table}.sam" "{ref.refpath}" "{table}" && '
+                                       f'rm -f "{table}.sam"', csh))
+    return lines
 
 
 def numt_reference_commands(ref: ReferenceSet, paths: dict, workflow, csh: bool) -> list:

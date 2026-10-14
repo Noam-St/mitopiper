@@ -300,6 +300,84 @@ def numt_reference(sam, mt, output, **options) -> int:
     return len(regions)
 
 
+_COMPLEMENT = str.maketrans("ACGTNacgtn", "TGCANtgcan")
+_MD = re.compile(r"(\d+)|(\^[A-Za-z]+)|([A-Za-z])")
+
+
+def _md_bases(md: str) -> list:
+    """The reference base of every aligned (M/=/X) position from an MD tag: None where it matches the
+    read, the reference base where it does not. Deleted bases (``^AC``) belong to D operations."""
+    bases = []
+    for number, _deleted, mismatch in _MD.findall(md):
+        if number:
+            bases += [None] * int(number)
+        elif mismatch:
+            bases.append(mismatch.upper())
+    return bases
+
+
+def numt_alleles(sam: TextIO, mt_records: dict, min_length: int = 50) -> dict:
+    """The bases that NUMTs carry at each mtDNA position, from :func:`fragments` aligned to a NUMT
+    reference (``bwa mem -a``, which writes MD tags).
+
+    ``mt_records`` maps mtDNA names to sequences; fragment names are ``<mtDNA name>_<start>``. Fragments
+    are rebuilt from the mtDNA, so secondary alignments without a sequence count too. Alignments shorter
+    than ``min_length`` and alignments to mitochondrial contigs are ignored. Returns
+    ``{(name, position): set of bases}``, in mtDNA orientation."""
+    names = set(mt_records) | {n.split(".")[0] for n in mt_records}
+    found = {}
+    for line in sam:
+        if line.startswith("@"):
+            continue
+        fields = line.rstrip("\n").split("\t")
+        if len(fields) < 11 or not fields[1].isdigit() or int(fields[1]) & 4 or fields[2] == "*":
+            continue
+        flag, contig, cigar = int(fields[1]), fields[2], fields[5]
+        if is_mitochondrial(contig, names) or _reference_span(cigar) < min_length:
+            continue
+        name, _, start = fields[0].rpartition("_")
+        md = next((f[5:] for f in fields[11:] if f.startswith("MD:Z:")), None)
+        if name not in mt_records or not start.isdigit() or md is None:
+            continue
+        mt = mt_records[name]
+        ops = [(int(n), op) for n, op in _CIGAR.findall(cigar)]
+        size = sum(n for n, op in ops if op in "MIS=XH")
+        fragment = (mt * (size // max(len(mt), 1) + 2))[int(start) - 1:int(start) - 1 + size].upper()
+        query = fragment.translate(_COMPLEMENT)[::-1] if flag & 16 else fragment
+        reference = iter(_md_bases(md))
+        q = 0
+        for n, op in ops:
+            if op in "M=X":
+                for i in range(q, q + n):
+                    base = next(reference, None) or query[i]
+                    index = size - 1 - i if flag & 16 else i          # position in the fragment
+                    if flag & 16:
+                        base = base.translate(_COMPLEMENT)
+                    position = (int(start) - 1 + index) % len(mt) + 1
+                    found.setdefault((name, position), set()).add(base)
+            if op in "MIS=XH":
+                q += n
+    return found
+
+
+def write_numt_alleles(sam, mt, output, min_length: int = 50) -> int:
+    """:func:`numt_alleles` as a table (chrom, position, ref, numt_bases), for ``mitopiper mt annotate
+    --numt-alleles``. Returns the number of positions whose NUMTs carry a base other than the reference."""
+    with open(mt, encoding="utf-8") as handle:
+        records = {h.split()[0]: s.upper() for h, s in read_fasta(handle)}
+    with open(sam, encoding="latin-1") as handle:
+        found = numt_alleles(handle, records, min_length)
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    differing = 0
+    with open(output, "w", encoding="utf-8") as out:
+        out.write("chrom\tposition\tref\tnumt_bases\n")
+        for (name, position), bases in sorted(found.items()):
+            ref = records[name][position - 1]
+            differing += bool(bases - {ref})
+            out.write(f"{name}\t{position}\t{ref}\t{''.join(sorted(bases))}\n")
+    return differing
+
+
 def numt_read_list(table, output, keep: str = "cymt", pairs: str = "all") -> dict:
     """Names of the reads to keep from a Numt Parser output table.
 
@@ -398,6 +476,11 @@ def add_parser(sub) -> None:
     regions.add_argument("--min-length", type=int, default=50)
     regions.add_argument("--flank", type=int, default=100)
     regions.add_argument("--merge", type=int, default=200)
+    alleles = msub.add_parser("numt-alleles", help="bases the NUMTs carry at each mtDNA position, for annotate --numt-alleles")
+    alleles.add_argument("sam", help="the mtDNA fragments (mt fragments) aligned to the NUMT reference with bwa mem -a")
+    alleles.add_argument("mt", help="the mtDNA FASTA")
+    alleles.add_argument("output")
+    alleles.add_argument("--min-length", type=int, default=50, help="shortest alignment counted (default 50)")
     cons = msub.add_parser("consensus", help="the sample's own mtDNA: the reference with its major alleles (for Numt Parser)")
     cons.add_argument("pileup", help="pileup of the sample's reads aligned to the reference")
     cons.add_argument("fasta", help="the mtDNA reference FASTA")
@@ -437,6 +520,9 @@ def run(args) -> int:
             print(f"[mitopiper] {exc}", file=sys.stderr)
             return 1
         print(f"[mitopiper] {count} NUMT regions", file=sys.stderr)
+    elif args.action == "numt-alleles":
+        differing = write_numt_alleles(args.sam, args.mt, args.output, args.min_length)
+        print(f"[mitopiper] NUMT alleles: {differing} mtDNA position(s) where a NUMT carries another base", file=sys.stderr)
     elif args.action == "consensus":
         changes = consensus(args.pileup, args.fasta, args.output, args.min_depth)
         print(f"[mitopiper] consensus: {len(changes)} substitution(s)"

@@ -165,7 +165,8 @@ def test_numt_parser_preset_finds_numts_in_the_nuclear_genome(cluster, shell):
     ws, tmp_path = cluster
     (tmp_path / "nuc.fa").write_text(">chr1\nAAAAAAAAAA\n")
     ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath=str(tmp_path / "mt.fa"), nuc_refpath=str(tmp_path / "nuc.fa")))
-    assert run_preset(ws, tmp_path, "mt-variants-numtparser", NUMT_PARSER + CIRCULAR, shell) == 0
+    assert run_preset(ws, tmp_path, "mt-variants-numtparser", NUMT_PARSER + CIRCULAR + ["annotate", "heteroplasmy"],
+                      shell) == 0
     states = {j.name: j.state for j in mon.collect(ws, ["exp"], mon.ErrorScanner(), lambda s, i: None)}
     assert all(s == mon.DONE for s in states.values()), states
     derived = ws.references_dir / "derived" / "Homo_sapiens"
@@ -185,6 +186,10 @@ def test_numt_parser_preset_finds_numts_in_the_nuclear_genome(cluster, shell):
     assert (numt / "a_0_HS.consensus.fa").read_text().startswith(">")
     assert f"-N {numt}/a_0_HS.cymt_reads.txt" in script and "-h -F 0x904" in script
     assert [p for p, d in merged_depths(ws).items() if d == 2] == [1, 2, 3, 28, 29, 30]
+    # the NUMT alleles table is made once by the reference job and flags the heteroplasmies
+    assert (derived / "mt.numts.fa.alleles.tsv").read_text().startswith("chrom\tposition\tref\tnumt_bases")
+    assert f"--numt-alleles {derived}/mt.numts.fa.alleles.tsv" in script
+    assert "numt_minor" in (out / "annotated" / "a_0_HS.annotated.tsv").read_text().splitlines()[0]
 
 
 def test_numt_parser_preset_uses_a_given_numt_reference(cluster, caplog):
@@ -198,6 +203,9 @@ def test_numt_parser_preset_uses_a_given_numt_reference(cluster, caplog):
     assert run_preset(ws, tmp_path, "mt-variants-numtparser", NUMT_PARSER) == 0
     prep = next((ws.output_dir / "exp" / "scripts").glob("prep_*")).read_text()
     assert "numt-regions" not in prep and f'bwa index "{tmp_path}/numts.fa"' in prep
+    assert run_preset(ws, tmp_path, "mt-variants-numtparser", NUMT_PARSER + CIRCULAR + ["annotate"]) == 0
+    prep = next((ws.output_dir / "exp" / "scripts").glob("prep_*")).read_text()
+    assert f'mt numt-alleles "{ws.references_dir}/derived/Homo_sapiens/numts.fa.alleles.tsv.sam"' in prep
 
 
 def test_bundled_presets_are_written_once(tmp_path):

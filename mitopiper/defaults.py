@@ -450,6 +450,10 @@ def _mt_variants(numt: str = "") -> dict:
             "circularity is handled as in mt-variants. The NUMT reference is refs add --numt-fasta, or is found in the "
             "nuclear FASTA (refs fetch-genome --nuclear-of / refs add --nuc-fasta)", "what this preset is for"]
     if numt:
+        # Flag heteroplasmies whose minor allele a NUMT carries: NUMT reads the filter let through can explain them.
+        settings["annotate"].update(_params(
+            ("numt alleles", "Flag heteroplasmies whose minor allele a NUMT carries (numt_minor column); the table is "
+                             "made by the reference job", "--numt-alleles", "_numt_alleles")))
         pipe["mpileup"]["input_ext"] = ".mt.bam"
         # The rotated alignment realigns only the reads kept above, so it is NUMT-aware too.
         pipe["align-rotated"].update(inputdir="alignment", input_ext=".mt.bam",

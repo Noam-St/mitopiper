@@ -121,3 +121,19 @@ def test_variant_needs_depth_and_a_majority():
     assert pileup._allele_fields("A", *counts(G=60), thresholds)["alt_major"] == "yes"        # a real variant
     assert pileup._allele_fields("A", *counts(G=40, A=40), thresholds)["alt_major"] == "no"   # a tie is no majority
     assert pileup._allele_fields("A", *counts(G=45, A=40, C=15), thresholds)["alt_major"] == "no"  # 45%: no majority
+
+
+def test_annotate_flags_heteroplasmy_whose_minor_allele_a_numt_carries(tmp_path):
+    het = "." * 40 + "," * 40 + "G" * 5 + "g" * 5          # 10% G on both strands
+    write_pileup(tmp_path / "s.pileup", [(1, "A", 90, het), (2, "A", 90, het), (3, "C", 60, "." * 30 + "," * 30)])
+    (tmp_path / "alleles.tsv").write_text("chrom\tposition\tref\tnumt_bases\nchrM\t1\tA\tAG\nchrM\t2\tA\tA\nchrM\t3\tC\tCT\n")
+    summary = pileup.annotate_pileup(tmp_path / "s.pileup", tmp_path / "s.tsv", min_af=0.05,
+                                     numt_alleles=tmp_path / "alleles.tsv")
+    assert summary == {"positions": 3, "heteroplasmic": 2, "alt_major": 0, "numt_minor": 1}
+    r = rows(tmp_path / "s.tsv")
+    assert [(x["numt_bases"], x["numt_minor"]) for x in r] == [("AG", "yes"), ("A", "no"), ("CT", "no")]
+    pileup.collect_heteroplasmy([tmp_path / "s.tsv"], tmp_path / "het")
+    assert [x["numt_minor"] for x in rows(tmp_path / "het" / "heteroplasmy_sites.tsv")] == ["yes", "no"]
+    # without the table the columns are not written
+    pileup.annotate_pileup(tmp_path / "s.pileup", tmp_path / "plain.tsv")
+    assert "numt_minor" not in rows(tmp_path / "plain.tsv")[0]

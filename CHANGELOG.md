@@ -5,6 +5,7 @@
 The single `maker.py` script was refactored into the installable `mitopiper` package.
 
 ### Added
+- NUMT allele flag: the NUMT-aware presets add `numt_bases` and `numt_minor` to the annotated tables (and `numt_minor` to `heteroplasmy_sites.tsv`). `numt_minor` = `yes` when a heteroplasmy's minor allele is a base that a NUMT carries at that position, so NUMT reads can explain it. The reference job builds the table once per organism (`mitopiper mt numt-alleles`: the mtDNA fragments aligned to the NUMT reference). On the tutorial's unfiltered pileup it flags all 77 NUMT-made heteroplasmies and none of the true ones; on the BGU RNA-seq data, low-frequency heteroplasmies kept by the Numt Parser preset (5746 A, 12007 A) carry a NUMT base.
 - `mitopiper presets reset NAME ...` restores bundled presets to the version of the installed mitopiper (workspaces keep their own copies, so upgrades did not reach them); the old copy is kept as `NAME_old_DATE`.
 - Steps can be marked `"temporary": true`: their outputs are deleted at the end of a successful sample job. The mt presets mark their intermediate SAM/BAM files, which took 93 GB of the 116 GB of one preset's full run (10 RNA-seq samples) on the BGU cluster.
 - `benchmark/sge_usage.sh`: run time, CPU time and peak memory of every job of an experiment from Grid Engine's `qacct` (failed attempts included), with core-hours per experiment.

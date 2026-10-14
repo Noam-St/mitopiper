@@ -160,3 +160,39 @@ def test_consensus_takes_the_samples_major_alleles(tmp_path):
     assert changes == [(2, "A", "G")]
     with open(tmp_path / "c.fa") as handle:
         assert list(mtdna.read_fasta(handle)) == [("MT human", "AGAAAAAAAA")]   # same length, same name
+
+
+MT20 = "ACGTTGCAAGGCTTACGATC"
+
+
+def _sam(*lines):
+    return io.StringIO("@SQ\tSN:numt1\tLN:100\n" + "".join("\t".join(map(str, l)) + "\n" for l in lines))
+
+
+def test_numt_alleles_reads_the_numt_bases_from_md_tags():
+    records = {"mt": MT20}
+    found = mtdna.numt_alleles(_sam(
+        # secondary alignment (no SEQ, as bwa mem -a writes them): the NUMT has A at mt position 5 (T)
+        ("mt_1", 256, "numt1", 1, 0, "20M", "*", 0, 0, "*", "*", "MD:Z:4A15"),
+        # reverse strand: the first aligned base is mt position 20 (C); the NUMT's T is an A on the mtDNA
+        ("mt_1", 16, "numt1", 30, 0, "20M", "*", 0, 0, "*", "*", "MD:Z:T19"),
+        # wraps around the origin: fragment mt_15 of 10 bases ends at position 4 (T); the NUMT has G
+        ("mt_15", 0, "numt1", 60, 0, "2S8M", "*", 0, 0, "*", "*", "MD:Z:7G"),
+        # ignored: an mtDNA contig, too short, unmapped
+        ("mt_1", 0, "chrM", 1, 0, "20M", "*", 0, 0, "*", "*", "MD:Z:0G19"),
+        ("mt_1", 0, "numt1", 1, 0, "5M15S", "*", 0, 0, "*", "*", "MD:Z:0G4"),
+        ("mt_1", 4, "*", 0, 0, "*", "*", 0, 0, "*", "*"),
+    ), records, min_length=8)
+    assert found[("mt", 5)] == {"T", "A"} and found[("mt", 20)] == {"C", "A"}
+    assert found[("mt", 4)] == {"T", "G"} and found[("mt", 1)] == {"A"}
+    assert found[("mt", 17)] == {"G"}                     # the first aligned base of mt_15, after its clipped 2
+
+
+def test_numt_alleles_command(tmp_path, capsys):
+    (tmp_path / "mt.fa").write_text(f">mt test\n{MT20}\n")
+    (tmp_path / "a.sam").write_text(_sam(("mt_1", 0, "numt1", 1, 0, "20M", "*", 0, 0, "*", "*", "MD:Z:4A15")).getvalue())
+    assert main(["mt", "numt-alleles", str(tmp_path / "a.sam"), str(tmp_path / "mt.fa"), str(tmp_path / "a.tsv"),
+                 "--min-length", "10"]) == 0
+    lines = (tmp_path / "a.tsv").read_text().splitlines()
+    assert lines[0] == "chrom\tposition\tref\tnumt_bases" and lines[5] == "mt\t5\tT\tA" and len(lines) == 21
+    assert "1 mtDNA position(s)" in capsys.readouterr().err

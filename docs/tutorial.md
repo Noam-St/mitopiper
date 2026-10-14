@@ -98,7 +98,7 @@ What was produced, in `tutorial_ws/output/tutorial/`:
 |---|---|
 | `pileup/<sample>.pileup` | pileup of the normal alignment |
 | `pileup/<sample>.circular.pileup` | the same, with the 400 positions on each side of the origin taken from the rotated alignment |
-| `annotated/<sample>.annotated.tsv` | one row per position: coverage per strand, read starts/ends, z-scores, allele counts, minor allele frequency, `heteroplasmic`, `alt_major`, gene |
+| `annotated/<sample>.annotated.tsv` | one row per position: coverage per strand, read starts/ends, z-scores, allele counts, minor allele frequency, `heteroplasmic`, `alt_major`, gene; with the NUMT-aware presets also `numt_bases` and `numt_minor` (the minor allele is a base a NUMT carries) |
 | `heteroplasmy/heteroplasmy_sites.tsv` | the heteroplasmies and variants of all samples |
 | `heteroplasmy/heteroplasmy_matrix.tsv` | minor allele frequency of every called position in every sample |
 | `tool_versions.tsv`, `mitopiper_manifest.json` | the tools, versions and settings that were used |
