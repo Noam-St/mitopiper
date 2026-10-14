@@ -362,7 +362,8 @@ def numt_alleles(sam: TextIO, mt_records: dict, min_length: int = 50) -> dict:
 
 def write_numt_alleles(sam, mt, output, min_length: int = 50) -> int:
     """:func:`numt_alleles` as a table (chrom, position, ref, numt_bases), for ``mitopiper mt annotate
-    --numt-alleles``. Returns the number of positions whose NUMTs carry a base other than the reference."""
+    --numt-alleles``: one row per position where a NUMT carries a base other than the reference, with those
+    bases separated by commas. Returns the number of rows."""
     with open(mt, encoding="utf-8") as handle:
         records = {h.split()[0]: s.upper() for h, s in read_fasta(handle)}
     with open(sam, encoding="latin-1") as handle:
@@ -373,8 +374,10 @@ def write_numt_alleles(sam, mt, output, min_length: int = 50) -> int:
         out.write("chrom\tposition\tref\tnumt_bases\n")
         for (name, position), bases in sorted(found.items()):
             ref = records[name][position - 1]
-            differing += bool(bases - {ref})
-            out.write(f"{name}\t{position}\t{ref}\t{''.join(sorted(bases))}\n")
+            other = sorted(bases - {ref})
+            if other:
+                differing += 1
+                out.write(f"{name}\t{position}\t{ref}\t{','.join(other)}\n")
     return differing
 
 

@@ -194,5 +194,5 @@ def test_numt_alleles_command(tmp_path, capsys):
     assert main(["mt", "numt-alleles", str(tmp_path / "a.sam"), str(tmp_path / "mt.fa"), str(tmp_path / "a.tsv"),
                  "--min-length", "10"]) == 0
     lines = (tmp_path / "a.tsv").read_text().splitlines()
-    assert lines[0] == "chrom\tposition\tref\tnumt_bases" and lines[5] == "mt\t5\tT\tA" and len(lines) == 21
+    assert lines == ["chrom\tposition\tref\tnumt_bases", "mt\t5\tT\tA"]     # only where a NUMT differs
     assert "1 mtDNA position(s)" in capsys.readouterr().err

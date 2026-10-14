@@ -813,15 +813,18 @@ Please cite Numt Parser when you use this preset.
   more than half of the reads (one read with an error at a barely covered position is not a variant).
 
   With `--numt-alleles TABLE` (set by the two NUMT-aware presets), two more columns tell which heteroplasmies NUMT
-  reads can explain: `numt_bases`, the bases the NUMTs carry at the position, and `numt_minor`, `yes` when the
-  minor allele is one of them. No filter removes every NUMT read (the Numt Parser preset keeps reads identical to a
-  NUMT and to the mtDNA), so a low-frequency heteroplasmy with `numt_minor` = `yes` deserves a second look. The
-  table is made once per organism by the reference job: the mtDNA fragments of the NUMT search aligned to the NUMT
-  reference (`bwa mem -a`), read by `mitopiper mt numt-alleles` (`references/derived/<organism>/<numts>.alleles.tsv`).
-  On the tutorial's mtDNA-only pileup it flags all 77 NUMT-made heteroplasmies and none of the 4 true ones.
-* `heteroplasmy` runs once per experiment: `mitopiper mt heteroplasmy` collects these positions from all samples into
-  `heteroplasmy/heteroplasmy_sites.tsv` (with the `numt_minor` flag when the tables have it). It also writes `heteroplasmy/heteroplasmy_matrix.tsv`, the minor allele
-  frequency of every called position in every sample.
+  reads can explain: `numt_bases`, the bases other than the reference that the NUMTs carry at the position
+  (comma-separated), and `numt_minor`, `yes` when the minor allele is one of them. A minor allele that is the
+  reference base is never flagged, although NUMTs usually carry it: reads from mtDNA without the sample's variant
+  have it too, so the flag could not tell the two apart. No filter removes every NUMT read (the Numt Parser preset
+  keeps reads identical to a NUMT and to the mtDNA), so a low-frequency heteroplasmy with `numt_minor` = `yes`
+  deserves a second look; the flag is an annotation, not a filter. The table is made once per organism by the
+  reference job: the mtDNA fragments of the NUMT search aligned to the NUMT reference (`bwa mem -a`), read by
+  `mitopiper mt numt-alleles` (`references/derived/<organism>/<numts>.alleles.tsv`, one row per position where a
+  NUMT differs from the reference). On the tutorial's mtDNA-only pileup it flags all 77 NUMT-made heteroplasmies
+  and none of the 4 true ones. On 10 human RNA-seq samples (GRCh38: 1,019 such positions), it flagged 13 of the 26
+  heteroplasmies called without NUMT filtering that the Numt Parser preset removes, and 6 of the 50 it keeps
+  (among them 5746 A in three samples and 12007 A, at 3–6%).
 
 Compared with `process_pileup.py`, pandas and Biopython are no longer needed, and three things are corrected:
 * read starts are counted even when the mapping-quality character after `^` is a letter or digit;

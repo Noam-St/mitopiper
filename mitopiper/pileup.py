@@ -46,8 +46,9 @@ COLUMNS = [
     "minor_pos", "minor_neg", "minor_af", "heteroplasmic", "alt_major",
     "feature", "gene", "length", "strand",
 ]
-#: With a NUMT allele table (``mitopiper mt numt-alleles``): the bases NUMTs carry at the position, and
-#: whether the minor allele is one of them (a heteroplasmy that NUMT reads can explain).
+#: With a NUMT allele table (``mitopiper mt numt-alleles``): the non-reference bases NUMTs carry at the
+#: position, and whether the minor allele is one of them (a heteroplasmy that NUMT reads can explain). A minor
+#: allele that is the reference base is never flagged: reads of mtDNA without the sample's variant have it too.
 NUMT_COLUMNS = ["numt_bases", "numt_minor"]
 RPM_COLUMNS = ["RPM", "pos_RPM", "neg_RPM", "read_end_RPM", "pos_read_end_RPM", "neg_read_end_RPM",
                "read_start_RPM", "pos_read_start_RPM", "neg_read_start_RPM"]
@@ -303,9 +304,9 @@ def annotate_pileup(pileup, output, annotation=None, sample: str = "", flip_stra
                             row[f"{prefix}{name}"] = c[k] * 1e6 / total_reads
                 row.update(_allele_fields(ref.upper(), counts[pos_s], counts[neg_s], thresholds))
                 if numt is not None:
-                    bases = numt.get((chrom, position), "")
-                    row["numt_bases"] = bases
-                    row["numt_minor"] = "yes" if row["minor"] in tuple(bases) and row["minor"] != row["major"] else "no"
+                    bases = numt.get((chrom, position), ())
+                    row["numt_bases"] = ",".join(bases)
+                    row["numt_minor"] = "yes" if row["minor"] in bases and row["minor"] != row["major"] else "no"
                     summary["numt_minor"] += row["heteroplasmic"] == "yes" and row["numt_minor"] == "yes"
                 summary["heteroplasmic"] += row["heteroplasmic"] == "yes"
                 summary["alt_major"] += row["alt_major"] == "yes"
@@ -321,9 +322,16 @@ STRAND_PREFIXES = ("", "pos_", "neg_")
 
 
 def read_numt_alleles(path) -> dict:
-    """``{(chrom, position): bases}`` from a ``mitopiper mt numt-alleles`` table."""
+    """``{(chrom, position): (bases, ...)}``: the non-reference bases of a ``mitopiper mt numt-alleles`` table.
+
+    Tables of the first version listed every base run together (``AG``), the reference included; it is left out."""
+    alleles = {}
     with open(path, encoding="utf-8") as handle:
-        return {(r["chrom"], int(r["position"])): r["numt_bases"] for r in csv.DictReader(handle, delimiter="\t")}
+        for r in csv.DictReader(handle, delimiter="\t"):
+            bases = tuple(b for b in r["numt_bases"].replace(",", "") if b != r["ref"].upper())
+            if bases:
+                alleles[(r["chrom"], int(r["position"]))] = bases
+    return alleles
 
 
 def _strand_counts(depth: int, p: dict, n: dict) -> dict:
@@ -421,7 +429,7 @@ def add_parsers(msub) -> None:
     ann.add_argument("--min-af", type=float, default=0.03, help="heteroplasmy: minimum minor allele frequency")
     ann.add_argument("--min-strand", type=int, default=2, help="heteroplasmy: minimum minor allele reads on each strand")
     ann.add_argument("--numt-alleles", default="", help="table of mitopiper mt numt-alleles: flag positions whose minor "
-                                                         "allele a NUMT carries (numt_minor)")
+                                                         "allele is a non-reference base a NUMT carries (numt_minor)")
     het = msub.add_parser("heteroplasmy", help="collect heteroplasmic sites of annotated tables of many samples")
     het.add_argument("tables", nargs="+")
     het.add_argument("-o", "--outdir", required=True)
