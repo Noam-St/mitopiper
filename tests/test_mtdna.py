@@ -196,3 +196,44 @@ def test_numt_alleles_command(tmp_path, capsys):
     lines = (tmp_path / "a.tsv").read_text().splitlines()
     assert lines == ["chrom\tposition\tref\tnumt_bases", "mt\t5\tT\tA"]     # only where a NUMT differs
     assert "1 mtDNA position(s)" in capsys.readouterr().err
+
+
+MT10 = "ACGTACGTAC"
+
+
+def test_combine_references_reuses_an_assembly_that_holds_the_mtdna(tmp_path):
+    nuclear = tmp_path / "nuc.fa"
+    nuclear.write_text(f">chr1\nAAAA\n>NC_012920.1 Homo sapiens mitochondrion\n{MT10[:6]}\n{MT10[6:].lower()}\n")
+    for ext in mtdna.BWA_INDEX + (".fai",):
+        (tmp_path / f"nuc.fa{ext}").write_text("index")
+    mt = fasta(tmp_path / "mt.fa", "NC_012920.1 Homo sapiens mitochondrion, complete genome", MT10)
+    out = tmp_path / "derived" / "combined.fa"
+    log = io.StringIO()
+    assert mtdna.combine_references(nuclear, mt, out, log) == []
+    assert out.is_symlink() and out.resolve() == nuclear.resolve() and "already holds the mtDNA" in log.getvalue()
+    assert all((tmp_path / "derived" / f"combined.fa{ext}").is_symlink() for ext in mtdna.BWA_INDEX + (".fai",))
+
+
+def test_combine_references_links_no_incomplete_index(tmp_path):
+    nuclear = tmp_path / "nuc.fa"
+    nuclear.write_text(f">chr1\nAAAA\n>NC_012920.1\n{MT10}\n")
+    (tmp_path / "nuc.fa.bwt").write_text("half an index")             # bwa index killed before .sa
+    mt = fasta(tmp_path / "mt.fa", "NC_012920.1", MT10)
+    out = tmp_path / "derived" / "combined.fa"
+    mtdna.combine_references(nuclear, mt, out, io.StringIO())
+    assert out.is_symlink() and not (tmp_path / "derived" / "combined.fa.bwt").exists()   # bwa index builds it here
+
+
+@pytest.mark.parametrize("assembly, copy", [
+    (f">chr1\nAAAA\n>NC_012920.1\n{MT10[:-1]}T\n", False),           # another mtDNA sequence
+    (f">chr1\nAAAA\n>chrM\n{MT10}\n", False),                          # same sequence, other name: reads would map to chrM
+    (">chr1\nAAAA\n", False),                                          # no mtDNA in the assembly
+    (f">chr1\nAAAA\n>NC_012920.1\n{MT10}\n", True),                   # --copy
+])
+def test_combine_references_copies_otherwise(tmp_path, assembly, copy):
+    nuclear = tmp_path / "nuc.fa"
+    nuclear.write_text(assembly)
+    mt = fasta(tmp_path / "mt.fa", "NC_012920.1", MT10)
+    out = tmp_path / "combined.fa"
+    mtdna.combine_references(nuclear, mt, out, io.StringIO(), reuse=not copy)
+    assert not out.is_symlink() and mtdna.contigs(out) == ["chr1", "NC_012920.1"]

@@ -5,6 +5,8 @@
 The single `maker.py` script was refactored into the installable `mitopiper` package.
 
 ### Added
+- The NUMT-aware presets reuse the nuclear assembly and its bwa index when its mitochondrial sequence is the mtDNA reference (same name and sequence, e.g. GRCh38 from NCBI with NC_012920.1): `references/derived/<organism>/*.with_nuclear.fa` links to it instead of being a copy that is indexed again, which took over an hour per workspace for human. Otherwise nothing changes; `mitopiper mt combine-references --copy` forces a copy.
+- Diagnosis of `ERROR 403: Forbidden` downloads (seen on BGU, exit code 8 after an hour of downloading): how to tell a run that is not public from the archive or a proxy refusing the cluster, and to rerun from `wget` later (complete files are kept). It was reported as an unrecognised failure.
 - NUMT allele flag: the NUMT-aware presets add `numt_bases` and `numt_minor` to the annotated tables (and `numt_minor` to `heteroplasmy_sites.tsv`). `numt_minor` = `yes` when a heteroplasmy's minor allele is a non-reference base that a NUMT carries at that position, so NUMT reads can explain it (`numt_bases` lists those bases, comma-separated). The reference job builds the table once per organism (`mitopiper mt numt-alleles`: the mtDNA fragments aligned to the NUMT reference). On the tutorial's unfiltered pileup it flags all 77 NUMT-made heteroplasmies and none of the true ones. On the BGU RNA-seq data it flagged 13 of the 26 heteroplasmies that the Numt Parser preset removes and 6 of the 50 it keeps, among them the low-frequency 5746 A and 12007 A. A first version also flagged minor alleles equal to the reference base whenever a NUMT carried it (87% of positions), which marked a third of the calls every preset agrees on (e.g. 2617 A in all samples); tables made by that version are read correctly.
 - `mitopiper presets reset NAME ...` restores bundled presets to the version of the installed mitopiper (workspaces keep their own copies, so upgrades did not reach them); the old copy is kept as `NAME_old_DATE`.
 - Steps can be marked `"temporary": true`: their outputs are deleted at the end of a successful sample job. The mt presets mark their intermediate SAM/BAM files, which took 93 GB of the 116 GB of one preset's full run (10 RNA-seq samples) on the BGU cluster.
@@ -74,6 +76,7 @@ The single `maker.py` script was refactored into the installable `mitopiper` pac
 - pandas and Biopython are no longer needed.
 
 ### Fixed
+- A bwa index counts as present only when its `.sa` file exists, the last one `bwa index` writes. The reference job checked `.bwt`, so after a job killed while indexing the next build skipped the incomplete index and every sample job failed at alignment.
 - Clearer output on the BGU test: Numt Parser's summary line says it counts read mates per label and read pairs kept, and `refs list` labels its nuclear and NUMT columns (`Nuclear FASTA`, `NUMT FASTA`).
 - A workspace whose NUMT reference was already found does not search again, so deleting the nuclear + mtDNA copy and its index after a run does not cost a new 1-hour index at the next build.
 - While Grid Engine had not yet written a finished job's accounting record, the monitor's summary called it an unrecognised failure; it now says to look again in a minute.

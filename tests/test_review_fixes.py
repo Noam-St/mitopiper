@@ -85,7 +85,7 @@ def test_reference_index_commands_use_csh_syntax_under_tcsh(tmp_path):
     ws = workspace_with(tmp_path, "tcsh")
     fasta = tmp_path / "mt.fa"
     fasta.write_text(">MT\nACGT\n")
-    for ext in (".fai", ".bwt"):
+    for ext in (".fai", ".bwt", ".sa"):
         (tmp_path / f"mt.fa{ext}").write_text("x")          # already indexed: the guards must skip the tools
     wf = ws.load_workflow("t")
     wf.run_order = ["bwa-align"]

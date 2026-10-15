@@ -43,7 +43,7 @@ case "$cmd" in
 esac
 """
 FAKE_BWA = r"""#!/bin/sh
-[ "$1" = index ] && touch "$2.bwt"
+[ "$1" = index ] && touch "$2.bwt" "$2.sa"
 case " $* " in *" - "*) cat > /dev/null ;; esac   # read the piped reads, as bwa does (no SIGPIPE upstream)
 echo "@HD"
 case "$*" in *fragments.fa*) printf '@SQ\tSN:chr1\tLN:10\nNC_012920.1_1\t0\tchr1\t3\t0\t60M\t*\t0\t0\t*\t*\n' ;; esac
@@ -150,6 +150,25 @@ def test_mt_variants_numt_aligns_to_nuclear_plus_mt(cluster, shell):
     assert [p for p, d in depths.items() if d == 2] == [1, 2, 3, 28, 29, 30]
 
 
+def test_numt_preset_reuses_an_indexed_assembly_that_holds_the_mtdna(cluster):
+    ws, tmp_path = cluster
+    # GRCh38 from NCBI: its NC_012920.1 is the rCRS, and the genome is indexed already
+    (tmp_path / "nuc.fa").write_text(f">chr1\nAAAAAAAAAA\n>NC_012920.1 Homo sapiens mitochondrion\n{MT}\n")
+    for ext in mtdna.BWA_INDEX + (".fai",):
+        (tmp_path / f"nuc.fa{ext}").write_text("index")
+    calls = tmp_path / "bwa_calls.txt"
+    bwa = tmp_path / "bin" / "bwa"
+    bwa.write_text(f'#!/bin/sh\necho "$*" >> "{calls}"\n' + FAKE_BWA.split("\n", 1)[1])
+    ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath=str(tmp_path / "mt.fa"), nuc_refpath=str(tmp_path / "nuc.fa")))
+    steps = ["wget", "align-combined", "index-combined", "mt-reads", "index-mt", "mpileup"] + CIRCULAR
+    assert run_preset(ws, tmp_path, "mt-variants-numt", steps) == 0
+    combined = ws.references_dir / "derived" / "Homo_sapiens" / "mt.with_nuclear.fa"
+    assert combined.is_symlink() and combined.resolve() == (tmp_path / "nuc.fa").resolve()
+    assert (combined.parent / "mt.with_nuclear.fa.sa").is_symlink()
+    assert not any(line.startswith("index") and "with_nuclear" in line for line in calls.read_text().splitlines())
+    assert (tmp_path / "nuc.fa.sa").read_text() == "index"            # the user's index is untouched
+
+
 def test_numt_preset_needs_a_nuclear_genome(cluster, caplog):
     ws, tmp_path = cluster
     ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath=str(tmp_path / "mt.fa")))
@@ -251,7 +270,7 @@ def test_references_you_add_get_their_missing_indices(tmp_path):
     (tmp_path / "mt.fa.fai").write_text("m\t4\t3\t4\t5\n")                       # already there
     commands = prepare_commands(ReferenceSet(refpath=str(fasta)), "Homo_sapiens", str(ws.root), wf, csh=False,
                                 steps=["bwa-align"])
-    assert commands == [f'if [ ! -s "{fasta}.bwt" ]; then bwa index "{fasta}"; fi']
+    assert commands == [f'if [ ! -s "{fasta}.sa" ]; then bwa index "{fasta}"; fi']
     elsewhere = ReferenceSet(refpath="/cluster/only/mt.fa")                       # not on this machine: left to you
     assert prepare_commands(elsewhere, "Homo_sapiens", str(ws.root), wf, csh=False, steps=["bwa-align"]) == []
 
@@ -278,7 +297,7 @@ SLOW_BWA = r"""#!/bin/sh
 # bwa index that takes a moment and notices another indexer running at the same time
 [ "$1" = index ] || exit 0
 if [ -e "$2.indexing" ]; then echo COLLISION >> "$2.log"; fi
-touch "$2.indexing"; echo start >> "$2.log"; sleep 1; echo index > "$2.bwt"; rm -f "$2.indexing"
+touch "$2.indexing"; echo start >> "$2.log"; sleep 1; echo index > "$2.bwt"; echo index > "$2.sa"; rm -f "$2.indexing"
 """
 
 
@@ -330,7 +349,7 @@ def test_a_stale_reference_lock_is_taken_over(tmp_path, monkeypatch):
     os.utime(lock, (old, old))
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name, body in {"bwa": "#!/bin/sh\n[ \"$1\" = index ] && echo x > \"$2.bwt\"\nexit 0\n", "samtools": FAKE_SAMTOOLS,
+    for name, body in {"bwa": "#!/bin/sh\n[ \"$1\" = index ] && echo x > \"$2.bwt\" && echo x > \"$2.sa\"\nexit 0\n", "samtools": FAKE_SAMTOOLS,
                        "mitopiper": f'#!/bin/sh\nPYTHONPATH="{REPO}" exec "{sys.executable}" -m mitopiper "$@"\n'}.items():
         (bin_dir / name).write_text(body)
         (bin_dir / name).chmod(0o755)

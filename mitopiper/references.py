@@ -568,7 +568,8 @@ def _fasta_index_commands(fasta: str, workflow, csh: bool, star: bool, skip_pres
     if bwa_steps:
         step = pipeline[bwa_steps[0]]
         bwa = step.get("path") or step.get("key", "bwa").split(" ")[0]
-        wanted.append((f"{fasta}.bwt", lambda: f'{bwa} index "{fasta}"'))
+        # .sa is the last file bwa index writes: a job killed while indexing leaves .bwt without it
+        wanted.append((f"{fasta}.sa", lambda: f'{bwa} index "{fasta}"'))
     if star and star_steps:
         step = pipeline[star_steps[0]]
         star_bin = step.get("path") or step.get("key", "STAR")
@@ -651,7 +652,7 @@ def numt_allele_commands(ref: ReferenceSet, paths: dict, workflow, csh: bool) ->
     bwa = (workflow.pipeline[bwa_steps[0]].get("path") or "bwa") if bwa_steps else "bwa"
     lines = [_unless_exists(f"{work}.fragments.fa", f'mitopiper mt fragments "{ref.refpath}" "{work}.fragments.fa"', csh)]
     if not bwa_steps:                               # the NUMT reference is indexed only for presets that run bwa
-        lines.append(_unless_exists(f'{paths["numt"]}.bwt', f'{bwa} index "{paths["numt"]}"', csh))
+        lines.append(_unless_exists(f'{paths["numt"]}.sa', f'{bwa} index "{paths["numt"]}"', csh))
     lines.append(_unless_exists(table, f'{bwa} mem -a "{paths["numt"]}" "{work}.fragments.fa" > "{table}.sam" && '
                                        f'mitopiper mt numt-alleles "{table}.sam" "{ref.refpath}" "{table}" && '
                                        f'rm -f "{table}.sam"', csh))

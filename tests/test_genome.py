@@ -91,7 +91,7 @@ def fake_ncbi(tmp_path, name, corrupt=False):
         f"{'0' * 32 if corrupt else md5(fasta_gz)}  ./{fasta_gz.name}\n{md5(gff_gz)}  ./{gff_gz.name}\n")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for tool, body in {"wget": FAKE_WGET, "samtools": '#!/bin/sh\ntouch "$2.fai"\n', "bwa": '#!/bin/sh\n[ "$1" = index ] && touch "$2.bwt"\nexit 0\n'}.items():
+    for tool, body in {"wget": FAKE_WGET, "samtools": '#!/bin/sh\ntouch "$2.fai"\n', "bwa": '#!/bin/sh\n[ "$1" = index ] && touch "$2.bwt" "$2.sa"\nexit 0\n'}.items():
         (bin_dir / tool).write_text(body)
         (bin_dir / tool).chmod(0o755)
     return server, bin_dir

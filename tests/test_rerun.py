@@ -57,6 +57,7 @@ CTX = _ctx()
     (dict(errors=["gzip: /w/output/E/fastq/x_1.fastq.gz: No such file or directory"], step="trim"),
      "which step 'wget' should have produced", {"from_step": "wget"}),        # not fastqc_pre
     (dict(errors=["wget: unable to resolve host address 'ftp.sra.ebi.ac.uk'"], step="wget"), "no network access", {}),
+    (dict(errors=["2026-10-15 18:02:25 ERROR 403: Forbidden."], step="wget", rc=8), "HTTP 403 Forbidden", {}),
     (dict(errors=["write error: No space left on device"]), "disk", {}),
     (dict(rc=139), "segmentation fault", {"memory": "60G"}),
     (dict(errors=["Perl API version v5.24.0 of Cwd.c does not match v5.44.0 at /usr/lib64/perl5/XSLoader.pm line 92."],

@@ -183,20 +183,65 @@ def is_mitochondrial(header: str, mt_names: set) -> bool:
             or re.search(r"mitochondri", header, re.IGNORECASE) is not None)
 
 
-def combine_references(nuclear, mt, output, log: TextIO = sys.stderr) -> list:
+#: bwa's index files; ``.sa`` is written last, so it marks a complete index.
+BWA_INDEX = (".amb", ".ann", ".bwt", ".pac", ".sa")
+
+
+def _mitochondrial_records(nuclear, mt_names: set) -> dict:
+    """``{name: sequence}`` of the mitochondrial sequences of a (streamed) nuclear FASTA."""
+    found, name = {}, None
+    with open(nuclear, encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith(">"):
+                header = line[1:].strip()
+                name = header.split()[0] if is_mitochondrial(header, mt_names) else None
+                if name:
+                    found[name] = []
+            elif name:
+                found[name].append(line.strip())
+    return {n: "".join(parts).upper() for n, parts in found.items()}
+
+
+def link_reference(fasta, output, log: TextIO = sys.stderr) -> list:
+    """Make ``output`` a link to ``fasta``, with links to its .fai and, when complete, its bwa index.
+    Returns the index extensions linked. A missing index is then built next to ``output``, never next
+    to ``fasta``."""
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    extensions = [".fai"] + (list(BWA_INDEX) if all(Path(f"{fasta}{e}").is_file() for e in BWA_INDEX) else [])
+    linked = [e for e in extensions if Path(f"{fasta}{e}").is_file()]
+    for ext in [""] + linked:
+        target = Path(f"{output}{ext}")
+        if target.is_symlink() or target.exists():
+            target.unlink()
+        target.symlink_to(Path(f"{fasta}{ext}").resolve())
+    print(f"[mitopiper] {output} links to {fasta}" + (f" (with {', '.join(linked)})" if linked else ""), file=log)
+    return linked
+
+
+def combine_references(nuclear, mt, output, log: TextIO = sys.stderr, reuse: bool = True) -> list:
     """Write the nuclear genome followed by the mtDNA, for NUMT-aware alignment.
 
     Mitochondrial sequences already present in the nuclear assembly (``chrM``, ``MT``,
     headers mentioning "mitochondrion", or the mtDNA accession) are left out: a
     duplicate copy would make every mtDNA read map twice with mapping quality 0.
     The nuclear FASTA is streamed, so whole genomes need little memory.
-    Returns the names of the sequences that were left out.
+
+    With ``reuse``, an assembly whose mitochondrial sequences are exactly the mtDNA reference (same
+    names and sequences, e.g. GRCh38 from NCBI, whose NC_012920.1 is the rCRS) already is that
+    reference: ``output`` then links to it and to its index (:func:`link_reference`), which saves
+    copying the genome and an hour of ``bwa index`` for human.
+    Returns the names of the sequences that were left out (none when the assembly is reused).
     """
     with open(mt, encoding="utf-8") as handle:
         mt_records = list(read_fasta(handle))
     if not mt_records:
         raise ValueError(f"{mt} contains no sequence")
     mt_names = {h.split()[0] for h, _ in mt_records} | {h.split()[0].split(".")[0] for h, _ in mt_records}
+    if reuse and _mitochondrial_records(nuclear, mt_names) == {h.split()[0]: s.upper() for h, s in mt_records}:
+        print(f"[mitopiper] {nuclear} already holds the mtDNA reference ({', '.join(h.split()[0] for h, _ in mt_records)}, "
+              "identical): using it as the nuclear + mtDNA reference", file=log)
+        link_reference(nuclear, output, log)
+        return []
     dropped = []
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     with open(nuclear, encoding="utf-8") as src, open(output, "w", encoding="utf-8") as out:
@@ -467,6 +512,8 @@ def add_parser(sub) -> None:
     refs.add_argument("nuclear")
     refs.add_argument("mt")
     refs.add_argument("output")
+    refs.add_argument("--copy", action="store_true",
+                      help="always write a copy, even when the assembly already holds the mtDNA reference")
     frag = msub.add_parser("fragments", help="overlapping fragments of the mtDNA, to find NUMTs in a nuclear genome")
     frag.add_argument("mt")
     frag.add_argument("output")
@@ -512,7 +559,7 @@ def run(args) -> int:
         print(f"[mitopiper] {counts['rotated']} positions from the rotated alignment, {counts['normal']} from the normal one",
               file=sys.stderr)
     elif args.action == "combine-references":
-        combine_references(args.nuclear, args.mt, args.output)
+        combine_references(args.nuclear, args.mt, args.output, reuse=not args.copy)
     elif args.action == "fragments":
         fragments(args.mt, args.output, args.size, args.step)
     elif args.action == "numt-regions":

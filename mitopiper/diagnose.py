@@ -353,6 +353,19 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
                        ["For SRA runs the ENA mirror may not have the files; download ENA's own run table instead "
                         "(mitopiper build PRJ... fetches it), or check the run on the ENA browser."],
                        ["mitopiper fetch-metadata PROJECT_ACCESSION"], {}))
+    elif _find(r"ERROR 403|403 Forbidden", text):
+        add(Suggestion("The archive refused the download (HTTP 403 Forbidden)",
+                       ["The URL is in the job's stderr, just above the error (mitopiper monitor --job NAME). Test it "
+                        "from the login node: wget -S --spider URL.",
+                        "If it is refused there too, the run may be withdrawn, suppressed or under controlled access: "
+                        "look it up on https://www.ebi.ac.uk/ena/browser/view/RUN_ACCESSION and leave it out of the "
+                        "sample table (fetch-metadata again, or build with --samples) if it is not public.",
+                        "If it works there, the archive is probably refusing this cluster for a while (too many "
+                        "downloads from one address) or a proxy on the compute nodes refuses it: rerun later, with "
+                        "fewer samples at a time (max_running) and a longer download_delay, or download on the "
+                        "login node (download_mode login).",
+                        "Files already downloaded are kept: wget -c skips complete files."],
+                       ["mitopiper rerun --from wget   # later"], {}))
     elif _find(r"unable to resolve host|name or service not known|temporary failure in name resolution|"
                r"network is unreachable|connection timed out|connection refused|unable to establish", text):
         add(Suggestion("The download failed: no network access from the compute node, or ENA was unreachable",

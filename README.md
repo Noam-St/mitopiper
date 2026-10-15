@@ -744,8 +744,12 @@ start-only behaviour, run the helper with `--tail-window 0`.
 reference, which shows up as heteroplasmy that isn't there. `mt-variants-numt` aligns to the nuclear
 genome *plus* the mtDNA (`mitopiper mt combine-references`). It leaves out any mitochondrial sequence
 already in the nuclear assembly (`chrM`, `MT`, …), because a duplicate would make every mtDNA read
-ambiguous. Only reads that map to the mtDNA with mapping quality ≥ `numt_min_mapq` (default 20) are
-kept. These kept reads are also the ones realigned to the rotated mtDNA. The preset needs a nuclear
+ambiguous. If the assembly's mitochondrial sequence already *is* the mtDNA reference (same name and
+sequence, e.g. GRCh38 from NCBI, whose `NC_012920.1` is the rCRS), the assembly is used as it is: the
+reference job links it and its bwa index into `references/derived/` instead of copying the genome and
+indexing it again (about an hour for human). A missing index is then built in `derived/`, never next to
+your FASTA; `--copy` forces a copy. Only reads that map to the mtDNA with mapping quality ≥
+`numt_min_mapq` (default 20) are kept. These kept reads are also the ones realigned to the rotated mtDNA. The preset needs a nuclear
 FASTA in the reference set: `mitopiper refs fetch-genome ORGANISM --nuclear-of mt`, or
 `mitopiper refs add ORGANISM --fasta mt.fa --nuc-fasta genome.fa`.
 
