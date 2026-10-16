@@ -352,11 +352,11 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
     if failed:
         no_sra = _find(r"fasterq-dump \(SRA Toolkit\) is not installed", text)
         add(Suggestion(f"A FASTQ file could not be downloaded in {failed.group(1)} attempts"
-                       + (", and the SRA fallback is not installed" if no_sra else ""),
+                       + (" (the optional SRA fallback is not installed)" if no_sra else ""),
                        ["The attempts are logged in the job's stderr (mitopiper monitor --job NAME), each with the "
                         "URL and wget's error; a wrong checksum counts as a failed attempt."]
-                       + (["Install the SRA Toolkit where the jobs run (conda install -c bioconda sra-tools, or "
-                           "module load sra-tools), so that the run is taken from the SRA when ENA fails."]
+                       + (["Optional: with the SRA Toolkit where the jobs run (conda install -c bioconda sra-tools, "
+                           "or module load sra-tools), a download that fails every attempt is taken from the SRA."]
                           if no_sra else [])
                        + ["Rerun later: files already downloaded are kept. More attempts: the general setting "
                           "download_tries."],

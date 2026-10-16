@@ -630,10 +630,11 @@ Each FASTQ file is fetched by `mitopiper download`, which keeps trying before th
 2. ENA URLs alternate between the URL as given, `https://` and `ftp://`, so a proxy or block that refuses
    one protocol (an `ERROR 403: Forbidden`) does not fail every attempt;
 3. the wait between attempts starts at `download_delay` seconds and doubles, up to 10 minutes;
-4. if every attempt failed, the run is taken from the SRA itself with `fasterq-dump` (SRA Toolkit,
-   `sra-tools` in `envs/mitopiper-tools.yml`) and compressed; both mates of a run come from one dump.
-   The archive's MD5 is of its own file, so it is not compared (fasterq-dump checks its download
-   itself). Set `sra_fallback` to `false` to fail instead.
+4. if every attempt failed and the SRA Toolkit is installed, the run is taken from the SRA itself with
+   `fasterq-dump` and compressed; both mates of a run come from one dump. The archive's MD5 is of its
+   own file, so it is not compared (fasterq-dump checks its download itself). The SRA Toolkit is
+   optional (`conda install -c bioconda sra-tools`): without it, or with `sra_fallback` set to `false`,
+   the job fails after the attempts, as a plain wget would.
 
 Every attempt is logged in the job's stderr with its URL and the tool's error.
 

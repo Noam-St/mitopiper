@@ -16,7 +16,8 @@ dependencies:
   - tabulate
   - wget
   - pigz
-  - sra-tools=3.1.1         # fasterq-dump: the SRA fallback of downloads
+  # Optional: sra-tools (fasterq-dump) lets a download that failed every attempt fall back to the SRA.
+  # - sra-tools=3.1.1
   - trim-galore=0.6.10
   - cutadapt=4.9
   - fastqc=0.12.1

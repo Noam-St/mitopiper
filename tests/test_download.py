@@ -98,7 +98,7 @@ def test_single_end_from_the_sra(tmp_path, monkeypatch):
 @pytest.mark.parametrize("run, sra, message", [
     ("", True, "download failed 2 times"),                       # no run accession: nothing to fall back on
     ("SRR9", False, "SRA fallback is switched off"),
-    ("SRR9", True, "fasterq-dump (SRA Toolkit) is not installed"),
+    ("SRR9", True, "download failed 2 times: u (the SRA was not tried: fasterq-dump (SRA Toolkit) is not installed"),
 ])
 def test_when_nothing_works_the_error_says_why(tmp_path, monkeypatch, run, sra, message):
     monkeypatch.setenv("PATH", str(tmp_path))                   # no fasterq-dump

@@ -10,8 +10,9 @@ The sample jobs fetch each FASTQ file with this command instead of calling wget 
    ftp://, so a proxy or a block that refuses one protocol (an HTTP 403 seen on the BGU cluster) does
    not fail all of them;
 3. the wait between attempts doubles from ``wait`` seconds, up to 10 minutes;
-4. when every attempt failed and the run accession is known, the run is taken from the SRA itself
-   with ``fasterq-dump`` (SRA Toolkit) and compressed. Both mates of a run come from one dump, kept
+4. when every attempt failed, the run accession is known and the SRA Toolkit is installed (it is
+   optional), the run is taken from the SRA itself with ``fasterq-dump`` and compressed. Without it the
+   download fails after the attempts, as a plain wget would. Both mates of a run come from one dump, kept
    in ``<folder>/.sra/<run>/`` until the second mate is taken. The archive's MD5 is of its own file,
    so there is no checksum to compare; fasterq-dump checks its download itself.
 """
@@ -31,6 +32,7 @@ from typing import Callable, TextIO
 MAX_WAIT = 600
 ENA_HOSTS = ("ftp.sra.ebi.ac.uk/", "ftp.ebi.ac.uk/")
 RUN = re.compile(r"^[SED]RR\d+$")
+SRA_TOOL = "fasterq-dump"
 
 
 class DownloadError(Exception):
@@ -81,12 +83,9 @@ def fetch_with_retries(url: str, dest: str, md5: str = "", downloader: str = "wg
     return False
 
 
-def from_sra(run: str, mate: int, dest: str, threads: int = 1, tool: str = "fasterq-dump",
+def from_sra(run: str, mate: int, dest: str, threads: int = 1, tool: str = SRA_TOOL,
              runner: Callable = subprocess.run, log: TextIO = sys.stderr) -> None:
     """Write mate ``mate`` (0: single-end) of ``run`` from the SRA to ``dest`` (gzipped)."""
-    if not shutil.which(tool):
-        raise DownloadError(f"{tool} (SRA Toolkit) is not installed, so the SRA could not be tried for {run}: "
-                            "install sra-tools (conda install -c bioconda sra-tools), or rerun the download later")
     cache = Path(dest).parent / ".sra" / run
     done = cache / ".complete"
     if not done.exists():
@@ -122,6 +121,9 @@ def download(url: str, dest: str, md5: str = "", downloader: str = "wget", downl
     if not (sra and RUN.match(run or "")):
         raise DownloadError(f"download failed {tries} times: {url}"
                             + ("" if sra else " (the SRA fallback is switched off: sra_fallback)"))
+    if not shutil.which(SRA_TOOL):
+        raise DownloadError(f"download failed {tries} times: {url} (the SRA was not tried: {SRA_TOOL} (SRA Toolkit) "
+                            "is not installed; it is optional: conda install -c bioconda sra-tools)")
     print(f"[mitopiper] download failed {tries} times: trying the SRA", file=log, flush=True)
     Path(dest).unlink(missing_ok=True)
     from_sra(run, mate, dest, threads, runner=runner, log=log)
@@ -137,7 +139,8 @@ def add_parser(sub) -> None:
     d.add_argument("--md5", default="", help="expected MD5 of the file")
     d.add_argument("--downloader", default="wget", help="download tool, called as TOOL ARGS -O DEST URL")
     d.add_argument("--downloader-args", default="", help="its options, e.g. '-c'")
-    d.add_argument("--tries", type=int, default=10, help="attempts before the SRA fallback (default 10)")
+    d.add_argument("--tries", type=int, default=10, help="attempts before the SRA fallback, if the SRA Toolkit is "
+                                                          "installed (default 10)")
     d.add_argument("--wait", type=int, default=30, help="seconds before the 2nd attempt, doubling up to 600")
     d.add_argument("--run", default="", help="run accession (SRR/ERR/DRR), for the SRA fallback")
     d.add_argument("--mate", type=int, default=0, choices=(0, 1, 2), help="1 or 2 for paired-end, 0 for single-end")
