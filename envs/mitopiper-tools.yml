@@ -16,6 +16,7 @@ dependencies:
   - tabulate
   - wget
   - pigz
+  - sra-tools=3.1.1         # fasterq-dump: the SRA fallback of downloads
   - trim-galore=0.6.10
   - cutadapt=4.9
   - fastqc=0.12.1

@@ -1,3 +1,6 @@
+import sys
+from pathlib import Path
+
 from mitopiper.builder import (
     build_experiment_steps,
     build_sample_job,
@@ -32,10 +35,9 @@ def test_single_end_default_pipeline():
     job = build_sample_job(se_sample(), Workflow.default(), EXP, REF)
     got = lines(job)
     assert job.job_name == "s_SRR1_3"
-    assert got["wget"][0] == "wget -c -O /data/output/EXP/fastq/SRR1_3_HS.fastq.gz ftp/SRR1.fastq.gz"
-    assert got["wget"][1].startswith("sh -c ") and 'echo "abc  /data/output/EXP/fastq/SRR1_3_HS.fastq.gz" | md5sum -c -' \
-        in got["wget"][1]
-    assert got["wget"][2:] == ["sleep 30"]
+    assert got["wget"] == [
+        "mitopiper download --downloader wget --downloader-args=-c --md5 abc --tries 10 --wait 30 --run SRR1 --mate 0 "
+        '--threads 1 "ftp/SRR1.fastq.gz" "/data/output/EXP/fastq/SRR1_3_HS.fastq.gz"', "sleep 30"]
     assert got["trim"] == ["trim_galore -q 20 -o /data/output/EXP/post_trim /data/output/EXP/fastq/SRR1_3_HS.fastq.gz"]
     assert got["bwa-align"] == [
         "bwa mem -k 19 /refs/chrM.fa /data/output/EXP/post_trim/SRR1_3_HS_trimmed.fq.gz > /data/output/EXP/alignment/SRR1_3_HS.sam"
@@ -54,8 +56,8 @@ def test_paired_end_multi_run_concatenates():
     job = build_sample_job(pe_sample(), Workflow.default(), EXP, REF)
     wget = lines(job)["wget"]
     assert 'cat "/data/output/EXP/fastq/SAMN1_0_DR_1.part0.fastq.gz" "/data/output/EXP/fastq/SAMN1_0_DR_1.part1.fastq.gz" > "/data/output/EXP/fastq/SAMN1_0_DR_1.fastq.gz"' in wget
-    assert any(l.endswith("ftp/SRR2_2.fastq.gz") for l in wget)
-    assert not any("md5sum" in l for l in wget)  # no md5 known
+    assert any('--run SRR2 --mate 2' in l and '"ftp/SRR2_2.fastq.gz"' in l for l in wget)
+    assert not any("--md5" in l for l in wget)  # no md5 known
     trim = lines(job)["trim"][0]
     assert "--paired /data/output/EXP/fastq/SAMN1_0_DR_1.fastq.gz /data/output/EXP/fastq/SAMN1_0_DR_2.fastq.gz" in trim
     assert len(lines(job)["fastqc"]) == 2
@@ -212,6 +214,9 @@ def test_a_corrupt_download_is_downloaded_once_more(tmp_path):
                                   f'if [ -e "{tmp_path}/once" ]; then printf "good data\\n" > "$out"; '
                                   f'else touch "{tmp_path}/once"; printf "bad! data\\n" > "$out"; fi\n')
     (bin_dir / "wget").chmod(0o755)
+    repo = Path(__file__).resolve().parent.parent
+    (bin_dir / "mitopiper").write_text(f'#!/bin/sh\nPYTHONPATH="{repo}" exec "{sys.executable}" -m mitopiper "$@"\n')
+    (bin_dir / "mitopiper").chmod(0o755)
     sample = Sample(index=0, accession="SAMN1", organism="Danio_rerio",
                     runs=[Run("SRR1", ["ftp/SRR1.fastq.gz"], md5=[hashlib.md5(good).hexdigest()])])
     wf = Workflow.default()
@@ -224,5 +229,5 @@ def test_a_corrupt_download_is_downloaded_once_more(tmp_path):
         script.write_text("\n".join(lines(job)["wget"]) + "\n")
         env = dict(__import__("os").environ, PATH=f"{bin_dir}:" + __import__("os").environ["PATH"])
         out = subprocess.run([shell, str(script)], env=env, capture_output=True, text=True)
-        assert out.returncode == 0 and "downloading" in out.stderr, (shell, out.stderr)
+        assert out.returncode == 0 and "checksum failed" in out.stderr and "download 2/10" in out.stderr, (shell, out.stderr)
         assert (tmp_path / "exp" / "fastq" / "SAMN1_0_DR.fastq.gz").read_bytes() == good

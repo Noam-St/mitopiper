@@ -165,9 +165,10 @@ def build_parser() -> argparse.ArgumentParser:
     rr.add_argument("--dry-run", action="store_true", help="only show what would be rerun")
     rr.add_argument("--submit", action="store_true", help="run rerun.sh right away")
 
-    from . import mtdna
+    from . import download, mtdna
 
     mtdna.add_parser(sub)
+    download.add_parser(sub)
 
     m = sub.add_parser("make-tsv", help="create a metadata table for local FASTQ files")
     m.add_argument("folder", help="folder containing the FASTQ files")
@@ -487,6 +488,7 @@ def main(argv: Optional[list] = None) -> int:
         "rerun": cmd_rerun,
         "check": cmd_check,
         "mt": lambda ws, args: __import__("mitopiper.mtdna", fromlist=["run"]).run(args),
+        "download": lambda ws, args: __import__("mitopiper.download", fromlist=["run"]).run(args),
     }
     try:
         if args.command in (None, "interactive"):

@@ -41,7 +41,7 @@ IGNORED = {
 #: Tools that other tools call behind the scenes.
 HIDDEN_DEPENDENCIES = {"trim_galore": ["cutadapt"]}
 #: Options whose value is itself a command (``STAR --readFilesCommand gunzip -c``).
-COMMAND_OPTIONS = ("--readFilesCommand",)
+COMMAND_OPTIONS = ("--readFilesCommand", "--downloader")
 
 #: executable -> conda package (bioconda / conda-forge)
 CONDA_PACKAGES = {

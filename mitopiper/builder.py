@@ -327,21 +327,25 @@ def render_structure(structure: str, variables: dict, lookups: dict) -> str:
 
 
 # ------------------------------------------------------------- downloads
-def _fetch_lines(key: str, settings: str, source: str, dest: str, md5: str, verify: bool, delay: int) -> list:
+def _fetch_lines(key: str, settings: str, source: str, dest: str, md5: str, verify: bool, delay: int,
+                 run: str = "", mate: int = 0, tries: int = 10, threads: int = 1, sra: bool = True) -> list:
     if is_local_path(source):
         source = source[len("file://"):] if source.startswith("file://") else source
         if source.endswith(".gz"):
             return [f'ln -sf "{source}" "{dest}"']
         return [f'gzip -c "{source}" > "{dest}"']
-    fetch = " ".join(p for p in (key, settings, "-O", dest, source) if p)
-    lines = [fetch]
+    # Retries (a wrong checksum included), other protocols and the SRA fallback: mitopiper.download.
+    options = [f"--downloader {shlex.quote(key)}"]
+    if settings:
+        options.append(f"--downloader-args={shlex.quote(settings)}")   # "=": its value starts with "-"
     if verify and md5:
-        # A wrong checksum gets one fresh download (deleted first: 'wget -c' would take a full-size
-        # corrupt file as complete), then fails the job. POSIX sh, whatever the job shell.
-        check = f'echo "{md5}  {dest}" | md5sum -c -'
-        retry = (f'{check} || {{ echo "[mitopiper] checksum failed: downloading {dest} again" >&2; '
-                 f'rm -f "{dest}"; {fetch} && {check}; }}')
-        lines.append(f"sh -c {shlex.quote(retry)}")
+        options.append(f"--md5 {md5}")
+    options.append(f"--tries {tries} --wait {delay}")
+    if run and sra:
+        options.append(f"--run {run} --mate {mate} --threads {threads}")
+    elif not sra:
+        options.append("--no-sra")
+    lines = [f'mitopiper download {" ".join(options)} "{source}" "{dest}"']
     if delay:
         lines.append(f"sleep {delay}")
     return lines
@@ -354,20 +358,27 @@ def download_lines(sample: Sample, key: str, settings: str, outdir: str, workflo
         delay = int(workflow.general("download_delay", 30) or 0)
     except (TypeError, ValueError):
         delay = 30
+    try:
+        tries = max(int(workflow.general("download_tries", 10) or 1), 1)
+    except (TypeError, ValueError):
+        tries = 10
+    sra = _truthy(workflow.general("sra_fallback", True))
+    threads = job_threads(workflow)
     mates = [1, 2] if sample.paired else [None]
     lines = []
     for m, mate in enumerate(mates):
         stem = f"{sample.name}_{mate}" if mate else sample.name
         dest = _join(outdir, f"{stem}.fastq.gz")
-        sources = [(run.files[m], run.md5[m] if m < len(run.md5) else "") for run in sample.runs]
+        sources = [(run.files[m], run.md5[m] if m < len(run.md5) else "", run.accession) for run in sample.runs]
+        fetch = dict(verify=verify, delay=delay, mate=mate or 0, tries=tries, threads=threads, sra=sra)
         if len(sources) == 1:
-            lines += _fetch_lines(key, settings, sources[0][0], dest, sources[0][1], verify, delay)
+            lines += _fetch_lines(key, settings, sources[0][0], dest, sources[0][1], run=sources[0][2], **fetch)
             continue
         parts = []
-        for k, (source, md5) in enumerate(sources):
+        for k, (source, md5, accession) in enumerate(sources):
             part = _join(outdir, f"{stem}.part{k}.fastq.gz")
             parts.append(part)
-            lines += _fetch_lines(key, settings, source, part, md5, verify, delay)
+            lines += _fetch_lines(key, settings, source, part, md5, run=accession, **fetch)
         quoted = " ".join(f'"{p}"' for p in parts)
         lines.append(f'cat {quoted} > "{dest}"')
         lines.append(f"rm -f {quoted}")

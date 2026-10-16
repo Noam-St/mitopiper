@@ -256,7 +256,11 @@ DEFAULT_MAIN = {
     "parallel_env": ["shared", "SGE parallel environment used with -pe"],
     "fail_fast": [True, "abort a job as soon as one of its commands fails (set -e -o pipefail)"],
     "verify_md5": [True, "verify downloaded FASTQ files against ENA's fastq_md5 column when available"],
-    "download_delay": [30, "seconds to wait between consecutive downloads (be kind to ENA)"],
+    "download_delay": [30, "seconds to wait between consecutive downloads (be kind to ENA); a failed download "
+                           "waits this long before its 2nd attempt, then twice as long each time (up to 10 min)"],
+    "download_tries": [10, "attempts per FASTQ file (a wrong checksum counts as a failed attempt) before the SRA "
+                           "fallback"],
+    "sra_fallback": [True, "when every attempt failed, take the run from the SRA with fasterq-dump (SRA Toolkit)"],
     "download_mode": ["job", "where the FASTQ files are downloaded: 'job' (in each sample job), 'login' (by master.sh "
                              "on the machine it runs on, before the samples are submitted) or 'queue' (one download job, "
                              "see download_queue)"],

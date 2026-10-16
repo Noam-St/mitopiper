@@ -605,6 +605,7 @@ for the reasoning behind the mt presets.
 of the active steps), `qsub_memory`, `walltime` (SLURM `--time`, SGE `-l h_rt`, LSF `-W`), `account` (SLURM `--account` / LSF `-P`),
 `parallel_env` (SGE `-pe`), `environment` (shell), and `free_form` (lines added to every job, e.g.
 `module load samtools`). Also: `fail_fast` (`set -eo pipefail`), `verify_md5`, `download_delay`,
+`download_tries`, `sra_fallback` (see [When downloads fail](#when-downloads-fail)),
 `ignore_paired_end`, and `tool_check` (write and run the `check_<exp>.sh` job).
 
 ### Where downloads run
@@ -619,6 +620,22 @@ on login or transfer nodes, so the general setting `download_mode` can move the 
 
 Either way the downloads are a stage of their own (`dl_<exp>`), with a status and a log. Every
 sample waits for it and skips itself if a download failed. `rerun` downloads again what is missing.
+
+### When downloads fail
+Each FASTQ file is fetched by `mitopiper download`, which keeps trying before the job gives up:
+
+1. it downloads with the preset's tool (`wget -c`) up to `download_tries` times (default 10). A file
+   whose MD5 does not match ENA's counts as a failed attempt: it is deleted and downloaded again. Other
+   failures keep the partial file, which the next attempt resumes;
+2. ENA URLs alternate between the URL as given, `https://` and `ftp://`, so a proxy or block that refuses
+   one protocol (an `ERROR 403: Forbidden`) does not fail every attempt;
+3. the wait between attempts starts at `download_delay` seconds and doubles, up to 10 minutes;
+4. if every attempt failed, the run is taken from the SRA itself with `fasterq-dump` (SRA Toolkit,
+   `sra-tools` in `envs/mitopiper-tools.yml`) and compressed; both mates of a run come from one dump.
+   The archive's MD5 is of its own file, so it is not compared (fasterq-dump checks its download
+   itself). Set `sra_fallback` to `false` to fail instead.
+
+Every attempt is logged in the job's stderr with its URL and the tool's error.
 
 ### Array jobs and a limit on running jobs
 Set the general setting `max_running` to run at most that many samples at the same time, or set

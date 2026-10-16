@@ -58,6 +58,9 @@ CTX = _ctx()
      "which step 'wget' should have produced", {"from_step": "wget"}),        # not fastqc_pre
     (dict(errors=["wget: unable to resolve host address 'ftp.sra.ebi.ac.uk'"], step="wget"), "no network access", {}),
     (dict(errors=["2026-10-15 18:02:25 ERROR 403: Forbidden."], step="wget", rc=8), "HTTP 403 Forbidden", {}),
+    (dict(errors=["[mitopiper] ERROR: fasterq-dump (SRA Toolkit) is not installed, so the SRA could not be tried",
+                  "[mitopiper] download failed 10 times: trying the SRA"], step="wget", rc=1),
+     "could not be downloaded in 10 attempts, and the SRA fallback is not installed", {}),
     (dict(errors=["write error: No space left on device"]), "disk", {}),
     (dict(rc=139), "segmentation fault", {"memory": "60G"}),
     (dict(errors=["Perl API version v5.24.0 of Cwd.c does not match v5.44.0 at /usr/lib64/perl5/XSLoader.pm line 92."],
