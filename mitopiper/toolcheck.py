@@ -41,7 +41,9 @@ IGNORED = {
 #: Tools that other tools call behind the scenes.
 HIDDEN_DEPENDENCIES = {"trim_galore": ["cutadapt"]}
 #: Options whose value is itself a command (``STAR --readFilesCommand gunzip -c``).
-COMMAND_OPTIONS = ("--readFilesCommand", "--downloader")
+COMMAND_OPTIONS = ("--readFilesCommand",)
+#: Commands that run the program given after ``--`` (``mitopiper download URL DEST -- wget -c``).
+COMMAND_WRAPPERS = ("mitopiper",)
 
 #: executable -> conda package (bioconda / conda-forge)
 CONDA_PACKAGES = {
@@ -108,6 +110,8 @@ def executables(line: str) -> list:
         if not words or words[0] in ("[", "[["):
             continue
         found.append(words[0])
+        if os.path.basename(words[0]) in COMMAND_WRAPPERS and "--" in words[:-1]:
+            found.append(words[words.index("--") + 1])
         for i, word in enumerate(words[:-1]):
             if word in COMMAND_OPTIONS:
                 found.append(words[i + 1])

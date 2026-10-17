@@ -366,19 +366,12 @@ def download_resources(workflow: Workflow, resources: JobResources) -> JobResour
 
 def uses_array(workflow: Workflow, scheduler: str) -> bool:
     """Whether sample jobs are submitted as one array job (never with the local scheduler)."""
-    try:
-        limit = int(workflow.general("max_running", 0) or 0)
-    except (TypeError, ValueError):
-        limit = 0
-    return scheduler != "local" and (workflow.flag("array_jobs", False) or limit > 0)
+    return scheduler != "local" and (workflow.flag("array_jobs", False) or max_running(workflow) > 0)
 
 
 def max_running(workflow: Workflow) -> int:
     """The general setting max_running (0 = no limit)."""
-    try:
-        return max(0, int(workflow.general("max_running", 0) or 0))
-    except (TypeError, ValueError):
-        return 0
+    return workflow.integer("max_running", 0)
 
 
 def write_array(scripts_dir: Path, experiment: str, exp: str, sample_scripts: list, workflow: Workflow,

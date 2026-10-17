@@ -33,6 +33,8 @@ from typing import Iterable, Optional
 log = logging.getLogger(__name__)
 
 ENA_FASTQ_ROOT = "ftp.sra.ebi.ac.uk/vol1/fastq"
+#: An SRA/ENA/DDBJ run accession.
+RUN_ACCESSION = re.compile(r"[SED]RR\d{6,}")
 
 # Column aliases: internal name -> accepted spellings (checked in order).
 COLUMN_ALIASES = {
@@ -173,7 +175,7 @@ def ena_fastq_urls(run: str, paired: bool) -> list:
     where the middle directory depends on the accession length.
     """
     run = run.strip()
-    if not re.fullmatch(r"[SED]RR\d{6,}", run):
+    if not RUN_ACCESSION.fullmatch(run):
         raise MetadataError(f"Cannot derive FASTQ URLs for '{run}': not a run accession")
     digits = len(run) - 3
     base = f"{ENA_FASTQ_ROOT}/{run[:6]}"

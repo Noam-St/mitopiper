@@ -327,61 +327,46 @@ def render_structure(structure: str, variables: dict, lookups: dict) -> str:
 
 
 # ------------------------------------------------------------- downloads
-def _fetch_lines(key: str, settings: str, source: str, dest: str, md5: str, verify: bool, delay: int,
-                 run: str = "", mate: int = 0, tries: int = 10, threads: int = 1, sra: bool = True) -> list:
+def _fetch_lines(source: str, dest: str, md5: str, run: str, mate: int, options: dict) -> list:
+    """Lines fetching one file: a link or copy of a local file, else ``mitopiper download`` (retries, a wrong
+    checksum included, other protocols and the SRA fallback: :mod:`mitopiper.download`)."""
     if is_local_path(source):
         source = source[len("file://"):] if source.startswith("file://") else source
         if source.endswith(".gz"):
             return [f'ln -sf "{source}" "{dest}"']
         return [f'gzip -c "{source}" > "{dest}"']
-    # Retries (a wrong checksum included), other protocols and the SRA fallback: mitopiper.download.
-    options = [f"--downloader {shlex.quote(key)}"]
-    if settings:
-        options.append(f"--downloader-args={shlex.quote(settings)}")   # "=": its value starts with "-"
-    if verify and md5:
-        options.append(f"--md5 {md5}")
-    options.append(f"--tries {tries} --wait {delay}")
-    if run and sra:
-        options.append(f"--run {run} --mate {mate} --threads {threads}")
-    elif not sra:
-        options.append("--no-sra")
-    lines = [f'mitopiper download {" ".join(options)} "{source}" "{dest}"']
-    if delay:
-        lines.append(f"sleep {delay}")
+    sra = (f"--run {run} --mate {mate} --threads {options['threads']}" if run else "") if options["sra"] else "--no-sra"
+    words = ["mitopiper download", f"--md5 {md5}" if md5 else "", options["retries"], sra,
+             f'"{source}" "{dest}" --', options["downloader"]]
+    lines = [" ".join(w for w in words if w)]
+    if options["delay"]:
+        lines.append(f"sleep {options['delay']}")
     return lines
 
 
 def download_lines(sample: Sample, key: str, settings: str, outdir: str, workflow: Workflow) -> list:
     """Fetch every run of the sample and concatenate runs into one file per mate."""
-    verify = _truthy(workflow.general("verify_md5", True))
-    try:
-        delay = int(workflow.general("download_delay", 30) or 0)
-    except (TypeError, ValueError):
-        delay = 30
-    try:
-        tries = max(int(workflow.general("download_tries", 10) or 1), 1)
-    except (TypeError, ValueError):
-        tries = 10
-    sra = _truthy(workflow.general("sra_fallback", True))
-    threads = job_threads(workflow)
+    delay = workflow.integer("download_delay", 30)
+    options = {"downloader": f"{key} {settings}".strip(), "delay": delay, "sra": workflow.flag("sra_fallback", True),
+               "retries": f"--tries {workflow.integer('download_tries', 10, minimum=1)} --wait {delay}",
+               "threads": job_threads(workflow)}
+    verify = workflow.flag("verify_md5", True)
     mates = [1, 2] if sample.paired else [None]
     lines = []
     for m, mate in enumerate(mates):
         stem = f"{sample.name}_{mate}" if mate else sample.name
         dest = _join(outdir, f"{stem}.fastq.gz")
-        sources = [(run.files[m], run.md5[m] if m < len(run.md5) else "", run.accession) for run in sample.runs]
-        fetch = dict(verify=verify, delay=delay, mate=mate or 0, tries=tries, threads=threads, sra=sra)
-        if len(sources) == 1:
-            lines += _fetch_lines(key, settings, sources[0][0], dest, sources[0][1], run=sources[0][2], **fetch)
-            continue
+        many = len(sample.runs) > 1
         parts = []
-        for k, (source, md5, accession) in enumerate(sources):
-            part = _join(outdir, f"{stem}.part{k}.fastq.gz")
+        for k, run in enumerate(sample.runs):
+            part = _join(outdir, f"{stem}.part{k}.fastq.gz") if many else dest
+            md5 = run.md5[m] if verify and m < len(run.md5) else ""
+            lines += _fetch_lines(run.files[m], part, md5, run.accession, mate or 0, options)
             parts.append(part)
-            lines += _fetch_lines(key, settings, source, part, md5, run=accession, **fetch)
-        quoted = " ".join(f'"{p}"' for p in parts)
-        lines.append(f'cat {quoted} > "{dest}"')
-        lines.append(f"rm -f {quoted}")
+        if many:
+            quoted = " ".join(f'"{p}"' for p in parts)
+            lines.append(f'cat {quoted} > "{dest}"')
+            lines.append(f"rm -f {quoted}")
     return lines
 
 

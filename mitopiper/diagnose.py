@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from .download import FAILED_PATTERN, NO_SRA_TOOL
 from .schedulers import format_walltime, walltime_seconds
 from .monitor import ACCOUNTING_PENDING, FAILED, KILLED, NEVER_SUBMITTED, NOT_SUBMITTED, SKIPPED, UNKNOWN, JobStatus, tail
 
@@ -348,9 +349,9 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
                            ["Check that the path exists and is visible from the compute nodes."], ["mitopiper rerun"], {}))
 
     # --- downloads ---------------------------------------------------------------
-    failed = _find(r"download failed (\d+) times", text)
+    failed = _find(FAILED_PATTERN, text)
     if failed:
-        no_sra = _find(r"fasterq-dump \(SRA Toolkit\) is not installed", text)
+        no_sra = _find(re.escape(NO_SRA_TOOL), text)
         add(Suggestion(f"A FASTQ file could not be downloaded in {failed.group(1)} attempts"
                        + (" (the optional SRA fallback is not installed)" if no_sra else ""),
                        ["The attempts are logged in the job's stderr (mitopiper monitor --job NAME), each with the "

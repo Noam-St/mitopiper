@@ -1,6 +1,3 @@
-import sys
-from pathlib import Path
-
 from mitopiper.builder import (
     build_experiment_steps,
     build_sample_job,
@@ -10,6 +7,7 @@ from mitopiper.builder import (
     selected_steps,
 )
 from mitopiper.config import Workflow
+from conftest import MITOPIPER_SHIM
 from mitopiper.metadata import Run, Sample
 from mitopiper.references import ReferenceSet
 
@@ -36,8 +34,8 @@ def test_single_end_default_pipeline():
     got = lines(job)
     assert job.job_name == "s_SRR1_3"
     assert got["wget"] == [
-        "mitopiper download --downloader wget --downloader-args=-c --md5 abc --tries 10 --wait 30 --run SRR1 --mate 0 "
-        '--threads 1 "ftp/SRR1.fastq.gz" "/data/output/EXP/fastq/SRR1_3_HS.fastq.gz"', "sleep 30"]
+        'mitopiper download --md5 abc --tries 10 --wait 30 --run SRR1 --mate 0 --threads 1 "ftp/SRR1.fastq.gz" '
+        '"/data/output/EXP/fastq/SRR1_3_HS.fastq.gz" -- wget -c', "sleep 30"]
     assert got["trim"] == ["trim_galore -q 20 -o /data/output/EXP/post_trim /data/output/EXP/fastq/SRR1_3_HS.fastq.gz"]
     assert got["bwa-align"] == [
         "bwa mem -k 19 /refs/chrM.fa /data/output/EXP/post_trim/SRR1_3_HS_trimmed.fq.gz > /data/output/EXP/alignment/SRR1_3_HS.sam"
@@ -214,8 +212,7 @@ def test_a_corrupt_download_is_downloaded_once_more(tmp_path):
                                   f'if [ -e "{tmp_path}/once" ]; then printf "good data\\n" > "$out"; '
                                   f'else touch "{tmp_path}/once"; printf "bad! data\\n" > "$out"; fi\n')
     (bin_dir / "wget").chmod(0o755)
-    repo = Path(__file__).resolve().parent.parent
-    (bin_dir / "mitopiper").write_text(f'#!/bin/sh\nPYTHONPATH="{repo}" exec "{sys.executable}" -m mitopiper "$@"\n')
+    (bin_dir / "mitopiper").write_text(MITOPIPER_SHIM)
     (bin_dir / "mitopiper").chmod(0o755)
     sample = Sample(index=0, accession="SAMN1", organism="Danio_rerio",
                     runs=[Run("SRR1", ["ftp/SRR1.fastq.gz"], md5=[hashlib.md5(good).hexdigest()])])

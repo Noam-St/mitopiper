@@ -76,6 +76,15 @@ class Workflow:
         """A boolean general setting."""
         return truthy(self.general(key, default))
 
+    def integer(self, key: str, default: int = 0, minimum: int = 0) -> int:
+        """A whole-number general setting: empty counts as 0, anything else that is not a number as
+        ``default``; never below ``minimum``."""
+        try:
+            value = int(self.general(key, default) or 0)
+        except (TypeError, ValueError):
+            value = default
+        return max(value, minimum)
+
     def set_general(self, key: str, value: Any) -> None:
         entry = self.general_settings.get(key)
         if isinstance(entry, list) and len(entry) > 1:

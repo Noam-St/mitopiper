@@ -40,7 +40,7 @@ def test_wrong_checksums_and_failures_are_retried_with_growing_waits(tmp_path):
     dest = tmp_path / "x.fastq.gz"
     runner = fake_wget([b"corrupt", 8, b"corrupt again", GOOD], calls)
     log = io.StringIO()
-    how = dl.download("ftp.sra.ebi.ac.uk/a.gz", str(dest), md5=hashlib.md5(GOOD).hexdigest(), downloader_args="-c",
+    how = dl.download("ftp.sra.ebi.ac.uk/a.gz", str(dest), md5=hashlib.md5(GOOD).hexdigest(), downloader=["wget", "-c"],
                       tries=10, wait=30, runner=runner, sleep=waits.append, log=log)
     assert how == "archive" and dest.read_bytes() == GOOD
     assert [c[-1] for c in calls] == ["ftp.sra.ebi.ac.uk/a.gz", "https://ftp.sra.ebi.ac.uk/a.gz",
@@ -51,7 +51,7 @@ def test_wrong_checksums_and_failures_are_retried_with_growing_waits(tmp_path):
 
 def test_waits_are_capped():
     waits = []
-    dl.fetch_with_retries("u", "/nonexistent/x", tries=8, wait=100, runner=fake_wget([1] * 8, []),
+    dl.fetch_with_retries("u", "/nonexistent/x", "", ["wget"], tries=8, wait=100, runner=fake_wget([1] * 8, []),
                           sleep=waits.append, log=io.StringIO())
     assert waits == [100, 200, 400, 600, 600, 600, 600]
 
@@ -72,33 +72,37 @@ def fake_fasterq_dump(tmp_path, monkeypatch, paired=True):
 
 def test_after_every_attempt_failed_both_mates_come_from_one_sra_dump(tmp_path, monkeypatch):
     dumps = fake_fasterq_dump(tmp_path, monkeypatch)
-    real = subprocess.run
+    real, wget_calls = subprocess.run, []
 
     def runner(command, **kwargs):              # wget always refused; everything else runs
-        return subprocess.CompletedProcess(command, 8) if command[0] == "wget" else real(command, **kwargs)
+        if command[0] == "wget":
+            wget_calls.append(command[-1])
+            return subprocess.CompletedProcess(command, 8)
+        return real(command, **kwargs)
 
     out = tmp_path / "fastq"
     for mate in (1, 2):
-        how = dl.download("ftp.sra.ebi.ac.uk/SRR9_%d.fastq.gz" % mate, str(out / f"S_{mate}.fastq.gz"), md5="0" * 32,
-                          tries=3, wait=0, run="SRR9", mate=mate, runner=runner, sleep=lambda s: None, log=io.StringIO())
+        how = dl.download("ftp.sra.ebi.ac.uk/SRR900009_%d.fastq.gz" % mate, str(out / f"S_{mate}.fastq.gz"), md5="0" * 32,
+                          tries=3, wait=0, run="SRR900009", mate=mate, runner=runner, sleep=lambda s: None, log=io.StringIO())
         assert how == "sra"
     assert gzip.open(out / "S_1.fastq.gz").read() == b"@a/1\nACGT\n+\nIIII\n"
     assert gzip.open(out / "S_2.fastq.gz").read() == b"@a/2\nTTTT\n+\nIIII\n"
-    assert dumps.read_text().count("x") == 1 and not (out / ".sra" / "SRR9").exists()
+    assert dumps.read_text().count("x") == 1 and not (out / ".sra" / "SRR900009").exists()
+    assert len(wget_calls) == 3 and all("_1" in url for url in wget_calls)   # mate 2 used the dump straight away
 
 
 def test_single_end_from_the_sra(tmp_path, monkeypatch):
     fake_fasterq_dump(tmp_path, monkeypatch, paired=False)
     dest = tmp_path / "S.fastq.gz"
-    how = dl.download("u", str(dest), tries=1, run="ERR5", mate=0, runner=lambda c, **k: (
+    how = dl.download("u", str(dest), tries=1, run="ERR500005", mate=0, runner=lambda c, **k: (
         subprocess.CompletedProcess(c, 4) if c[0] == "wget" else subprocess.run(c, **k)), log=io.StringIO())
     assert how == "sra" and gzip.open(dest).read().startswith(b"@s")
 
 
 @pytest.mark.parametrize("run, sra, message", [
     ("", True, "download failed 2 times"),                       # no run accession: nothing to fall back on
-    ("SRR9", False, "SRA fallback is switched off"),
-    ("SRR9", True, "download failed 2 times: u (the SRA was not tried: fasterq-dump (SRA Toolkit) is not installed"),
+    ("SRR900009", False, "SRA fallback is switched off"),
+    ("SRR900009", True, "download failed 2 times: u (the SRA was not tried: fasterq-dump (SRA Toolkit) is not installed"),
 ])
 def test_when_nothing_works_the_error_says_why(tmp_path, monkeypatch, run, sra, message):
     monkeypatch.setenv("PATH", str(tmp_path))                   # no fasterq-dump
@@ -108,5 +112,5 @@ def test_when_nothing_works_the_error_says_why(tmp_path, monkeypatch, run, sra, 
 
 
 def test_the_tool_check_sees_the_downloader():
-    line = 'mitopiper download --downloader wget --downloader-args=-c --md5 abc --tries 10 --wait 30 "u" "d"'
+    line = 'mitopiper download --md5 abc --tries 10 --wait 30 "u" "d" -- wget -c'
     assert set(required_tools({"wget": [line]})) == {"mitopiper", "wget"}

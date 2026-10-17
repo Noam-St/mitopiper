@@ -9,7 +9,6 @@ import os
 import shutil
 import time
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -20,6 +19,7 @@ from mitopiper.cli import main
 from mitopiper.config import Workspace
 from mitopiper.local_samples import make_tsv
 from mitopiper.references import ReferenceRegistry, ReferenceSet
+from conftest import MITOPIPER_SHIM
 
 REPO = Path(__file__).resolve().parent.parent
 MT = "ACGT" * 7 + "AC"  # 30 bases
@@ -62,7 +62,7 @@ def cluster(tmp_path, monkeypatch):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     tools = {"samtools": FAKE_SAMTOOLS, "bwa": FAKE_BWA, "numt_parser.py": FAKE_NUMT_PARSER,
-             "mitopiper": f'#!/bin/sh\nPYTHONPATH="{REPO}" exec "{sys.executable}" -m mitopiper "$@"\n'}
+             "mitopiper": MITOPIPER_SHIM}
     for name, body in tools.items():
         (bin_dir / name).write_text(body)
         (bin_dir / name).chmod(0o755)
@@ -307,7 +307,7 @@ def test_reference_jobs_of_parallel_builds_take_turns(tmp_path, monkeypatch):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     for name, body in {"bwa": SLOW_BWA, "samtools": FAKE_SAMTOOLS,
-                       "mitopiper": f'#!/bin/sh\nPYTHONPATH="{REPO}" exec "{sys.executable}" -m mitopiper "$@"\n'}.items():
+                       "mitopiper": MITOPIPER_SHIM}.items():
         (bin_dir / name).write_text(body)
         (bin_dir / name).chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
@@ -350,7 +350,7 @@ def test_a_stale_reference_lock_is_taken_over(tmp_path, monkeypatch):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     for name, body in {"bwa": "#!/bin/sh\n[ \"$1\" = index ] && echo x > \"$2.bwt\" && echo x > \"$2.sa\"\nexit 0\n", "samtools": FAKE_SAMTOOLS,
-                       "mitopiper": f'#!/bin/sh\nPYTHONPATH="{REPO}" exec "{sys.executable}" -m mitopiper "$@"\n'}.items():
+                       "mitopiper": MITOPIPER_SHIM}.items():
         (bin_dir / name).write_text(body)
         (bin_dir / name).chmod(0o755)
     env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", MITOPIPER_LOCK_WAIT="1")

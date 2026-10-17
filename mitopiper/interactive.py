@@ -585,7 +585,7 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input, session_fa
     if scheduler == "local":
         print("NOTE: the 'local' scheduler runs the jobs one after another on this machine.")
     else:
-        limit = int(workflow.general("max_running", 0) or 0) if str(workflow.general("max_running", 0)).isdigit() else 0
+        limit = workflow.integer("max_running", 0)
         if limit:
             print(f"The samples run as one array job, at most {limit} at a time (general setting max_running).")
         else:
