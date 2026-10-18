@@ -91,6 +91,29 @@ def fetch_with_retries(url: str, dest: str, md5: str, downloader: list, tries: i
     return False
 
 
+def md5_from_list(text: str, name: str) -> str:
+    """The MD5 of file ``name`` in a checksum list (``md5sum`` output, e.g. NCBI's md5checksums.txt)."""
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and fields[-1].rsplit("/", 1)[-1] == name:
+            return fields[0].lower()
+    raise DownloadError(f"{name} is not in the checksum list")
+
+
+def checksum_from_url(md5_url: str, dest: str, downloader: list, tries: int, wait: int, runner: Callable,
+                      sleep: Callable, log: TextIO) -> str:
+    """Download the checksum list ``md5_url`` (with the same retries) and return the MD5 of ``dest``'s file
+    there. The list is kept next to ``dest`` only while it is read."""
+    listing = Path(dest).with_name(Path(dest).name + ".md5checksums")
+    listing.unlink(missing_ok=True)
+    if not fetch_with_retries(md5_url, str(listing), "", downloader, tries, wait, runner, sleep, log):
+        raise DownloadError(f"{FAILED.format(tries=tries)}: {md5_url}")
+    try:
+        return md5_from_list(listing.read_text(encoding="utf-8", errors="replace"), Path(dest).name)
+    finally:
+        listing.unlink(missing_ok=True)
+
+
 def _sra_cache(dest: str, run: str) -> Path:
     return Path(dest).parent / ".sra" / run
 
@@ -126,9 +149,14 @@ def from_sra(run: str, mate: int, dest: str, threads: int = 1, runner: Callable 
 
 def download(url: str, dest: str, md5: str = "", downloader: tuple = ("wget",), tries: int = 10, wait: int = 30,
              run: str = "", mate: int = 0, threads: int = 1, sra: bool = True, runner: Callable = subprocess.run,
-             sleep: Callable = time.sleep, log: TextIO = sys.stderr) -> str:
-    """Get one FASTQ file, from the archive or else from the SRA. Returns "archive" or "sra"."""
+             sleep: Callable = time.sleep, log: TextIO = sys.stderr, md5_url: str = "") -> str:
+    """Get one file, from the archive or else (a FASTQ run) from the SRA. Returns "archive" or "sra".
+
+    ``md5_url``: a checksum list holding the file's MD5 under its name (NCBI's md5checksums.txt), used
+    when ``md5`` is not given."""
     Path(dest).parent.mkdir(parents=True, exist_ok=True)
+    if md5_url and not md5:
+        md5 = checksum_from_url(md5_url, dest, list(downloader), tries, wait, runner, sleep, log)
     use_sra = sra and RUN_ACCESSION.fullmatch(run or "") is not None
     if use_sra and (_sra_cache(dest, run) / ".complete").exists():
         _say(f"{run} was already taken from the SRA for its other mate: using that", log)   # skip the failing archive
@@ -160,6 +188,7 @@ def add_parser(sub) -> None:
     d.add_argument("downloader", nargs=argparse.REMAINDER,
                    help="after --: the download tool and its options, called as ... -O DEST URL (default: wget)")
     d.add_argument("--md5", default="", help="expected MD5 of the file")
+    d.add_argument("--md5-url", default="", help="or: a checksum list (md5sum format) holding it under DEST's name")
     d.add_argument("--tries", type=int, default=10, help="attempts before the SRA fallback, if the SRA Toolkit is "
                                                           "installed (default 10)")
     d.add_argument("--wait", type=int, default=30, help="seconds before the 2nd attempt, doubling up to 600")
@@ -172,7 +201,7 @@ def add_parser(sub) -> None:
 def run(args) -> int:
     try:
         download(args.url, args.dest, args.md5, args.downloader or ["wget"], max(args.tries, 1), args.wait,
-                 args.run, args.mate, args.threads, sra=not args.no_sra)
+                 args.run, args.mate, args.threads, sra=not args.no_sra, md5_url=args.md5_url)
     except DownloadError as exc:
         _say(f"ERROR: {exc}", sys.stderr)
         return 1

@@ -114,3 +114,21 @@ def test_when_nothing_works_the_error_says_why(tmp_path, monkeypatch, run, sra, 
 def test_the_tool_check_sees_the_downloader():
     line = 'mitopiper download --md5 abc --tries 10 --wait 30 "u" "d" -- wget -c'
     assert set(required_tools({"wget": [line]})) == {"mitopiper", "wget"}
+
+
+def test_the_md5_can_come_from_a_checksum_list(tmp_path):
+    good = hashlib.md5(GOOD).hexdigest()
+    listing = f"{'0' * 32}  ./other.fna.gz\n{good}  ./genome.fna.gz\n".encode()
+    calls = []
+    runner = fake_wget([listing, b"corrupt", GOOD], calls)          # the list, then a corrupt and a good genome
+    dest = tmp_path / "genome.fna.gz"
+    how = dl.download("https://ftp.ncbi.nlm.nih.gov/x/genome.fna.gz", str(dest), md5_url="https://ftp.ncbi.nlm.nih.gov/x/md5checksums.txt",
+                      tries=3, wait=0, sra=False, runner=runner, sleep=lambda s: None, log=io.StringIO())
+    assert how == "archive" and dest.read_bytes() == GOOD and len(calls) == 3
+    assert not list(tmp_path.glob("*.md5checksums"))                # the list is not left behind
+
+
+def test_a_file_missing_from_the_checksum_list_is_an_error():
+    assert dl.md5_from_list("abc  ./a.gz\ndef  b.gz\n", "b.gz") == "def"
+    with pytest.raises(dl.DownloadError, match="c.gz is not in the checksum list"):
+        dl.md5_from_list("abc  ./a.gz\n", "c.gz")

@@ -5,6 +5,7 @@ import shutil
 
 import pytest
 
+from conftest import MITOPIPER_SHIM
 from mitopiper import monitor as mon
 from mitopiper import references as refs_mod
 from mitopiper.cli import main
@@ -60,7 +61,8 @@ def test_fetching_only_plans_the_download(tmp_path):
     assert ref.source == "ncbi_genome" and ref.needs_indexing and ref.refpath.endswith("GCF_000002035.6_GRCz11_genomic.fna")
     assert set(ref.downloads) == {ref.refpath, ref.gtfpath} and not (ws.references_dir / "genome").exists()
     cmds = index_commands(ref, Workflow.default())
-    assert cmds[0].startswith("sh -c 'set -e;") and "md5sum -c -" in cmds[0] and any("bwa index" in c for c in cmds)
+    assert cmds[0].startswith("sh -c 'set -e;") and "mitopiper download --md5-url" in cmds[0] and "--no-sra" in cmds[0]
+    assert any("bwa index" in c for c in cmds)
     # attached as the nuclear FASTA of the mitochondrial set: downloaded and indexed, but STAR indexes only refpath
     mt = ReferenceSet(refpath=str(tmp_path / "mt.fa"), source="ncbi_mt")
     both = attach_nuclear(mt, ref)
@@ -91,7 +93,7 @@ def fake_ncbi(tmp_path, name, corrupt=False):
         f"{'0' * 32 if corrupt else md5(fasta_gz)}  ./{fasta_gz.name}\n{md5(gff_gz)}  ./{gff_gz.name}\n")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for tool, body in {"wget": FAKE_WGET, "samtools": '#!/bin/sh\ntouch "$2.fai"\n', "bwa": '#!/bin/sh\n[ "$1" = index ] && touch "$2.bwt" "$2.sa"\nexit 0\n'}.items():
+    for tool, body in {"wget": FAKE_WGET, "mitopiper": MITOPIPER_SHIM, "samtools": '#!/bin/sh\ntouch "$2.fai"\n', "bwa": '#!/bin/sh\n[ "$1" = index ] && touch "$2.bwt" "$2.sa"\nexit 0\n'}.items():
         (bin_dir / tool).write_text(body)
         (bin_dir / tool).chmod(0o755)
     return server, bin_dir
@@ -107,6 +109,8 @@ def test_reference_job_downloads_verifies_and_indexes_the_genome(tmp_path, monke
     ws.initialise()
     wf = ws.load_workflow("default")
     wf.set_general("environment", shell)
+    wf.set_general("download_tries", 2)
+    wf.set_general("download_delay", 0)
     wf.run_order = ["wget", "bwa-align"]
     ws.write_workflow(wf, "t")
     ref, _ = fetch_genome_reference(ws, "Danio_rerio", client=FakeClient([report("GCF_000002035.6", "GRCz11", "reference genome")]))
@@ -122,6 +126,8 @@ def test_reference_job_downloads_verifies_and_indexes_the_genome(tmp_path, monke
     if corrupt:
         assert states["prep_exp"] == mon.FAILED and states["s_a_0"] == mon.SKIPPED
         assert not fasta.exists()
+        err = next((ws.output_dir / "exp" / "stderr").glob("prep_*")).read_text()
+        assert err.count("checksum failed") == 2 and "download failed 2 times" in err      # retried, then gave up
     else:
         assert states["prep_exp"] == mon.DONE and states["s_a_0"] == mon.DONE
         assert fasta.read_text().startswith(">chr1") and fasta.with_suffix(".fna.bwt").exists()

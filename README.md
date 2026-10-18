@@ -905,7 +905,8 @@ organism, you get an error, and the interactive mode offers to enter a path by h
 
 Nothing large is downloaded when you run the command. The first build that uses the reference
 downloads the FASTA and GFF in its reference job (`prep_<exp>.sh`), checks them against NCBI's
-`md5checksums.txt`, unpacks them into `references/genome/<organism>/` and indexes them, all before
+`md5checksums.txt` (with the retries of [When downloads fail](#when-downloads-fail), without the SRA
+fallback), unpacks them into `references/genome/<organism>/` and indexes them, all before
 any sample job starts. Later builds reuse the files. In the interactive mode, the same download is
 offered when an organism has no reference, and under *configuration → manage references*.
 

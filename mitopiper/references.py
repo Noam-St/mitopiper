@@ -488,19 +488,23 @@ def attach_nuclear(ref: ReferenceSet, genome_ref: ReferenceSet) -> ReferenceSet:
                    downloads={**ref.downloads, genome_ref.refpath: genome_ref.downloads[genome_ref.refpath]})
 
 
-def download_commands(ref: ReferenceSet) -> list:
+def download_commands(ref: ReferenceSet, workflow=None) -> list:
     """Download, MD5-check and unpack every file of ``ref.downloads`` that is not there yet.
 
-    The commands run through ``sh -c`` so they work whatever the job shell is.
+    Files are fetched by ``mitopiper download``, with the retries of the sample downloads (the general
+    settings download_tries and download_delay; a wrong checksum counts as a failed attempt). The commands
+    run through ``sh -c`` so they work whatever the job shell is.
     """
+    tries = workflow.integer("download_tries", 10, minimum=1) if workflow else 10
+    wait = workflow.integer("download_delay", 30) if workflow else 30
     commands = []
     for local, spec in sorted(ref.downloads.items()):
         folder, name = local.rsplit("/", 1)
         remote = spec["url"].rsplit("/", 1)[1]
-        fetch = [f'echo "Downloading {remote}"', f'wget -c -q -O "{remote}" "{spec["url"]}"']
-        if spec.get("md5_url"):
-            fetch += [f'wget -q -O "{name}.md5checksums" "{spec["md5_url"]}"',
-                      f'grep " \\./{remote}$" "{name}.md5checksums" | md5sum -c -']
+        checksum = f'--md5-url "{spec["md5_url"]}" ' if spec.get("md5_url") else ""
+        fetch = [f'echo "Downloading {remote}"',
+                 f'mitopiper download {checksum}--tries {tries} --wait {wait} --no-sra "{spec["url"]}" "{remote}" '
+                 "-- wget -c -q"]
         if remote.endswith(".gz"):
             fetch.append(f'gunzip -f "{remote}"')
         script = f'set -e; mkdir -p "{folder}"; cd "{folder}"; if [ ! -s "{name}" ]; then {"; ".join(fetch)}; fi'
@@ -747,7 +751,7 @@ def index_commands(ref: ReferenceSet, workflow, csh: Optional[bool] = None) -> l
     if not ref.refpath:
         return []
     csh = _resolve_csh(workflow, csh)
-    commands = download_commands(ref)
+    commands = download_commands(ref, workflow)
     if ref.nuc_refpath and ref.nuc_refpath in ref.downloads:
         commands += _fasta_index_commands(ref.nuc_refpath, workflow, csh, star=False)
     return commands + _fasta_index_commands(ref.refpath, workflow, csh, star=True)
