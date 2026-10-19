@@ -361,8 +361,11 @@ continues until everything is done. To make a fix permanent for future runs, add
 preset (e.g. `free_form`).
 
 **6. Come back later.** You can log out; the jobs keep running. When you next start `mitopiper` in
-the workspace, it offers to *monitor / rerun the jobs of the last build*. Or open the monitor
-directly:
+the workspace, it offers to *monitor / rerun the jobs of the last build*, or, when several builds were
+launched in the same workspace, to *monitor / rerun other experiments*: a list of every experiment
+with jobs (newest first, with when it was launched), from which you pick one or several (`0 2`,
+`1-3`, `all`) to follow together. Or open the monitor directly, naming the experiments
+(`mitopiper monitor -i EXP1 EXP2`):
 
 ```bash
 mitopiper monitor -i

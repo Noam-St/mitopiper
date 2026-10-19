@@ -160,3 +160,32 @@ def test_interactive_monitor_stays_when_every_job_is_done(tmp_path):
                              query=lambda s, i: None, stay_when_done=True)
     assert session.run() == 0
     assert "### E / s_a_0" in out.getvalue() and "Leaving the monitor" in out.getvalue()
+
+
+def test_start_menu_can_monitor_earlier_experiments(tmp_path, capsys):
+    import json
+    import os
+
+    ws = setup_ws(tmp_path)
+    for i, name in enumerate(["old_exp", "new_exp"]):
+        exp = ws.experiment_dir(name)
+        exp.mkdir(parents=True)
+        (exp / "jobs.tsv").write_text("job_id\tjob_name\tscript\tsubmitted\tkind\n1\ts_a_0\t/s/a.sh\t1\tsample\n")
+        os.utime(exp / "jobs.tsv", (1_000_000 + i, 1_000_000 + i))
+    (ws.root / "last_build.json").write_text(json.dumps({"experiments": ["new_exp"]}))
+    opened = []
+
+    class Session:
+        def __init__(self, experiments):
+            opened.append(experiments)
+
+        def run(self):
+            return 0
+
+    factory = lambda w, e, i: Session(e)  # noqa: E731
+    # 2: other experiments; the list is newest first, so 'all' -> both, '1' -> the older one
+    assert run_interactive(ws, scripted(["2", "all"], []), session_factory=factory) == 0
+    assert run_interactive(ws, scripted(["2", "1"], []), session_factory=factory) == 0
+    assert opened == [["new_exp", "old_exp"], ["old_exp"]]
+    out = capsys.readouterr().out
+    assert "monitor / rerun other experiments (2 launched in this workspace)" in out and "Last launched" in out

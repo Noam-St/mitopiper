@@ -539,6 +539,30 @@ def _last_build(workspace: Workspace) -> list:
     return [e for e in last.get("experiments", []) if (workspace.experiment_dir(e) / "jobs.tsv").exists()]
 
 
+def _launched_experiments(workspace: Workspace) -> list:
+    """``(name, launched, jobs)`` of every experiment with submitted jobs (a jobs.tsv), newest first."""
+    import time
+
+    found = []
+    if workspace.output_dir.is_dir():
+        for exp in workspace.output_dir.iterdir():
+            jobs = exp / "jobs.tsv"
+            if jobs.is_file():
+                with open(jobs, encoding="utf-8") as handle:
+                    count = max(sum(1 for _ in handle) - 1, 0)
+                found.append((jobs.stat().st_mtime, exp.name, count))
+    return [(name, time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime)), count)
+            for mtime, name, count in sorted(found, reverse=True)]
+
+
+def _choose_experiments(launched: list, input_fn: Callable) -> list:
+    print(table([[i, name, when, count] for i, (name, when, count) in enumerate(launched)],
+                ["#", "Experiment", "Last launched", "Jobs"]))
+    chosen = choose_many("Which experiments? (e.g. '0', '0 2', '1-3' or 'all')", len(launched), input_fn,
+                         allow_exit=False)
+    return [launched[i][0] for i in chosen]
+
+
 def _default_session(workspace: Workspace, experiments: list, input_fn: Callable):
     from .session import MonitorSession
 
@@ -555,12 +579,18 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input, session_fa
     banner("Welcome to mitopiper - job script generator for sequencing pipelines")
 
     previous = _last_build(workspace)
-    if previous:
-        what = choose("What would you like to do?",
-                      ["build and launch new jobs", f"monitor / rerun the jobs of the last build ({', '.join(previous)})"],
-                      allow_exit=False, input_fn=input_fn)
-        if what == 1:
+    launched = _launched_experiments(workspace)
+    if previous or launched:
+        options = ["build and launch new jobs"]
+        if previous:
+            options.append(f"monitor / rerun the jobs of the last build ({', '.join(previous)})")
+        if set(name for name, _, _ in launched) - set(previous):
+            options.append(f"monitor / rerun other experiments ({len(launched)} launched in this workspace)")
+        what = choose("What would you like to do?", options, allow_exit=False, input_fn=input_fn) if len(options) > 1 else 0
+        if options[what].startswith("monitor / rerun the jobs of the last build"):
             return session_factory(workspace, previous, input_fn).run()
+        if options[what].startswith("monitor / rerun other"):
+            return session_factory(workspace, _choose_experiments(launched, input_fn), input_fn).run()
 
     idx = choose("Choose your job scheduler:", list(SCHEDULERS), allow_exit=False, input_fn=input_fn)
     scheduler = SCHEDULERS[idx]
