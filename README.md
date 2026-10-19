@@ -40,6 +40,8 @@ mitochondrial reference genome from NCBI.
 
 - [Tutorial](docs/tutorial.md) · [Benchmark](benchmark/README.md) · [Testing on a cluster](docs/HPC_TESTING.md)
 - [Installation](#installation)
+  - [In a fresh conda environment (recommended)](#in-a-fresh-conda-environment-recommended)
+  - [Without git](#without-git) · [Without conda](#without-conda)
 - [Getting started](#getting-started)
   - [Before you start](#before-you-start)
   - [A. Interactive mode (guided)](#a-interactive-mode-guided)
@@ -61,29 +63,118 @@ mitochondrial reference genome from NCBI.
 
 ## Installation
 
-Install mitopiper on the cluster's **login node**, where jobs are submitted from:
+Install mitopiper on the cluster's **login node**, where jobs are submitted from. The recommended way
+is a fresh conda environment that holds mitopiper and every tool of the bundled workflows. The jobs
+run with the environment they are submitted from, so they find the same tools.
+
+### In a fresh conda environment (recommended)
+
+**1. conda or mamba.** If `conda --version` or `mamba --version` works (or your cluster offers
+`module load miniconda`/`anaconda`), skip this step. Otherwise install Miniforge. Put it on
+project storage rather than in a small home quota:
+
+```bash
+wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
+bash Miniforge3-Linux-x86_64.sh -b -p /path/to/miniforge3
+source /path/to/miniforge3/etc/profile.d/conda.sh     # once per shell (or run `conda init bash` once)
+```
+
+**2. The code.**
 
 ```bash
 git clone https://github.com/Noam-St/mitopiper.git
 cd mitopiper
-pip install .                  # inside an active conda/virtual environment
+```
+
+(Without git: see [below](#without-git); unpack the archive and `cd mitopiper`.)
+
+**3. The environment, with the tools of the bundled workflows.** `envs/mitopiper-tools.yml` pins bwa,
+samtools, Trim Galore, cutadapt, FastQC, MultiQC, STAR, subread and htseq. Continuous integration
+resolves it and runs the tutorial with it on every commit.
+
+```bash
+mamba env create -f envs/mitopiper-tools.yml                          # `conda env create` works too, slower
+conda activate mitopiper-tools
+# shared lab environment on project storage instead of ~/.conda:
+#   mamba env create -f envs/mitopiper-tools.yml -p /path/to/envs/mitopiper-tools
+#   conda activate /path/to/envs/mitopiper-tools
+```
+
+**4. mitopiper itself**, into that environment:
+
+```bash
+pip install .
 mitopiper --version
 ```
 
-**Without git** (e.g. when cloning fails on the cluster): every commit to `master` that passes the
+**5. Numt Parser** (only for the `mt-variants-numtparser` preset). It is not packaged, so clone it and
+link its script into the environment, where every shell and job with the environment active finds it.
+CI tests commit `fa4b2dd`:
+
+```bash
+git clone https://github.com/adeflamingh/NuMt_parser /path/to/NuMt_parser
+git -C /path/to/NuMt_parser checkout fa4b2dd
+chmod +x /path/to/NuMt_parser/bin/numt_parser.py
+ln -s /path/to/NuMt_parser/bin/numt_parser.py "$CONDA_PREFIX/bin/"
+```
+
+**6. Optional: the SRA Toolkit.** Downloads that fail every attempt then fall back to the SRA (see
+[When downloads fail](#when-downloads-fail)): `mamba install -c conda-forge -c bioconda sra-tools`.
+
+**7. Clusters whose login files set `PERL5LIB`** (e.g. a site-wide ActivePerl): FastQC and Trim Galore then
+fail with `Perl API version v5.24.0 of Cwd.c does not match v5.xx`. Add two small activation scripts, so that
+every `conda activate` of the environment (bash or csh) unsets it:
+
+```bash
+mkdir -p "$CONDA_PREFIX/etc/conda/activate.d"
+echo 'unset PERL5LIB PERL5OPT' > "$CONDA_PREFIX/etc/conda/activate.d/mitopiper-perl.sh"
+echo 'unsetenv PERL5LIB; unsetenv PERL5OPT' > "$CONDA_PREFIX/etc/conda/activate.d/mitopiper-perl.csh"
+conda deactivate && conda activate mitopiper-tools      # or the -p path
+```
+
+**8. Check.** `mitopiper check` (after a build) or the check job of every build lists any tool the jobs
+call that cannot be found. A quick look by hand:
+
+```bash
+for t in mitopiper bwa samtools trim_galore cutadapt fastqc multiqc numt_parser.py; do
+    printf '%-15s %s\n' "$t" "$(command -v $t || echo MISSING)"; done
+```
+
+**Jobs.** Submit (`bash master.sh`, or the interactive mode) from a shell where the environment is
+active. SLURM and LSF pass that environment to the jobs, and mitopiper asks Grid Engine for it (`-V`).
+If your cluster's login files reset `PATH` in the jobs (as a csh queue shell with a `~/.cshrc` can),
+activate the environment in every job with the general setting `free_form`, in the job shell's syntax:
+
+```bash
+mitopiper presets set PRESET free_form='source /path/to/miniforge3/etc/profile.d/conda.sh; conda activate mitopiper-tools'
+# csh/tcsh jobs: 'source /path/to/miniforge3/etc/profile.d/conda.csh; conda activate mitopiper-tools'
+```
+
+To update later: `git pull` (or a new archive), then `pip install .` again in the active environment.
+When `envs/mitopiper-tools.yml` changes: `mamba env update -f envs/mitopiper-tools.yml`.
+
+### Without git
+
+When cloning fails on the cluster: every commit to `master` that passes the
 tests is packaged as one file, `mitopiper-latest.tar.gz`, on the
 [`latest` release](https://github.com/Noam-St/mitopiper/releases/tag/latest).
 
 ```bash
 wget https://github.com/Noam-St/mitopiper/releases/download/latest/mitopiper-latest.tar.gz
-tar xzf mitopiper-latest.tar.gz && cd mitopiper && pip install .
+tar xzf mitopiper-latest.tar.gz && cd mitopiper
 ```
+
+Then continue with step 3 of [the conda installation](#in-a-fresh-conda-environment-recommended)
+(or just `pip install .` when the tools are installed already).
 
 While the repository is private, that link needs a login. Download the file from the release page in your
 browser and copy it to the cluster (`scp`), or use `gh release download latest -R Noam-St/mitopiper`.
 The release title names the commit it was built from, and `mitopiper-latest.tar.gz.md5` lets you check the download.
 
-Without a conda/virtual environment, use `pip install --user .` instead. That puts the `mitopiper`
+### Without conda
+
+If the tools are already available (e.g. through `module load`), mitopiper alone needs only Python ≥ 3.9:
+`pip install .` in a virtual environment, or `pip install --user .` without one. That puts the `mitopiper`
 command in `~/.local/bin`. If `mitopiper` is then "command not found", add that folder to your
 `PATH` once:
 
@@ -940,6 +1031,7 @@ policy.
 | --- | --- |
 | `mitopiper: command not found` right after installing | pip put it in a folder that isn't on your `PATH`, usually `~/.local/bin` after `pip install --user`. Add that folder to `PATH` (see [Installation](#installation)), install inside a conda environment, or use `python -m mitopiper`. |
 | The tool check reports missing tools | Add `module load …` / `conda activate …` to `free_form` (interactive option 2 does it for you), or install them with `mitopiper check --auto-fix`. If the tools exist only on the compute nodes, build with `--no-check`: the check job verifies them there. |
+| FastQC or Trim Galore: `Perl API version v5.24.0 of Cwd.c does not match …` | Your login files set `PERL5LIB` to another Perl. Unset it in the environment's activation scripts ([Installation, step 7](#in-a-fresh-conda-environment-recommended)), or in the jobs with `free_form` (`unset PERL5LIB PERL5OPT`; csh: `unsetenv PERL5LIB`). |
 | `Submitting failed … sbatch: command not found` | Run mitopiper on the cluster's login node, and pick the scheduler your cluster uses. |
 | Jobs fail with `command not found` | Add `module load …` / `conda activate …` to the `free_form` general setting (or use `mitopiper rerun --free-form …` once). |
 | Downloads fail on compute nodes | Many clusters have no internet on compute nodes. Set the general setting `download_mode` to `login` or `queue` (see [Where downloads run](#where-downloads-run)) and build again. |

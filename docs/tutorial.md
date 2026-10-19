@@ -38,6 +38,9 @@ Without git, download `mitopiper-latest.tar.gz` from the repository's `latest` r
 commit; see the README's Installation section), then run `tar xzf mitopiper-latest.tar.gz && cd mitopiper` and
 continue from `mamba env create`.
 
+For a lasting installation on a cluster (a shared environment on project storage, Numt Parser linked into
+it, a site-wide `PERL5LIB`), follow the README's [Installation](../README.md#in-a-fresh-conda-environment-recommended).
+
 `mitopiper --version` should print the version. The environment file was tested with
 micromamba 2.9, and it resolved to bwa 0.7.18, samtools 1.21, Trim Galore 0.6.10 and cutadapt 4.9.
 
