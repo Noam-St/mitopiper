@@ -13,7 +13,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import __version__, jobscript, toolcheck
+from . import __version__, build_info, jobscript, toolcheck
 from .builder import (
     step_threads,
     build_experiment_steps,
@@ -435,7 +435,7 @@ def write_manifest(exp_dir: Path, workflow: Workflow, options: BuildOptions, sam
     """Record everything needed to reproduce this build."""
     now = _dt.datetime.now().astimezone()
     manifest = {
-        "mitopiper_version": __version__,
+        "mitopiper_version": f"{__version__} ({build_info()})",
         "created": now.isoformat(timespec="seconds"),
         "command_line": sys.argv,
         "python": platform.python_version(),

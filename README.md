@@ -104,8 +104,14 @@ conda activate mitopiper-tools
 
 ```bash
 pip install .
-mitopiper --version
+mitopiper --version          # e.g. mitopiper 2.0.0.dev0 (commit d0245d6, 2026-10-19)
 ```
+
+**Which version do I have?** `mitopiper --version` names the commit the installed copy was made from. The
+[`latest` release](https://github.com/Noam-St/mitopiper/releases/tag/latest) is titled
+`Latest master (<commit>)`; the same commit in both means you have the newest one. (Installed from a git clone
+rather than the archive, it reports `commit unknown`; there, `git log -1` shows the commit.) If an old copy
+answers, `python -c "import mitopiper; print(mitopiper.__file__)"` shows which installation Python is using.
 
 **5. Numt Parser** (only for the `mt-variants-numtparser` preset). It is not packaged, so clone it and
 link its script into the environment, where every shell and job with the environment active finds it.

@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from . import __version__
+from . import __version__, build_info
 from .build import BuildError, BuildOptions, build_experiment, resolve_metadata_source, write_master
 from .cleanup import cleanup
 from .config import ConfigError, Workspace
@@ -39,7 +39,7 @@ def _csv_list(value: Optional[str]) -> Optional[list]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mitopiper", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__} ({build_info()})")
     parser.add_argument("-w", "--workdir", default=".", help="workspace directory (default: current directory)")
     parser.add_argument("-v", "--verbose", action="count", default=0, help="more logging (-vv for debug)")
     sub = parser.add_subparsers(dest="command")

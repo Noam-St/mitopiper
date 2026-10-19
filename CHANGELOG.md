@@ -5,6 +5,7 @@
 The single `maker.py` script was refactored into the installable `mitopiper` package.
 
 ### Added
+- `mitopiper --version` names the commit the copy was made from (stamped into `mitopiper-latest.tar.gz` by `git archive`, or read from git in a checkout), so an installation can be compared with the title of the `latest` release. The experiment manifest records it too.
 - The interactive start menu can monitor and rerun any experiment launched in the workspace, not only the last build: *monitor / rerun other experiments* lists them newest first, with launch time and job count, and follows the chosen ones together.
 - A folder of FASTQ files (`.fastq`, `.fq`, `.fastq.gz`, `.fq.gz`) can be the input of a build: `mitopiper build FOLDER --org "Homo sapiens"` or, interactively, its path at the prompt after the scheduler. The files are linked (default), copied or moved (`--fastq-mode`) into the workspace's `fastq/<folder name>/`, and their table is written to `metadata/<folder name>.tsv` (as `make-tsv` does). `--browse` / `b` choose the folder in a file browser (Tk, else zenity or kdialog; needs a display, e.g. `ssh -X`).
 - Reference downloads (`refs fetch-genome`, done by the reference job) use `mitopiper download` too: the same attempts (`download_tries`), protocols and growing waits, with the MD5 taken from NCBI's `md5checksums.txt` (`--md5-url`), so a wrong checksum is retried instead of failing the job. Before, they were a single `wget` and `md5sum -c`.

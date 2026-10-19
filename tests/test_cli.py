@@ -140,3 +140,19 @@ def test_presets_reset_restores_the_bundled_version(tmp_path, capsys):
     kept = [p for p in ws.list_presets() if p.startswith("mt-variants-numtparser_old_")]
     assert kept and ws.load_workflow(kept[0]).general("qsub_queue") == "old.q"
     assert run(ws, "presets", "reset", "no-such-preset") == 1
+
+
+def test_version_names_the_commit(monkeypatch, capsys):
+    import pytest
+
+    import mitopiper
+    from mitopiper import _commit
+
+    monkeypatch.setattr(_commit, "COMMIT", "abc1234")              # as git archive stamps the release
+    monkeypatch.setattr(_commit, "DATE", "2026-10-19")
+    with pytest.raises(SystemExit):
+        main(["--version"])
+    assert capsys.readouterr().out.strip() == f"mitopiper {mitopiper.__version__} (commit abc1234, 2026-10-19)"
+    monkeypatch.setattr(_commit, "COMMIT", "$Format:%h$")          # not stamped and no git: says so
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: (_ for _ in ()).throw(OSError("no git")))
+    assert mitopiper.build_info().startswith("commit unknown")
