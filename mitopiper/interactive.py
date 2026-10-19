@@ -20,6 +20,7 @@ from .build import (
 from .builder import PLACEHOLDERS, output_exts, selected_steps
 from .config import INTERNAL_PRESETS, ConfigError, Workflow, Workspace
 from .ena import is_accession
+from .local_samples import FASTQ_MODES, browse_for_folder, import_fastq_folder, is_fastq_folder, scan_fastq_folder
 from .metadata import MetadataError, load_samples, parse_selection
 from .references import ReferenceRegistry, RefError, ReferenceSet, fetch_mt_reference
 from .schedulers import SCHEDULERS
@@ -395,6 +396,31 @@ def interactive_resolver(workspace: Workspace, input_fn: Callable = input):
     return resolve
 
 
+def _import_folder(workspace: Workspace, folder: Path, input_fn: Callable) -> Optional[Path]:
+    """Ask how to bring a folder of FASTQ files into the workspace; returns its metadata table."""
+    runs = scan_fastq_folder(folder)
+    print(table([[sample, run, len(files), "PE" if len(files) == 2 else "SE"] for run, sample, files in runs],
+                ["Sample", "Run", "Files", "Layout"]))
+    print(f"{len(runs)} run(s) in {folder}")
+    organism = ""
+    while not organism:
+        organism = ask("Organism of these samples (scientific name, e.g. Homo sapiens)", input_fn=input_fn)
+    strategy = ask("Library strategy (e.g. RNA-Seq, WGS; may stay empty)", "", input_fn)
+    labels = [f"link them (the files stay in {folder})", f"copy them into {workspace.root / 'fastq'}",
+              f"move them into {workspace.root / 'fastq'} (they leave {folder})"]
+    mode = FASTQ_MODES[choose("How should the files be brought into the workspace?", labels, allow_exit=False,
+                              input_fn=input_fn)]
+    if mode == "move" and not yes_no(f"Really move the files out of {folder}?", False, input_fn):
+        return None
+    try:
+        metadata = import_fastq_folder(workspace.root, folder, organism, mode, library_strategy=strategy)
+    except (OSError, ValueError) as exc:
+        print(f"Error: {exc}\n")
+        return None
+    print(f"Sample table: {metadata}\n")
+    return metadata
+
+
 def _choose_metadata(workspace: Workspace, input_fn: Callable) -> list:
     experiments = list_experiments(workspace)
     print("\nPrevious experiments:")
@@ -402,14 +428,32 @@ def _choose_metadata(workspace: Workspace, input_fn: Callable) -> list:
         print(f"  {i}\t{name}")
     print(
         "\nEnter the path of a new ENA/SRA metadata file, a project/study accession to fetch from ENA\n"
-        "(e.g. PRJEB12345, PRJNA67890, SRP012345), or the number(s) of previous experiments\n"
+        "(e.g. PRJEB12345, PRJNA67890, SRP012345), the path of a folder of FASTQ files (.fastq, .fq,\n"
+        ".fastq.gz, .fq.gz; 'b' opens a file browser), or the number(s) of previous experiments\n"
         "(e.g. '2', '0-3', '0 2 5' or 'all')."
     )
     while True:
         answer = input_fn("> ").strip().strip('"')
         if not answer:
             continue
+        if answer.lower() in ("b", "browse"):
+            try:
+                answer = browse_for_folder()
+            except RuntimeError as exc:
+                print(f"{exc}. Type the folder's path instead.\n")
+                continue
+            if not answer:
+                continue
+            print(answer)
         candidate = Path(answer).expanduser()
+        if candidate.is_dir():
+            if not is_fastq_folder(candidate):
+                print(f"{candidate} has no FASTQ files (.fastq, .fq, .fastq.gz, .fq.gz).\n")
+                continue
+            metadata = _import_folder(workspace, candidate, input_fn)
+            if metadata:
+                return [metadata]
+            continue
         for path in (candidate, candidate.with_suffix(".tsv"), candidate.with_suffix(".txt"), candidate.with_suffix(".csv")):
             if path.is_file():
                 return [path]

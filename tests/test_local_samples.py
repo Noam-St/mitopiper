@@ -23,3 +23,69 @@ def test_ignore_and_force_paired(tmp_path):
     touch(other, "a.fastq", "b.fastq")
     (run,) = scan_fastq_folder(other, force_paired=True)
     assert len(run[2]) == 2
+
+
+# ------------------------------------------------------------- FASTQ folders brought into a workspace
+import pytest  # noqa: E402
+
+from mitopiper import local_samples  # noqa: E402
+from mitopiper.cli import main  # noqa: E402
+from mitopiper.metadata import load_samples  # noqa: E402
+
+
+def fastq_folder(tmp_path):
+    folder = tmp_path / "hypoxia_samples"
+    folder.mkdir()
+    for name in ("ctrl_R1.fastq.gz", "ctrl_R2.fastq.gz", "hyp.fq.gz"):
+        (folder / name).write_text(f"@{name}\nACGT\n+\nIIII\n")
+    return folder
+
+
+@pytest.mark.parametrize("mode", ["link", "copy", "move"])
+def test_a_fastq_folder_is_brought_into_the_workspace(tmp_path, mode):
+    folder, ws = fastq_folder(tmp_path), tmp_path / "ws"
+    table = local_samples.import_fastq_folder(ws, folder, "Homo sapiens", mode, library_strategy="RNA-Seq")
+    placed = ws / "fastq" / "hypoxia_samples"
+    assert table == ws / "metadata" / "hypoxia_samples.tsv"
+    assert sorted(p.name for p in placed.iterdir()) == ["ctrl_R1.fastq.gz", "ctrl_R2.fastq.gz", "hyp.fq.gz"]
+    assert (placed / "hyp.fq.gz").is_symlink() == (mode == "link")
+    assert (folder / "hyp.fq.gz").exists() == (mode != "move")
+    samples = load_samples(table)
+    assert [(s.accession, s.paired, s.organism) for s in samples] == [("ctrl", True, "Homo_sapiens"), ("hyp", False, "Homo_sapiens")]
+    assert all(f.startswith(str(placed)) for s in samples for r in s.runs for f in r.files)
+    # importing again is harmless; a different file of the same name is not overwritten
+    assert local_samples.import_fastq_folder(ws, folder, "Homo sapiens", mode) == table
+    if mode != "move":
+        other = tmp_path / "other" / "hypoxia_samples"
+        other.mkdir(parents=True)
+        (other / "hyp.fq.gz").write_text("@x\nA\n+\nI\n")
+        with pytest.raises(FileExistsError, match="exists already"):
+            local_samples.import_fastq_folder(ws, other, "Homo sapiens", mode)
+
+
+def test_build_takes_a_fastq_folder(tmp_path, capsys, caplog):
+    folder, ws = fastq_folder(tmp_path), tmp_path / "ws"
+    assert main(["-w", str(ws), "build", "--no-check", str(folder), "-s", "local", "--steps", "wget"]) == 2
+    assert "give their organism with --org" in caplog.text
+    (tmp_path / "mt.fa").write_text(">MT\nACGT\n")
+    assert main(["-w", str(ws), "refs", "add", "Homo sapiens", "--fasta", str(tmp_path / "mt.fa")]) == 0
+    assert main(["-w", str(ws), "build", "--no-check", str(folder), "--org", "Homo sapiens", "-s", "local",
+                 "--steps", "wget"]) == 0
+    assert "files linked into" in capsys.readouterr().out
+    script = (ws / "output" / "hypoxia_samples" / "scripts" / "s_ctrl_0.sh").read_text()
+    assert f'ln -sf "{ws.resolve()}/fastq/hypoxia_samples/ctrl_R1.fastq.gz"' in script
+
+
+def test_build_can_browse_for_the_folder(tmp_path, monkeypatch, capsys):
+    folder, ws = fastq_folder(tmp_path), tmp_path / "ws"
+    monkeypatch.setattr(local_samples, "browse_for_folder", lambda *a, **k: str(folder))
+    main(["-w", str(ws), "build", "--no-check", "--browse", "--org", "Homo sapiens", "-s", "local", "--dry-run"])
+    assert f"FASTQ folder: {folder}" in capsys.readouterr().out and (ws / "metadata" / "hypoxia_samples.tsv").is_file()
+
+
+def test_no_file_browser_without_a_display(monkeypatch):
+    monkeypatch.setattr(local_samples.sys, "platform", "linux")
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    with pytest.raises(RuntimeError, match="ssh -X"):
+        local_samples.browse_for_folder()

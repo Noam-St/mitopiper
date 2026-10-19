@@ -53,3 +53,31 @@ def test_key_fixer():
     assert key_fixer("q") == "-q"
     assert key_fixer("out dir") == "--out-dir"
     assert key_fixer("--x") == "--x"
+
+
+def test_interactive_session_from_a_fastq_folder(tmp_path, monkeypatch):
+    folder = tmp_path / "hypoxia_samples"
+    folder.mkdir()
+    for name in ("ctrl_1.fastq.gz", "ctrl_2.fastq.gz"):
+        (folder / name).write_text("@r\nACGT\n+\nIIII\n")
+    import mitopiper.interactive as inter
+    monkeypatch.setattr(inter, "browse_for_folder", lambda *a, **k: str(folder))
+    ws = Workspace(tmp_path / "ws")
+    answers = [
+        "1",                                # scheduler: slurm
+        "b",                                # browse: the stand-in browser returns the folder
+        "Homo sapiens",                     # organism
+        "RNA-Seq",                          # library strategy
+        "0",                                # link the files
+        "0",                                # preset: default
+        "n",                                # don't change configuration
+        "all",                              # samples
+        "",                                 # keep all steps
+        "1", "/refs/hs.fa", "", "/refs/hs.gtf", "",   # Homo_sapiens: enter paths
+        "3",                                # tools missing here: launch anyway
+        "n",                                # don't launch now
+    ]
+    assert run_interactive(ws, scripted(answers)) == 0
+    assert (ws.root / "fastq" / "hypoxia_samples" / "ctrl_1.fastq.gz").is_symlink()
+    assert sorted(p.name for p in (ws.output_dir / "hypoxia_samples" / "scripts").iterdir()) == [
+        "check_hypoxia_samples.sh", "s_ctrl_0.sh"]

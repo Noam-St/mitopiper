@@ -48,7 +48,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init", help="create the workspace skeleton and default preset")
 
     b = sub.add_parser("build", help="generate job scripts non-interactively")
-    b.add_argument("metadata", nargs="+", help="metadata file(s), previous experiment name(s), or ENA/SRA accession(s) such as PRJEB12345")
+    b.add_argument("metadata", nargs="*", help="metadata file(s), previous experiment name(s), ENA/SRA accession(s) such as "
+                                               "PRJEB12345, or folder(s) of FASTQ files (with --org)")
     b.add_argument("-p", "--preset", default="default", help="workflow preset to use (default: %(default)s)")
     b.add_argument("-s", "--scheduler", default="sge", help=f"one of {', '.join(SCHEDULERS)} (default: %(default)s)")
     b.add_argument("--samples", default="all", help="rows to process: all, 3, 1-4 (inclusive), '0 2 5' (default: all)")
@@ -56,6 +57,13 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--steps", help="comma separated steps to run instead of the preset's run order")
     b.add_argument("--skip", help="comma separated steps to leave out")
     b.add_argument("--reference", help="name of the reference set to use for every organism that has it")
+    fq = b.add_argument_group("FASTQ folders", "a folder of .fastq/.fq(.gz) files is brought into the workspace "
+                              "(fastq/<folder name>/) and described in metadata/<folder name>.tsv, as make-tsv does")
+    fq.add_argument("--org", help="scientific name of the organism of the FASTQ files, e.g. 'Homo sapiens'")
+    fq.add_argument("--lib-strat", default="", help="library strategy of the FASTQ files, e.g. RNA-Seq")
+    fq.add_argument("--fastq-mode", choices=("link", "copy", "move"), default="link",
+                    help="link the files (default; they stay where they are), copy them, or move them into the workspace")
+    fq.add_argument("--browse", action="store_true", help="choose the FASTQ folder in a file browser (needs a display)")
     b.add_argument("--fetch-mt", action="store_true", help="download missing references (mtDNA) from NCBI instead of failing")
     b.add_argument("--dry-run", action="store_true", help="resolve everything and write plan.json, but no scripts")
     b.add_argument("--refresh", action="store_true", help="download the metadata of an accession again even if it was used before")
@@ -180,9 +188,41 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _metadata_items(ws: Workspace, args) -> list:
+    """The metadata tables of the build: files, experiments and accessions as given, FASTQ folders
+    (and the one chosen with --browse) imported into the workspace first."""
+    from .local_samples import browse_for_folder, import_fastq_folder
+
+    items = list(args.metadata)
+    if args.browse:
+        try:
+            folder = browse_for_folder()
+        except RuntimeError as exc:
+            raise BuildError(f"{exc}; give the folder's path instead") from None
+        if not folder:
+            raise BuildError("no folder was chosen")
+        print(f"FASTQ folder: {folder}")
+        items.append(folder)
+    if not items:
+        raise BuildError("give a metadata file, an experiment, an accession or a FASTQ folder (or --browse)")
+    tables = []
+    for item in items:
+        if Path(item).expanduser().is_dir():
+            if not args.org:
+                raise BuildError(f"{item} is a folder of FASTQ files: give their organism with --org 'Genus species'")
+            tables.append(import_fastq_folder(ws.root, item, args.org, args.fastq_mode, library_strategy=args.lib_strat))
+            done = {"link": "linked", "copy": "copied", "move": "moved"}[args.fastq_mode]
+            print(f"{item}: files {done} into {ws.root / 'fastq' / Path(item).expanduser().resolve().name}, "
+                  f"sample table {tables[-1]}")
+        else:
+            tables.append(resolve_metadata_source(ws, item, refresh=args.refresh))
+    return tables
+
+
 def cmd_build(ws: Workspace, args) -> int:
     ws.initialise()
-    if args.name and len(args.metadata) > 1:
+    items = _metadata_items(ws, args)
+    if args.name and len(items) > 1:
         raise BuildError("--name can only be used with a single metadata file")
     workflow = ws.activate(args.preset)
     scheduler = normalise(args.scheduler)
@@ -203,8 +243,7 @@ def cmd_build(ws: Workspace, args) -> int:
         return ref
 
     results = []
-    for item in args.metadata:
-        metadata = resolve_metadata_source(ws, item, refresh=args.refresh)
+    for metadata in items:
         ignore_paired = str(workflow.general("ignore_paired_end", False)).lower() in ("true", "1", "yes")
         samples = load_samples(metadata, ignore_paired=ignore_paired)
         selection = parse_selection(args.samples, len(samples))

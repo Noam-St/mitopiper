@@ -453,11 +453,25 @@ used are `Run`, `BioSample`/`Sample`, `ScientificName`/`Organism`, `LibraryLayou
 (`ftp.sra.ebi.ac.uk/vol1/fastq/…`).
 
 ### Local FASTQ files
+Give `build` a folder of `.fastq`, `.fq`, `.fastq.gz` or `.fq.gz` files instead of a table or an accession:
+```bash
+mitopiper build /data/hypoxia_samples --org "Homo sapiens" --lib-strat RNA-Seq -s sge
+mitopiper build --browse --org "Homo sapiens" -s sge        # choose the folder in a file browser
+```
+The files are brought into the workspace, under `fastq/<folder name>/`, and described in
+`metadata/<folder name>.tsv`. With `--fastq-mode`, they can be linked (the default; the files stay where
+they are), copied, or moved (they leave the folder). In the interactive mode, the prompt after the
+scheduler takes the folder's path too, or `b` for the file browser, and then asks for the organism,
+the library strategy and the mode. The file browser needs a display: on a cluster, connect with `ssh -X`
+(or `-Y`); it uses Tk, or zenity / kdialog where Tk is missing. Importing the same folder again changes
+nothing.
+
+`make-tsv` writes the table without touching the files, for a table you want to edit first:
 ```bash
 mitopiper make-tsv /data/run42 --org "Homo sapiens" -l RNA-Seq     # writes run42.tsv
 mitopiper build run42.tsv --skip fastqc_pre
 ```
-The `wget` step symlinks `.gz` files (or gzips plain FASTQ) into the experiment instead of
+Either way, samples are found by their mate suffix (`_1`/`_2`, `_R1`/`_R2`), and the `wget` step symlinks `.gz` files (or gzips plain FASTQ) into the experiment instead of
 downloading them. Illumina lane files of the same sample (`S1_L001_R1_001…`, `S1_L002_R1_001…`)
 are grouped and concatenated.
 
