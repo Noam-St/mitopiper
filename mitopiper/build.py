@@ -18,6 +18,7 @@ from .builder import (
     step_threads,
     build_experiment_steps,
     build_sample_job,
+    deletes_reads,
     job_threads,
     StepCommands,
     selected_steps,
@@ -277,6 +278,9 @@ def build_experiment(
                 skipped.append(organism)
                 del refs[organism]
     samples = [s for s in samples if s.organism in refs]
+    if not workflow.flag("keep_reads", True) and not deletes_reads(workflow):
+        log.warning("keep_reads is false, but the reads are kept: they are deleted only by jobs that stop at the first "
+                    "failing command (fail_fast on, environment bash, zsh or ksh)")
 
     exp = str(exp_dir)
     scheduler = options.scheduler

@@ -5,6 +5,8 @@
 The single `maker.py` script was refactored into the installable `mitopiper` package.
 
 ### Added
+- VCF output: every mt preset writes `vcf/<sample>.vcf` (`mitopiper mt vcf`, after `annotate`), with the sample's heteroplasmies and variants. `GT` gives the called alleles (`1` homoplasmic, `0/1` or `1/2` heteroplasmic), `DP`/`AD`/`AF` the depth, reads per allele and heteroplasmy level, `INFO` the call type and genes; a heteroplasmy whose minor allele a NUMT carries is marked `NUMT_MINOR` and filtered as `numt` (unless its major allele is a variant). Deletion alleles are left out. Workspaces made before get the step with `mitopiper presets reset NAME`.
+- General setting `keep_reads` (default true): when false, a sample job deletes its downloaded and trimmed FASTQ files after its last step succeeded (32 GB for two RNA-seq samples on BGU). Local FASTQ files are only linked or copied into the experiment, so the originals stay. Only jobs that stop at any failing command (bash/zsh/ksh with `fail_fast`) delete reads; otherwise the build warns and keeps them.
 - Every job script unsets `PERL5LIB` and `PERL5OPT` (general setting `unset_perl_env`, on by default): jobs inherit the submitting shell's environment, and a site Perl's `PERL5LIB` from the login files made FastQC fail in a job submitted from such a shell (BGU round 5).
 - The build refuses an "mtDNA" reference larger than 50 MB (a whole genome registered as `--fasta`, e.g. hg38, which was rotated and indexed for 1.6 h on BGU) and warns above 1 MB.
 - The release notes of `latest` give the archive's MD5 and the commit `mitopiper --version` must name.

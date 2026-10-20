@@ -412,9 +412,94 @@ def collect_heteroplasmy(tables: list, outdir) -> dict:
     return per_sample
 
 
+# --------------------------------------------------------------------- VCF
+VCF_HEADER = [
+    "##fileformat=VCFv4.2",
+    '##INFO=<ID=TYPE,Number=1,Type=String,Description="heteroplasmy (minor allele called), variant (non-reference '
+    'major allele) or both">',
+    '##INFO=<ID=GENE,Number=.,Type=String,Description="Genes covering the position">',
+    '##INFO=<ID=NUMT_MINOR,Number=0,Type=Flag,Description="The minor allele is a non-reference base a NUMT carries '
+    '(numt_minor): NUMT reads can explain the heteroplasmy">',
+    '##FILTER=<ID=numt,Description="A heteroplasmy at a reference major allele whose minor allele a NUMT carries '
+    '(NUMT_MINOR); a non-reference major allele at the same position is not filtered">',
+    '##FORMAT=<ID=GT,Number=1,Type=String,Description="Called alleles: one for a homoplasmic variant, the major and '
+    'the minor allele for a heteroplasmy (unordered; . for a deletion)">',
+    '##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Reads with A, C, G, T or a deletion at the position '
+    '(allele_depth)">',
+    '##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Reads of the reference and of each alternative allele">',
+    '##FORMAT=<ID=AF,Number=A,Type=Float,Description="Fraction of DP of each alternative allele (heteroplasmy level)">',
+]
+
+
+def fasta_lengths(path) -> dict:
+    """``{name: length}`` of the sequences of a FASTA file."""
+    from .mtdna import read_fasta              # mtdna imports this module
+    with open(path, encoding="utf-8") as handle:
+        return {(header.split() or [""])[0]: len(sequence) for header, sequence in read_fasta(handle)}
+
+
+def _info_value(text: str) -> str:
+    """``text`` without the characters a VCF INFO value cannot hold (whitespace , ; =)."""
+    return re.sub(r"[\s,;=]+", "_", text)
+
+
+def write_vcf(table, output, reference=None, sample: str = "") -> dict:
+    """The heteroplasmic and non-reference major alleles of an annotated table (``mitopiper mt annotate``) as a
+    single-sample VCF. Deletion alleles are left out (a VCF deletion needs the base before it, which the table's
+    per-position counts do not tie to a read; a deletion called with a base shows as a missing allele, ``1/.``).
+    Returns counts of records, of those filtered as NUMT alleles and of deletion alleles left out."""
+    lengths = fasta_lengths(reference) if reference else {}
+    records, seen = [], {}
+    summary = {"records": 0, "numt": 0, "deletions_left_out": 0}
+    with open(table, encoding="utf-8") as handle:
+        for row in csv.DictReader(handle, delimiter="\t"):
+            sample = sample or row["sample"]
+            seen[row["chrom"]] = max(seen.get(row["chrom"], 0), int(row["position"]))
+            het, alt = row["heteroplasmic"] == "yes", row["alt_major"] == "yes"
+            if not (het or alt):
+                continue
+            ref = row["ref"] if row["ref"] in ("A", "C", "G", "T") else "N"     # e.g. rCRS 3107
+            called = [row["major"]] + ([row["minor"]] if het else [])
+            bases = [a for a in called if a != "del"]
+            summary["deletions_left_out"] += len(called) - len(bases)
+            alts = [a for a in bases if a != ref]
+            if not alts:
+                continue
+            alleles = [ref] + alts
+            depth = int(row["allele_depth"])
+            # a deletion called with a base is a missing allele: "1/." is a heteroplasmy, not a homoplasmic "1"
+            gt = "/".join([str(i) for i in sorted(alleles.index(a) for a in bases)] + ["."] * (len(called) - len(bases)))
+            sample_fields = [gt, str(depth), ",".join(row[a] for a in alleles),
+                             ",".join(f"{int(row[a]) / depth:.4g}" for a in alts)]
+            numt_minor = het and row.get("numt_minor") == "yes"
+            # a non-reference major allele is a variant NUMT reads cannot explain: the record stays PASS
+            numt = numt_minor and not alt
+            summary["numt"] += numt
+            info = "TYPE=" + ("both" if het and alt else "heteroplasmy" if het else "variant")
+            genes = [_info_value(g) for g in row.get("gene", "").split(";") if g.strip()]
+            if genes:
+                info += ";GENE=" + ",".join(genes)
+            if numt_minor:
+                info += ";NUMT_MINOR"
+            records.append([row["chrom"], row["position"], ".", ref, ",".join(alts), ".",
+                            "numt" if numt else "PASS", info, "GT:DP:AD:AF", ":".join(sample_fields)])
+    header = list(VCF_HEADER)
+    if reference:
+        header.insert(1, f"##reference=file://{Path(reference).resolve()}")
+    header += [f"##contig=<ID={chrom},length={lengths.get(chrom, length)}>" for chrom, length in seen.items()]
+    header.append("\t".join(["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT",
+                             sample or Path(table).name.split(".")[0]]))
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    with open(output, "w", encoding="utf-8") as out:
+        out.write("\n".join(header) + "\n")
+        out.writelines("\t".join(r) + "\n" for r in records)
+    summary["records"] = len(records)
+    return summary
+
+
 # ---------------------------------------------------------------------- CLI
 def add_parsers(msub) -> None:
-    """``mitopiper mt annotate`` and ``mitopiper mt heteroplasmy``."""
+    """``mitopiper mt annotate``, ``mitopiper mt vcf`` and ``mitopiper mt heteroplasmy``."""
     ann = msub.add_parser("annotate", help="per-position coverage, read starts/ends, alleles and genes of a pileup")
     ann.add_argument("pileup")
     ann.add_argument("output", help="output table (TSV)")
@@ -430,10 +515,16 @@ def add_parsers(msub) -> None:
     ann.add_argument("--min-strand", type=int, default=2, help="heteroplasmy: minimum minor allele reads on each strand")
     ann.add_argument("--numt-alleles", default="", help="table of mitopiper mt numt-alleles: flag positions whose minor "
                                                          "allele is a non-reference base a NUMT carries (numt_minor)")
+    vcf = msub.add_parser("vcf", help="heteroplasmies and variants of an annotated table as VCF")
+    vcf.add_argument("table", help="table of mitopiper mt annotate")
+    vcf.add_argument("output", help="output VCF")
+    vcf.add_argument("--reference", default="", help="the mtDNA FASTA the reads were aligned to (contig lengths, "
+                                                     "##reference)")
+    vcf.add_argument("--sample", default="", help="sample name (default: the table's)")
     het = msub.add_parser("heteroplasmy", help="collect heteroplasmic sites of annotated tables of many samples")
     het.add_argument("tables", nargs="+")
     het.add_argument("-o", "--outdir", required=True)
-    for parser in (ann, het):
+    for parser in (ann, vcf, het):
         parser.set_defaults(mt_run=run)
 
 
@@ -445,6 +536,10 @@ def run(args) -> int:
         numt = f" ({summary['numt_minor']} with a minor allele that a NUMT carries)" if args.numt_alleles else ""
         print(f"[mitopiper] {summary['positions']} positions, {summary['heteroplasmic']} heteroplasmic{numt}, "
               f"{summary['alt_major']} with a non-reference major allele", file=sys.stderr)
+    elif args.action == "vcf":
+        summary = write_vcf(args.table, args.output, args.reference or None, args.sample)
+        left = f"; {summary['deletions_left_out']} deletion allele(s) left out" if summary["deletions_left_out"] else ""
+        print(f"[mitopiper] {summary['records']} VCF records ({summary['numt']} filtered as numt){left}", file=sys.stderr)
     else:
         tables = [t for t in args.tables if Path(t).exists()]
         for missing in sorted(set(args.tables) - set(tables)):

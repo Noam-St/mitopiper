@@ -237,6 +237,23 @@ def temporary_outputs(workflow: Workflow, exp_dir: str, sample_name: str) -> lis
     return paths
 
 
+def deletes_reads(workflow: Workflow) -> bool:
+    """Whether sample jobs delete their reads at the end (``keep_reads`` false). Only where a failing command,
+    one inside a pipeline included, stops the job: with ``fail_fast`` in bash, zsh or ksh (``set -eo pipefail``).
+    csh and sh only see the last command of a pipeline, so a failed ``bwa mem | samtools sort`` would go on to
+    the deletion; reads cost a download to get back."""
+    from .jobscript import PIPEFAIL_SHELLS, fail_fast, shell_of
+    return not workflow.flag("keep_reads", True) and fail_fast(workflow) and shell_of(workflow) in PIPEFAIL_SHELLS
+
+
+def read_files(workflow: Workflow, base: dict, name: str, paired: bool) -> list:
+    """The downloaded and the trimmed FASTQ files of sample ``name`` (those of the active steps)."""
+    active = workflow.active_order()
+    raw = [_join(base["fastq_pre_dir"], f"{name}_{m}.fastq.gz") for m in (1, 2)] if paired else [base["fastq_pre"]]
+    trimmed = [base["fastq1"], base["fastq2"]] if paired else [base["fastq"]]
+    return (raw if "wget" in active else []) + (trimmed if "trim" in active else [])
+
+
 def output_paths(conf: dict, exp_dir: str, sample_name: str) -> dict:
     outdir = _join(exp_dir, conf.get("outdir", ""))
     return {name: _join(outdir, f"{sample_name}{ext}") for name, ext in output_exts(conf).items()}
@@ -434,11 +451,15 @@ def build_sample_job(
         binds = [workspace_of(exp_dir)] + [posixpath.dirname(p) for p in (ref.refpath, ref.nuc_refpath, ref.numt_refpath, ref.gtfpath) if p]
         job.steps.append(StepCommands(step, conf.get("description", ""), in_environment(conf, lines, workflow, binds)))
     temporary = temporary_outputs(workflow, exp_dir, sample.name)
+    if deletes_reads(workflow):
+        # The reads take most of the disk of an experiment (BGU: 32 GB for two RNA-seq samples). Local FASTQ files
+        # (an imported folder) are linked into the experiment, or gzipped copies made: only those go.
+        temporary += read_files(workflow, base, name, paired)
     if temporary and job.steps and workflow.flag("fail_fast", True):
         # Reached only when every step before succeeded (fail_fast stops the job at the first error), so a
         # failed job keeps what a rerun needs. Without fail_fast nothing is deleted.
-        job.steps.append(StepCommands(TEMPORARY_STEP, "Delete intermediate files of steps marked temporary",
-                                      [f'rm -f "{path}"' for path in temporary]))
+        job.steps.append(StepCommands(TEMPORARY_STEP, "Delete intermediate files (steps marked temporary; the reads "
+                                      "with keep_reads false)", [f'rm -f "{path}"' for path in temporary]))
     return job
 
 

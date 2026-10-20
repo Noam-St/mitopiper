@@ -722,7 +722,8 @@ of the active steps), `qsub_memory`, `walltime` (SLURM `--time`, SGE `-l h_rt`, 
 `parallel_env` (SGE `-pe`), `environment` (shell), and `free_form` (lines added to every job, e.g.
 `module load samtools`). Also: `fail_fast` (`set -eo pipefail`), `verify_md5`, `download_delay`,
 `download_tries`, `sra_fallback` (see [When downloads fail](#when-downloads-fail)), `unset_perl_env` (unset
-`PERL5LIB`/`PERL5OPT` in every job; set them again in `free_form` if a step of yours needs them),
+`PERL5LIB`/`PERL5OPT` in every job; set them again in `free_form` if a step of yours needs them), `keep_reads`
+(see [Intermediate files](#intermediate-files)),
 `ignore_paired_end`, and `tool_check` (write and run the `check_<exp>.sh` job).
 
 ### Where downloads run
@@ -779,6 +780,15 @@ presets mark the alignments that only the next steps read: the SAM and unsorted 
 whole-genome BAM (`mt-variants-numt`), and the SAMs and full mtDNA alignment given to Numt Parser
 (`mt-variants-numtparser`). The sorted, filtered and rotated BAMs, pileups and tables are kept. Remove the
 flag from a step to keep its files.
+
+The reads usually take most of the space (32 GB of FASTQ for two RNA-seq samples on the BGU cluster). With the
+general setting `keep_reads` false, the downloaded (`fastq/`) and trimmed (`post_trim/`) FASTQ files of a sample
+are deleted at the same point, after its last step succeeded. Local FASTQ files (an imported folder or local
+paths in the table) are only linked into the experiment, or copied there gzipped: those links and copies are
+deleted, never the originals. A later rerun of a step that reads them must start at `wget`
+(`mitopiper rerun --from wget`), which fetches them again. Only jobs that stop at the first failing command delete
+reads (`fail_fast` on and `environment` bash, zsh or ksh): csh and sh do not see a failure inside a pipeline such as
+`bwa mem | samtools sort`, so there the reads are kept, with a warning at build time.
 
 ### Resources per step
 A step can declare what it needs with the optional fields `threads`, `memory` and `walltime` in
@@ -931,7 +941,7 @@ tells you if it is missing. Numt Parser was designed for DNA reads: it rejects s
 (CIGAR `N`), which bwa does not produce. It keeps the alignments in memory, so the step asks for 16G.
 Please cite Numt Parser when you use this preset.
 
-**Per-position tables and heteroplasmy.** Every mt preset ends with two steps.
+**Per-position tables, heteroplasmy and VCF.** Every mt preset ends with three steps.
 
 * `annotate` runs once per sample: `mitopiper mt annotate`, a port of the original `process_pileup.py`. It writes
   `annotated/<sample>.annotated.tsv`, with one row per mtDNA position:
@@ -965,6 +975,20 @@ Please cite Numt Parser when you use this preset.
   heteroplasmies called without NUMT filtering that the Numt Parser preset removes, and 6 of the 50 it keeps
   (among them 5746 A in three samples and 12007 A, at 3–6%).
 
+* `vcf` runs once per sample: `mitopiper mt vcf` writes the sample's heteroplasmic and `alt_major` positions to
+  `vcf/<sample>.vcf` (VCF 4.2, for bcftools, annotation tools or HaploGrep), with the reference and its contig
+  lengths in the header. `GT` lists the called alleles: `1` for a homoplasmic variant, the major and the minor allele
+  for a heteroplasmy (`0/1`, or `1/2` when neither is the reference); `DP` is the depth, `AD` the reads of each allele
+  and `AF` the frequency of each alternative allele (the heteroplasmy level). `INFO/TYPE` is `heteroplasmy`,
+  `variant` or `both`, and `INFO/GENE` the genes. A heteroplasmy with `numt_minor` = `yes` is marked `NUMT_MINOR`
+  and gets the FILTER `numt` instead of `PASS`, unless its major allele is itself a variant (NUMT reads cannot
+  explain that). Deletion alleles are left out (the per-position counts do not give the base a VCF deletion
+  starts at); a deletion called with a base shows as `1/.`.
+
+* `heteroplasmy` runs once per experiment, after all samples: `mitopiper mt heteroplasmy` gathers the calls of every
+  sample into `heteroplasmy/heteroplasmy_sites.tsv` (one row per heteroplasmy or variant) and
+  `heteroplasmy/heteroplasmy_matrix.tsv` (the minor allele frequency of every called position in every sample).
+
 Compared with `process_pileup.py`, pandas and Biopython are no longer needed, and three things are corrected:
 * read starts are counted even when the mapping-quality character after `^` is a letter or digit;
 * a read end (`$`) is counted for the read *before* it;
@@ -987,6 +1011,7 @@ mitopiper mt fragments mt.fa fragments.fa --size 100 --step 20
 mitopiper mt numt-regions fragments_vs_genome.sam mt.fa regions.txt   # then: samtools faidx genome.fa -r regions.txt
 mitopiper mt numt-reads sample.numt_parser.tsv keep.txt --keep cymt --pairs all
 mitopiper mt annotate sample.circular.pileup sample.annotated.tsv --annotation mt.gff3 --min-depth 50 --min-af 0.03
+mitopiper mt vcf sample.annotated.tsv sample.vcf --reference mt.fa
 mitopiper mt heteroplasmy annotated/*.annotated.tsv -o heteroplasmy/
 ```
 

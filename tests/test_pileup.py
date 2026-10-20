@@ -143,3 +143,47 @@ def test_annotate_flags_heteroplasmy_whose_minor_allele_a_numt_carries(tmp_path)
     # without the table the columns are not written
     pileup.annotate_pileup(tmp_path / "s.pileup", tmp_path / "plain.tsv")
     assert "numt_minor" not in rows(tmp_path / "plain.tsv")[0]
+
+
+def test_vcf_of_heteroplasmies_and_variants(tmp_path, capsys):
+    het = "." * 40 + "," * 40 + "G" * 5 + "g" * 5          # A>G 10%
+    variant = "T" * 40 + "t" * 40 + "." * 5 + "," * 5      # homoplasmic-ish T with 10% reference A: both calls
+    two_alts = "T" * 40 + "t" * 40 + "G" * 5 + "g" * 5     # major T, minor G
+    del_minor = "T" * 45 + "t" * 45 + "*" * 5 + "#" * 5    # major T, minor deletion
+    write_pileup(tmp_path / "s.pileup", [(1, "A", 90, het), (2, "A", 60, "." * 30 + "," * 30), (3, "A", 90, variant),
+                                         (4, "A", 90, two_alts), (5, "A", 100, del_minor), (6, "A", 90, het)])
+    (tmp_path / "alleles.tsv").write_text("chrom\tposition\tref\tnumt_bases\nchrM\t4\tA\tG\nchrM\t6\tA\tG\n")
+    pileup.annotate_pileup(tmp_path / "s.pileup", tmp_path / "s.tsv", sample="S1", min_af=0.05,
+                           annotation=None, numt_alleles=tmp_path / "alleles.tsv")
+    (tmp_path / "mt.fa").write_text(">chrM\n" + "A" * 50 + "\n" + "A" * 30 + "\n")
+    assert main(["mt", "vcf", str(tmp_path / "s.tsv"), str(tmp_path / "s.vcf"), "--reference", str(tmp_path / "mt.fa")]) == 0
+    assert "5 VCF records (1 filtered as numt); 1 deletion allele(s) left out" in capsys.readouterr().err
+    lines = (tmp_path / "s.vcf").read_text().splitlines()
+    assert lines[0] == "##fileformat=VCFv4.2" and "##contig=<ID=chrM,length=80>" in lines
+    assert lines[1] == f"##reference=file://{(tmp_path / 'mt.fa').resolve()}"
+    assert lines[len([x for x in lines if x.startswith("##")])].split("\t")[-1] == "S1"
+    records = [x.split("\t") for x in lines if not x.startswith("#")]
+    assert [(r[1], r[3], r[4], r[6], r[7], r[9]) for r in records] == [
+        ("1", "A", "G", "PASS", "TYPE=heteroplasmy", "0/1:90:80,10:0.1111"),
+        ("3", "A", "T", "PASS", "TYPE=both", "0/1:90:10,80:0.8889"),
+        # NUMTs explain the minor G, not the major T: the variant is not filtered
+        ("4", "A", "T,G", "PASS", "TYPE=both;NUMT_MINOR", "1/2:90:0,80,10:0.8889,0.1111"),
+        ("5", "A", "T", "PASS", "TYPE=both", "1/.:100:0,90:0.9"),
+        ("6", "A", "G", "numt", "TYPE=heteroplasmy;NUMT_MINOR", "0/1:90:80,10:0.1111")]
+
+
+def test_vcf_of_a_homoplasmic_variant_names_its_genes(tmp_path):
+    table = tmp_path / "t.tsv"
+    columns = ["sample", "chrom", "position", "ref", "A", "C", "G", "T", "del", "allele_depth", "major", "minor",
+               "heteroplasmic", "alt_major", "gene"]
+    columns.insert(5, "N")
+    values = ["S", "MT", "7", "A", "0", "0", "0", "100", "0", "0", "100", "G", "", "no", "yes", "COX1;16S rRNA"]
+    n_ref = ["S", "MT", "8", "N", "60", "0", "0", "40", "0", "0", "100", "A", "G", "yes", "no", ""]
+    table.write_text("\n".join("\t".join(r) for r in (columns, values, n_ref)) + "\n")
+    assert pileup.write_vcf(table, tmp_path / "t.vcf") == {"records": 2, "numt": 0, "deletions_left_out": 0}
+    text = (tmp_path / "t.vcf").read_text()
+    assert "##contig=<ID=MT,length=8>" in text and "##reference" not in text
+    records = [x.split("\t") for x in text.splitlines() if not x.startswith("#")]
+    assert records == [
+        ["MT", "7", ".", "A", "G", ".", "PASS", "TYPE=variant;GENE=COX1,16S_rRNA", "GT:DP:AD:AF", "1:100:0,100:1"],
+        ["MT", "8", ".", "N", "A,G", ".", "PASS", "TYPE=heteroplasmy", "GT:DP:AD:AF", "1/2:100:0,60,40:0.6,0.4"]]

@@ -260,6 +260,9 @@ DEFAULT_MAIN = {
                            "waits this long before its 2nd attempt, then twice as long each time (up to 10 min)"],
     "unset_perl_env": [True, "unset PERL5LIB and PERL5OPT in every job (a site-wide Perl breaks FastQC and Trim Galore "
                              "of conda; set them again in free_form if a step of yours needs them)"],
+    "keep_reads": [True, "keep the downloaded and trimmed FASTQ files of a sample; false: delete them when its job "
+                         "succeeded (local FASTQ files, e.g. an imported folder, are only linked into the experiment: "
+                         "the links are removed, never the files)"],
     "download_tries": [10, "attempts per FASTQ file (a wrong checksum counts as a failed attempt) before the SRA "
                            "fallback"],
     "sra_fallback": [True, "when every attempt failed, take the run from the SRA with fasterq-dump (SRA Toolkit)"],
@@ -341,6 +344,8 @@ def _annotation_steps() -> tuple:
     pipeline = {
         "annotate": _step("mitopiper mt annotate", "Coverage, read starts/ends, alleles and genes per position",
                           "annotated", "", "", ".annotated.tsv", "key output_circular-merge output settings"),
+        "vcf": _step("mitopiper mt vcf", "Heteroplasmies and variants of the sample as VCF", "vcf", "", "", ".vcf",
+                     "key output_annotate output settings"),
         "heteroplasmy": _step("mitopiper mt heteroplasmy", "Heteroplasmic sites of all samples", "heteroplasmy",
                               "", "", "", "key -o dir_heteroplasmy outputs_annotate", scope="experiment"),
     }
@@ -351,9 +356,10 @@ def _annotation_steps() -> tuple:
             ("min depth", "Heteroplasmy: minimum depth (A/C/G/T/deletions)", "--min-depth", 50),
             ("min af", "Heteroplasmy: minimum minor allele frequency", "--min-af", 0.03),
             ("min strand", "Heteroplasmy: minimum minor allele reads on each strand", "--min-strand", 2)),
+        "vcf": _params(("reference", "mtDNA FASTA the reads were aligned to", "--reference", "_fasta")),
         "heteroplasmy": {},
     }
-    return pipeline, settings, ["annotate", "heteroplasmy"]
+    return pipeline, settings, ["annotate", "vcf", "heteroplasmy"]
 
 
 def _mt_variants(numt: str = "") -> dict:

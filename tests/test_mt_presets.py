@@ -104,7 +104,7 @@ def test_mt_variants_merges_the_rotated_alignment_around_the_origin(cluster):
     ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath=str(tmp_path / "mt.fa")))
     (tmp_path / "mt.gff3").write_text("NC_012920.1\tRefSeq\tgene\t2\t4\t.\t+\t.\tgene=TRNF\n")
     ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath=str(tmp_path / "mt.fa"), gtfpath=str(tmp_path / "mt.gff3")))
-    steps = ["wget", "bwa-align", "view", "sort", "index", "mpileup"] + CIRCULAR + ["annotate", "heteroplasmy"]
+    steps = ["wget", "bwa-align", "view", "sort", "index", "mpileup"] + CIRCULAR + ["annotate", "vcf", "heteroplasmy"]
     assert run_preset(ws, tmp_path, "mt-variants", steps) == 0
     states = {j.name: j.state for j in mon.collect(ws, ["exp"], mon.ErrorScanner(), lambda s, i: None)}
     assert all(s == mon.DONE for s in states.values()), states
@@ -117,6 +117,8 @@ def test_mt_variants_merges_the_rotated_alignment_around_the_origin(cluster):
     assert [(r["position"], r["coverage"], r["gene"]) for r in table[:5]] == [
         ("1", "2", ""), ("2", "2", "TRNF"), ("3", "2", "TRNF"), ("4", "1", "TRNF"), ("5", "1", "")]
     assert (ws.output_dir / "exp" / "heteroplasmy" / "heteroplasmy_matrix.tsv").exists()
+    vcf = (ws.output_dir / "exp" / "vcf" / "a_0_HS.vcf").read_text()
+    assert "##contig=<ID=NC_012920.1,length=30>" in vcf and f"##reference=file://{tmp_path / 'mt.fa'}" in vcf
     script = (ws.output_dir / "exp" / "scripts" / "e_exp.sh").read_text()
     assert f"mitopiper mt heteroplasmy -o {ws.output_dir}/exp/heteroplasmy {ws.output_dir}/exp/annotated/a_0_HS.annotated.tsv" in script
 
@@ -376,7 +378,31 @@ def test_temporary_outputs_are_removed_last_and_only_on_success():
     late = build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa"), steps=["annotate"])
     assert late.steps[-1].lines == last.lines
     preset.set_general("fail_fast", False)               # the job goes on after errors: delete nothing
-    assert build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa")).steps[-1].step == "annotate"
+    assert build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa")).steps[-1].step == "vcf"
+
+
+def test_keep_reads_false_deletes_the_downloaded_and_trimmed_reads_last():
+    from mitopiper.builder import build_sample_job
+    from mitopiper.config import Workflow
+    from mitopiper.defaults import bundled_presets
+    from mitopiper.metadata import Run, Sample
+
+    preset = Workflow(**bundled_presets()["mt-variants"])
+    sample = Sample(index=0, accession="S", organism="Homo_sapiens", runs=[Run("R", ["/f_1.fq.gz", "/f_2.fq.gz"])])
+    kept = build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa")).steps[-1].lines
+    assert not any("fastq" in line or ".fq.gz" in line for line in kept)          # kept by default
+    preset.set_general("keep_reads", False)
+    job = build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa"))
+    assert job.steps[-1].lines == kept + [
+        'rm -f "/w/output/E/fastq/S_0_HS_1.fastq.gz"', 'rm -f "/w/output/E/fastq/S_0_HS_2.fastq.gz"',
+        'rm -f "/w/output/E/post_trim/S_0_HS_1_val_1.fq.gz"', 'rm -f "/w/output/E/post_trim/S_0_HS_2_val_2.fq.gz"']
+    # the local files themselves are only linked from fastq/: the links go, never the files
+    wget = next(s for s in job.steps if s.step == "wget")
+    assert any(line.startswith('ln -sf "/f_1.fq.gz"') for line in wget.lines)
+    assert not any("/f_1.fq.gz" in line for line in job.steps[-1].lines)
+    # csh and sh do not stop at a failure inside a pipeline: the reads are kept there
+    preset.set_general("environment", "tcsh")
+    assert build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa")).steps[-1].lines == kept
 
 
 def test_existing_numt_reference_is_reused_without_the_genome_index(tmp_path):
