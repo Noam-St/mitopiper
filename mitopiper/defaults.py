@@ -258,6 +258,8 @@ DEFAULT_MAIN = {
     "verify_md5": [True, "verify downloaded FASTQ files against ENA's fastq_md5 column when available"],
     "download_delay": [30, "seconds to wait between consecutive downloads (be kind to ENA); a failed download "
                            "waits this long before its 2nd attempt, then twice as long each time (up to 10 min)"],
+    "unset_perl_env": [True, "unset PERL5LIB and PERL5OPT in every job (a site-wide Perl breaks FastQC and Trim Galore "
+                             "of conda; set them again in free_form if a step of yours needs them)"],
     "download_tries": [10, "attempts per FASTQ file (a wrong checksum counts as a failed attempt) before the SRA "
                            "fallback"],
     "sra_fallback": [True, "when every attempt failed, take the run from the SRA with fasterq-dump (SRA Toolkit)"],

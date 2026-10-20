@@ -86,6 +86,7 @@ jobs:
           git archive --format=tar.gz --prefix=mitopiper/ -o mitopiper-latest.tar.gz HEAD
           md5sum mitopiper-latest.tar.gz > mitopiper-latest.tar.gz.md5
           echo "SHORT=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          echo "MD5=$(cut -d' ' -f1 mitopiper-latest.tar.gz.md5)" >> "$GITHUB_ENV"
           tar tzf mitopiper-latest.tar.gz | grep -q '^mitopiper/pyproject.toml$'
       - name: Publish on the "latest" release
         env:
@@ -93,7 +94,9 @@ jobs:
         run: |
           git tag -f latest
           git push -f origin refs/tags/latest
-          notes="mitopiper master at ${SHORT}, $(date -u '+%Y-%m-%d %H:%M UTC'). Rebuilt automatically after every commit to master that passes the tests. Unpack with: tar xzf mitopiper-latest.tar.gz"
+          notes="mitopiper master at ${SHORT}, $(date -u '+%Y-%m-%d %H:%M UTC'). Rebuilt automatically after every commit to master that passes the tests. Unpack with: tar xzf mitopiper-latest.tar.gz
+
+          Check the download: md5sum mitopiper-latest.tar.gz must print ${MD5} (also in mitopiper-latest.tar.gz.md5). Once installed, mitopiper --version must name commit ${SHORT}."
           if gh release view latest > /dev/null 2>&1; then
             gh release edit latest --title "Latest master (${SHORT})" --notes "$notes" --prerelease
           else

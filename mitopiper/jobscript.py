@@ -141,6 +141,10 @@ def preamble(workflow: Workflow, exp_dir: str, job_name: str, depends_on: Option
         text += _CSH_TRACKING.replace("@STATUSDIR@", status_dir).replace("@STATUS@", base)
         if depends_on:
             text += _CSH_GUARD.replace("@STATUSDIR@", status_dir).replace("@DEPS@", " ".join(depends_on))
+    if workflow.flag("unset_perl_env", True):
+        # A site Perl's PERL5LIB (set by ~/.cshrc or a module) breaks the Perl tools of conda environments
+        # (FastQC, Trim Galore: "Perl API version v5.24.0 of Cwd.c does not match"), and jobs inherit it.
+        text += "unsetenv PERL5LIB\nunsetenv PERL5OPT\n" if fam == "csh" else "unset PERL5LIB PERL5OPT\n"
     free_form = str(workflow.general("free_form", "") or "")
     if free_form:
         text += free_form if free_form.endswith("\n") else free_form + "\n"

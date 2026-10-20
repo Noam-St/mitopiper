@@ -394,3 +394,23 @@ def test_existing_numt_reference_is_reused_without_the_genome_index(tmp_path):
     Path(numts).write_text(">chr1:1-10\nACGT\n")
     after = " ".join(derived_commands(ref, "Homo_sapiens", str(ws.root), wf))
     assert "combine-references" not in after and "numt-regions" not in after and "numts.fa" in after
+
+
+def test_a_whole_genome_as_the_mtdna_reference_is_refused(cluster, caplog):
+    """BGU round 5: hg38 registered as the mtDNA was rotated and indexed for 1.6 h."""
+    import logging
+
+    ws, tmp_path = cluster
+    big = tmp_path / "hg38.fa"
+    with open(big, "wb") as handle:                      # sparse: 60 MB on paper only
+        handle.write(b">chr1\nACGT\n")
+        handle.truncate(60_000_000)
+    ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath=str(big)))
+    assert run_preset(ws, tmp_path, "mt-variants", ["wget", "bwa-align"]) != 0
+    assert "a whole genome rather than an mtDNA" in caplog.text and "refs fetch-mt Homo_sapiens" in caplog.text
+    caplog.clear()
+    with open(big, "r+b") as handle:                     # 2 MB: large for an mtDNA, but possible (plants)
+        handle.truncate(2_000_000)
+    with caplog.at_level(logging.WARNING):
+        assert run_preset(ws, tmp_path, "mt-variants", ["wget"]) == 0
+    assert "larger than most mitochondrial genomes" in caplog.text

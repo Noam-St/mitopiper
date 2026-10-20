@@ -215,6 +215,10 @@ def link_reference(fasta, output, log: TextIO = sys.stderr) -> list:
             target.unlink()
         target.symlink_to(Path(f"{fasta}{ext}").resolve())
     print(f"[mitopiper] {output} links to {fasta}" + (f" (with {', '.join(linked)})" if linked else ""), file=log)
+    if ".sa" not in linked:
+        print(f"[mitopiper] {fasta} has no complete bwa index: it is built here, next to {output}, for this workspace "
+              f"only. To share one index between workspaces, run 'bwa index {fasta}' once (or move these index "
+              "files next to it); later workspaces then link it instead of indexing again.", file=log)
     return linked
 
 

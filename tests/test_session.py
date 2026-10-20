@@ -170,7 +170,8 @@ def test_start_menu_can_monitor_earlier_experiments(tmp_path, capsys):
     for i, name in enumerate(["old_exp", "new_exp"]):
         exp = ws.experiment_dir(name)
         exp.mkdir(parents=True)
-        (exp / "jobs.tsv").write_text("job_id\tjob_name\tscript\tsubmitted\tkind\n1\ts_a_0\t/s/a.sh\t1\tsample\n")
+        (exp / "jobs.tsv").write_text("job_id\tjob_name\tscript\tsubmitted\tkind\n1\ts_a_0\t/s/a.sh\t1\tsample\n"
+                                      "2\ts_a_0\t/s/a.sh\t2\tsample\n")                 # a rerun: still 1 job
         os.utime(exp / "jobs.tsv", (1_000_000 + i, 1_000_000 + i))
     (ws.root / "last_build.json").write_text(json.dumps({"experiments": ["new_exp"]}))
     opened = []
@@ -189,3 +190,5 @@ def test_start_menu_can_monitor_earlier_experiments(tmp_path, capsys):
     assert opened == [["new_exp", "old_exp"], ["old_exp"]]
     out = capsys.readouterr().out
     assert "monitor / rerun other experiments (2 launched in this workspace)" in out and "Last launched" in out
+    import re
+    assert re.search(r"new_exp\s*\|[^|]*\|\s*1\s*\|", out)                    # 2 submissions of one job: 1 job

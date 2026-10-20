@@ -1,3 +1,7 @@
+import shutil
+
+import pytest
+
 from mitopiper.builder import (
     build_experiment_steps,
     build_sample_job,
@@ -228,3 +232,24 @@ def test_a_corrupt_download_is_downloaded_once_more(tmp_path):
         out = subprocess.run([shell, str(script)], env=env, capture_output=True, text=True)
         assert out.returncode == 0 and "checksum failed" in out.stderr and "download 2/10" in out.stderr, (shell, out.stderr)
         assert (tmp_path / "exp" / "fastq" / "SAMN1_0_DR.fastq.gz").read_bytes() == good
+
+
+@pytest.mark.parametrize("shell", ["bash"] + [s for s in ("tcsh",) if shutil.which(s)])
+def test_jobs_unset_a_site_perl5lib(tmp_path, shell):
+    """BGU round 5: a job submitted from a shell with the login PERL5LIB failed in FastQC."""
+    import os
+    import subprocess
+
+    from mitopiper import jobscript
+
+    for flag, expected in ((True, "unset"), (False, "/site/perl")):
+        wf = Workflow.default()
+        wf.set_general("environment", shell)
+        wf.set_general("unset_perl_env", flag)
+        script = tmp_path / f"job_{flag}"
+        check = ('if ( $?PERL5LIB ) then\necho "$PERL5LIB"\nelse\necho unset\nendif\n' if shell == "tcsh"
+                 else 'echo "${PERL5LIB-unset}"\n')
+        script.write_text(jobscript.preamble(wf, str(tmp_path), "j") + check)
+        out = subprocess.run([shell, str(script)], capture_output=True, text=True,
+                             env=dict(os.environ, PERL5LIB="/site/perl", PERL5OPT="-Mx"))
+        assert out.stdout.strip().splitlines()[-1] == expected, (shell, flag, out.stdout, out.stderr)

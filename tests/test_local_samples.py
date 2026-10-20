@@ -80,7 +80,10 @@ def test_build_can_browse_for_the_folder(tmp_path, monkeypatch, capsys):
     folder, ws = fastq_folder(tmp_path), tmp_path / "ws"
     monkeypatch.setattr(local_samples, "browse_for_folder", lambda *a, **k: str(folder))
     main(["-w", str(ws), "build", "--no-check", "--browse", "--org", "Homo sapiens", "-s", "local", "--dry-run"])
-    assert f"FASTQ folder: {folder}" in capsys.readouterr().out and (ws / "metadata" / "hypoxia_samples.tsv").is_file()
+    out = capsys.readouterr().out
+    assert f"FASTQ folder: {folder}" in out and "files would be linked into" in out
+    # a dry run places nothing and writes no table in the workspace (BGU round 5)
+    assert not (ws / "fastq").exists() and not (ws / "metadata" / "hypoxia_samples.tsv").exists()
 
 
 def test_no_file_browser_without_a_display(monkeypatch):

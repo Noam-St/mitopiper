@@ -410,8 +410,20 @@ class GenomeInfo:
         return {"fasta": f"{base}/{self.ftp_name}_genomic.fna.gz", "gff": f"{base}/{self.ftp_name}_genomic.gff.gz",
                 "md5": f"{base}/md5checksums.txt"}
 
+    #: Below this, a genome is quick to download and index: no warning.
+    SMALL = 500_000_000
+
+    @property
+    def size_text(self) -> str:
+        if not self.total_length:
+            return "an unknown size"
+        return f"{self.size_gb:.1f} Gb" if self.total_length >= 1e9 else f"{self.total_length / 1e6:.1f} Mb"
+
     def warning(self) -> str:
-        size = f"{self.size_gb:.1f} Gb" if self.total_length else "an unknown size"
+        if 0 < self.total_length < self.SMALL:
+            return (f"{self.organism or 'This'} genome {self.accession} ({self.assembly_name}) has {self.size_text} of "
+                    "sequence: a small download. The reference job downloads, checks and indexes it before the samples.")
+        size = self.size_text
         return (
             f"NOT RECOMMENDED: {self.organism or 'this'} genome {self.accession} ({self.assembly_name}) has {size} of sequence.\n"
             f"  * the download is large (roughly {max(self.size_gb * 0.3, 0.1):.1f} GB compressed, more once unpacked) "

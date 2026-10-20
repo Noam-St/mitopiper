@@ -41,6 +41,23 @@ def test_migration_adds_new_keys(workspace):
     assert wf.general("account") == ""
 
 
+def test_opening_an_older_workspace_writes_nothing(workspace, tmp_path):
+    """BGU round 5: the interactive menu added new settings to every preset file of a read-only workspace."""
+    from mitopiper.config import Workspace
+
+    legacy = workspace.preset_dir("old")
+    legacy.mkdir()
+    for name, data in {"pipeline": {"trim": {"key": "trim_galore", "switch": True}}, "settings": {}, "run_order": ["trim"],
+                       "general_settings": {"qsub_queue": ["x.q", ""]}}.items():
+        (legacy / f"{name}.json").write_text(json.dumps(data))
+    before = {p: p.read_bytes() for p in workspace.config_dir.rglob("*.json")}
+    reopened = Workspace(workspace.root)
+    reopened.initialise()
+    wf = reopened.load_workflow("old")
+    assert wf.general("download_tries") == 10 and wf.general("qsub_queue") == "x.q"   # new defaults, in memory
+    assert {p: p.read_bytes() for p in workspace.config_dir.rglob("*.json")} == before   # files untouched
+
+
 def test_legacy_refpaths_are_migrated(workspace):
     path = workspace.preset_dir("global") / "refpaths.json"
     path.write_text(json.dumps({"Homo_sapiens": {"refpath": "/a.fa", "gtfpath": "/a.gtf", "nuc_refpath": "", "chrominfopath": ""}}))

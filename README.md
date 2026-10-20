@@ -109,7 +109,8 @@ mitopiper --version          # e.g. mitopiper 2.0.0.dev0 (commit d0245d6, 2026-1
 
 **Which version do I have?** `mitopiper --version` names the commit the installed copy was made from. The
 [`latest` release](https://github.com/Noam-St/mitopiper/releases/tag/latest) is titled
-`Latest master (<commit>)`; the same commit in both means you have the newest one. (Installed from a git clone
+`Latest master (<commit>)`, and its notes give the MD5 of the archive (`md5sum mitopiper-latest.tar.gz`) and the
+commit `--version` must name; the same commit in both means you have the newest one. (Installed from a git clone
 rather than the archive, it reports `commit unknown`; there, `git log -1` shows the commit.) If an old copy
 answers, `python -c "import mitopiper; print(mitopiper.__file__)"` shows which installation Python is using.
 
@@ -128,8 +129,9 @@ ln -s /path/to/NuMt_parser/bin/numt_parser.py "$CONDA_PREFIX/bin/"
 [When downloads fail](#when-downloads-fail)): `mamba install -c conda-forge -c bioconda sra-tools`.
 
 **7. Clusters whose login files set `PERL5LIB`** (e.g. a site-wide ActivePerl): FastQC and Trim Galore then
-fail with `Perl API version v5.24.0 of Cwd.c does not match v5.xx`. Add two small activation scripts, so that
-every `conda activate` of the environment (bash or csh) unsets it:
+fail with `Perl API version v5.24.0 of Cwd.c does not match v5.xx`. The jobs are safe: every job script unsets
+`PERL5LIB` and `PERL5OPT` (the general setting `unset_perl_env`, on by default). For your own shell, add two small
+activation scripts, so that every `conda activate` of the environment (bash or csh) unsets them too:
 
 ```bash
 mkdir -p "$CONDA_PREFIX/etc/conda/activate.d"
@@ -719,7 +721,8 @@ for the reasoning behind the mt presets.
 of the active steps), `qsub_memory`, `walltime` (SLURM `--time`, SGE `-l h_rt`, LSF `-W`), `account` (SLURM `--account` / LSF `-P`),
 `parallel_env` (SGE `-pe`), `environment` (shell), and `free_form` (lines added to every job, e.g.
 `module load samtools`). Also: `fail_fast` (`set -eo pipefail`), `verify_md5`, `download_delay`,
-`download_tries`, `sra_fallback` (see [When downloads fail](#when-downloads-fail)),
+`download_tries`, `sra_fallback` (see [When downloads fail](#when-downloads-fail)), `unset_perl_env` (unset
+`PERL5LIB`/`PERL5OPT` in every job; set them again in `free_form` if a step of yours needs them),
 `ignore_paired_end`, and `tool_check` (write and run the `check_<exp>.sh` job).
 
 ### Where downloads run
@@ -1040,7 +1043,7 @@ policy.
 | --- | --- |
 | `mitopiper: command not found` right after installing | pip put it in a folder that isn't on your `PATH`, usually `~/.local/bin` after `pip install --user`. Add that folder to `PATH` (see [Installation](#installation)), install inside a conda environment, or use `python -m mitopiper`. |
 | The tool check reports missing tools | Add `module load …` / `conda activate …` to `free_form` (interactive option 2 does it for you), or install them with `mitopiper check --auto-fix`. If the tools exist only on the compute nodes, build with `--no-check`: the check job verifies them there. |
-| FastQC or Trim Galore: `Perl API version v5.24.0 of Cwd.c does not match …` | Your login files set `PERL5LIB` to another Perl. Unset it in the environment's activation scripts ([Installation, step 7](#in-a-fresh-conda-environment-recommended)), or in the jobs with `free_form` (`unset PERL5LIB PERL5OPT`; csh: `unsetenv PERL5LIB`). |
+| FastQC or Trim Galore: `Perl API version v5.24.0 of Cwd.c does not match …` | Your login files set `PERL5LIB` to another Perl. Jobs unset it themselves (`unset_perl_env`, on by default; jobs written by an older mitopiper do not: rebuild or rerun them). In your own shell, unset it in the environment's activation scripts ([Installation, step 7](#in-a-fresh-conda-environment-recommended)). |
 | `Submitting failed … sbatch: command not found` | Run mitopiper on the cluster's login node, and pick the scheduler your cluster uses. |
 | Jobs fail with `command not found` | Add `module load …` / `conda activate …` to the `free_form` general setting (or use `mitopiper rerun --free-form …` once). |
 | Downloads fail on compute nodes | Many clusters have no internet on compute nodes. Set the general setting `download_mode` to `login` or `queue` (see [Where downloads run](#where-downloads-run)) and build again. |

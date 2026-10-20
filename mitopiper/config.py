@@ -122,6 +122,34 @@ def truthy(value: Any) -> bool:
 _truthy = truthy  # kept for callers of the old private name
 
 
+def migrated(name: str, data):
+    """``(data, changed)``: one config file of a preset with the keys added to the built-in defaults since it
+    was written (existing values are never changed), every step with a ``scope``, every setting with an
+    ``order``. Works on a copy."""
+    data = copy.deepcopy(data)
+    changed = False
+    defaults = default_config()
+    if name in ("pipeline", "settings", "general_settings") and isinstance(data, dict):
+        for key, value in defaults[name].items():
+            if key not in data:
+                data[key] = copy.deepcopy(value)
+                changed = True
+    if name == "pipeline" and isinstance(data, dict):
+        for step in data.values():
+            if isinstance(step, dict) and "scope" not in step:
+                step["scope"] = "sample"
+                changed = True
+    if name == "settings" and isinstance(data, dict):
+        for params in data.values():
+            if not isinstance(params, dict):
+                continue
+            for i, param in enumerate(params.values()):
+                if isinstance(param, dict) and "order" not in param:
+                    param["order"] = i
+                    changed = True
+    return data, changed
+
+
 @dataclass
 class Workspace:
     """Access to the configuration and output directories of a workspace."""
@@ -187,16 +215,15 @@ class Workspace:
         for name, config in bundled_presets().items():
             if not (self.preset_dir(name) / "pipeline.json").exists():
                 self.write_workflow(Workflow(**config), name)
-        self.migrate_presets()
         self._initialised = True
 
     def migrate_presets(self) -> None:
-        """Merge keys that were added to the built-in defaults into every preset.
+        """Write into every preset the keys that were added to the built-in defaults (:func:`migrated`).
 
-        Existing values are never overwritten.  Settings parameters without an
-        ``order`` field are given one based on their current position.
+        Presets are migrated in memory whenever they are loaded, so this is never needed to run them; it
+        only makes the files show the new keys. Nothing calls it on its own: opening a workspace (the menu,
+        monitor, refs list) must not rewrite its settings.
         """
-        defaults = default_config()
         for preset in self.list_presets(include_internal=True):
             if preset == "global":
                 continue
@@ -205,29 +232,10 @@ class Workspace:
                 if not path.exists():
                     continue
                 try:
-                    data = self.read_json(name, preset)
+                    data, changed = migrated(name, self.read_json(name, preset))
                 except ConfigError as exc:
                     log.warning("%s", exc)
                     continue
-                changed = False
-                if name in ("pipeline", "settings", "general_settings") and isinstance(data, dict):
-                    for key, value in defaults[name].items():
-                        if key not in data:
-                            data[key] = copy.deepcopy(value)
-                            changed = True
-                if name == "pipeline":
-                    for step in data.values():
-                        if isinstance(step, dict) and "scope" not in step:
-                            step["scope"] = "sample"
-                            changed = True
-                if name == "settings":
-                    for params in data.values():
-                        if not isinstance(params, dict):
-                            continue
-                        for i, param in enumerate(params.values()):
-                            if isinstance(param, dict) and "order" not in param:
-                                param["order"] = i
-                                changed = True
                 if changed:
                     self.write_json(name, data, preset)
                     log.debug("Migrated %s/%s.json", preset, name)
@@ -244,7 +252,7 @@ class Workspace:
     def load_workflow(self, preset: str = "current") -> Workflow:
         if not self.preset_dir(preset).is_dir():
             raise ConfigError(f"Preset '{preset}' does not exist in {self.config_dir}")
-        data = {name: self.read_json(name, preset) for name in CONFIG_FILES}
+        data = {name: migrated(name, self.read_json(name, preset))[0] for name in CONFIG_FILES}
         return Workflow(**data)
 
     def write_workflow(self, workflow: Workflow, preset: str = "current") -> None:

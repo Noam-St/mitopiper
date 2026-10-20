@@ -76,7 +76,11 @@ def make_tsv(folder, organism: str, output: Optional[Path] = None, library_strat
     """Write ``<folder name>.tsv`` (or ``output``) describing the FASTQ files in ``folder``."""
     folder = Path(folder).expanduser().resolve()
     runs = scan_fastq_folder(folder, ignore_paired, force_paired)
-    output = Path(output) if output else Path.cwd() / f"{folder.name}.tsv"
+    return write_table(runs, organism, Path(output) if output else Path.cwd() / f"{folder.name}.tsv", library_strategy)
+
+
+def write_table(runs: list, organism: str, output: Path, library_strategy: str = "") -> Path:
+    """Write the ``(run_id, sample_id, [files])`` of :func:`scan_fastq_folder` as an ENA-style table."""
     output.parent.mkdir(parents=True, exist_ok=True)
     fields = ["run_accession", "sample_accession", "scientific_name", "fastq_ftp", "sample_title", "library_strategy"]
     with open(output, "w", newline="", encoding="utf-8") as handle:
@@ -125,10 +129,14 @@ def _place(source: Path, target: Path, mode: str) -> None:
 
 
 def import_fastq_folder(workspace_root, folder, organism: str, mode: str = "link", name: Optional[str] = None,
-                        library_strategy: str = "", ignore_paired: bool = False, force_paired: bool = False) -> Path:
+                        library_strategy: str = "", ignore_paired: bool = False, force_paired: bool = False,
+                        dry_run: bool = False) -> Path:
     """Place the FASTQ files of ``folder`` in ``<workspace>/fastq/<name>/`` (``mode``: link, copy or move;
     default ``name``: the folder's) and write their table to ``<workspace>/metadata/<name>.tsv``, which is
-    returned. Links keep the files where they are; ``move`` takes them out of ``folder``."""
+    returned. Links keep the files where they are; ``move`` takes them out of ``folder``.
+
+    With ``dry_run`` nothing is placed or written in the workspace: the table, with the paths the files would
+    have there, goes to a temporary file."""
     if mode not in FASTQ_MODES:
         raise ValueError(f"unknown mode '{mode}': choose one of {', '.join(FASTQ_MODES)}")
     if not organism.strip():
@@ -141,6 +149,13 @@ def import_fastq_folder(workspace_root, folder, organism: str, mode: str = "link
         return make_tsv(target, organism, Path(workspace_root) / "metadata" / f"{name}.tsv", library_strategy,
                         ignore_paired, force_paired)
     runs = scan_fastq_folder(folder, ignore_paired, force_paired)
+    if dry_run:
+        import tempfile
+
+        placed = [(run, sample, [str(target / Path(f).name) for f in files]) for run, sample, files in runs]
+        log.info("Would %s %d run(s) of %s into %s (dry run: nothing placed)", mode, len(runs), folder, target)
+        return write_table(placed, organism, Path(tempfile.mkdtemp(prefix="mitopiper-")) / f"{name}.tsv",
+                           library_strategy)
     target.mkdir(parents=True, exist_ok=True)
     for _, _, files in runs:
         for file in files:

@@ -52,6 +52,8 @@ def test_urls_follow_the_ncbi_ftp_layout():
                                       "GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.fna.gz")
     assert GenomeInfo("GCA_000002315.5", "Gallus gallus 6/0").ftp_name == "GCA_000002315.5_Gallus_gallus_6_0"
     assert "NOT RECOMMENDED" in GenomeInfo("GCF_000001405.40", "GRCh38", total_length=3_100_000_000).warning()
+    yeast = GenomeInfo("GCF_000146045.2", "R64", organism="Saccharomyces cerevisiae", total_length=12_157_105).warning()
+    assert "NOT RECOMMENDED" not in yeast and "12.2 Mb" in yeast                          # BGU round 5: "0.0 Gb"
 
 
 def test_fetching_only_plans_the_download(tmp_path):

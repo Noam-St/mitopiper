@@ -5,6 +5,9 @@
 The single `maker.py` script was refactored into the installable `mitopiper` package.
 
 ### Added
+- Every job script unsets `PERL5LIB` and `PERL5OPT` (general setting `unset_perl_env`, on by default): jobs inherit the submitting shell's environment, and a site Perl's `PERL5LIB` from the login files made FastQC fail in a job submitted from such a shell (BGU round 5).
+- The build refuses an "mtDNA" reference larger than 50 MB (a whole genome registered as `--fasta`, e.g. hg38, which was rotated and indexed for 1.6 h on BGU) and warns above 1 MB.
+- The release notes of `latest` give the archive's MD5 and the commit `mitopiper --version` must name.
 - `mitopiper --version` names the commit the copy was made from (stamped into `mitopiper-latest.tar.gz` by `git archive`, or read from git in a checkout), so an installation can be compared with the title of the `latest` release. The experiment manifest records it too.
 - The interactive start menu can monitor and rerun any experiment launched in the workspace, not only the last build: *monitor / rerun other experiments* lists them newest first, with launch time and job count, and follows the chosen ones together.
 - A folder of FASTQ files (`.fastq`, `.fq`, `.fastq.gz`, `.fq.gz`) can be the input of a build: `mitopiper build FOLDER --org "Homo sapiens"` or, interactively, its path at the prompt after the scheduler. The files are linked (default), copied or moved (`--fastq-mode`) into the workspace's `fastq/<folder name>/`, and their table is written to `metadata/<folder name>.tsv` (as `make-tsv` does). `--browse` / `b` choose the folder in a file browser (Tk, else zenity or kdialog; needs a display, e.g. `ssh -X`).
@@ -81,6 +84,12 @@ The single `maker.py` script was refactored into the installable `mitopiper` pac
 - pandas and Biopython are no longer needed.
 
 ### Fixed
+- Opening a workspace (the interactive menu, monitor, refs list, ...) no longer rewrites its preset files to add new settings: presets get the new defaults in memory when they are loaded, and files change only when you change or save a preset (BGU round 5: the menu rewrote every `general_settings.json` of a read-only workspace).
+- `build FOLDER --dry-run` no longer links files or writes the sample table into the workspace.
+- `mitopiper download`: after `ftp://` fails to connect (FTP's data connection is often blocked from compute nodes), the next attempts use the other protocols only; a download that failed every attempt no longer leaves an empty file. Its notices while retrying no longer count as errors of a job that finished.
+- `refs fetch-genome` gives the size of small genomes in Mb and no "NOT RECOMMENDED" warning for them; with `--nuclear-of`, it says that only the FASTA is added (the set keeps its own annotation).
+- When a genome is linked as the nuclear + mtDNA reference without a complete bwa index, the reference job says how to share the index it builds between workspaces.
+- The start menu's experiment list counts each job once (reruns are not more jobs).
 - A bwa index counts as present only when its `.sa` file exists, the last one `bwa index` writes. The reference job checked `.bwt`, so after a job killed while indexing the next build skipped the incomplete index and every sample job failed at alignment.
 - Clearer output on the BGU test: Numt Parser's summary line says it counts read mates per label and read pairs kept, and `refs list` labels its nuclear and NUMT columns (`Nuclear FASTA`, `NUMT FASTA`).
 - A workspace whose NUMT reference was already found does not search again, so deleting the nuclear + mtDNA copy and its index after a run does not cost a new 1-hour index at the next build.

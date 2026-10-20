@@ -132,3 +132,19 @@ def test_a_file_missing_from_the_checksum_list_is_an_error():
     assert dl.md5_from_list("abc  ./a.gz\ndef  b.gz\n", "b.gz") == "def"
     with pytest.raises(dl.DownloadError, match="c.gz is not in the checksum list"):
         dl.md5_from_list("abc  ./a.gz\n", "c.gz")
+
+
+def test_ftp_that_cannot_connect_is_dropped_and_no_empty_file_is_left(tmp_path):
+    """BGU round 5: FTP's data connection is refused from the compute nodes (wget exit code 4)."""
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append(command[-1])
+        open(command[command.index("-O") + 1], "wb").close()            # wget -O creates the file anyway
+        return subprocess.CompletedProcess(command, 4 if command[-1].startswith("ftp://") else 8)
+
+    dest = tmp_path / "x.gz"
+    assert not dl.fetch_with_retries("ftp.sra.ebi.ac.uk/a.gz", str(dest), "", ["wget"], 6, 0, runner,
+                                     lambda s: None, io.StringIO())
+    assert sum(c.startswith("ftp://") for c in calls) == 1 and len(calls) == 6
+    assert not dest.exists()

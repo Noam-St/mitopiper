@@ -210,10 +210,12 @@ def _metadata_items(ws: Workspace, args) -> list:
         if Path(item).expanduser().is_dir():
             if not args.org:
                 raise BuildError(f"{item} is a folder of FASTQ files: give their organism with --org 'Genus species'")
-            tables.append(import_fastq_folder(ws.root, item, args.org, args.fastq_mode, library_strategy=args.lib_strat))
+            tables.append(import_fastq_folder(ws.root, item, args.org, args.fastq_mode, library_strategy=args.lib_strat,
+                                              dry_run=args.dry_run))
             done = {"link": "linked", "copy": "copied", "move": "moved"}[args.fastq_mode]
-            print(f"{item}: files {done} into {ws.root / 'fastq' / Path(item).expanduser().resolve().name}, "
-                  f"sample table {tables[-1]}")
+            target = ws.root / "fastq" / Path(item).expanduser().resolve().name
+            print(f"{item}: files would be {done} into {target} (dry run)" if args.dry_run else
+                  f"{item}: files {done} into {target}, sample table {tables[-1]}")
         else:
             tables.append(resolve_metadata_source(ws, item, refresh=args.refresh))
     return tables
@@ -408,7 +410,8 @@ def cmd_refs(ws: Workspace, args) -> int:
             if args.nuclear_of not in registry.names(organism):
                 raise RefError(f"{organism} has no reference set '{args.nuclear_of}'")
             registry.add(organism, attach_nuclear(registry.get(organism, args.nuclear_of), ref), args.nuclear_of, activate=False)
-            print(f"'{args.nuclear_of}' now has the nuclear genome {genome.accession} as _fasta_nuc")
+            print(f"'{args.nuclear_of}' now has the nuclear genome {genome.accession} as _fasta_nuc (its FASTA only: "
+                  f"the set keeps its own annotation)")
         else:
             registry.add(organism, ref, args.name, activate=not args.no_activate)
             print(f"Registered '{args.name}' = {genome.accession} ({genome.assembly_name})")

@@ -244,3 +244,14 @@ def test_sge_accounting_on_n1ge_with_reused_job_numbers(monkeypatch, tmp_path):
     assert mon.sge_accounting("17163", lambda cmd: old_only, "s_control_0", submitted, requested=5) is None
     records = mon.own_records(mon.qacct_records(N1GE_17163), "s_control_0", submitted)
     assert [r["qname"] for r in records] == ["bioinfo.q"]
+
+
+def test_download_retries_are_not_errors(tmp_path):
+    """BGU round 5: a DONE job showed ERR 3 for the attempts mitopiper download had recovered from."""
+    log = tmp_path / "s.err"
+    log.write_text("[mitopiper] download 1/10: ftp.sra.ebi.ac.uk/x.gz\n"
+                   "[mitopiper] checksum failed for /o/x.gz (aa, expected bb): deleting it\n"
+                   "[mitopiper] wget failed (exit code 4)\n"
+                   "[mitopiper] ERROR: download failed 10 times: ftp.sra.ebi.ac.uk/x.gz\n")
+    count, lines = mon.ErrorScanner().scan(log)
+    assert count == 1 and "download failed 10 times" in lines[0].text

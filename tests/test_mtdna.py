@@ -220,8 +220,10 @@ def test_combine_references_links_no_incomplete_index(tmp_path):
     (tmp_path / "nuc.fa.bwt").write_text("half an index")             # bwa index killed before .sa
     mt = fasta(tmp_path / "mt.fa", "NC_012920.1", MT10)
     out = tmp_path / "derived" / "combined.fa"
-    mtdna.combine_references(nuclear, mt, out, io.StringIO())
+    log = io.StringIO()
+    mtdna.combine_references(nuclear, mt, out, log)
     assert out.is_symlink() and not (tmp_path / "derived" / "combined.fa.bwt").exists()   # bwa index builds it here
+    assert "no complete bwa index" in log.getvalue() and "run 'bwa index" in log.getvalue()
 
 
 @pytest.mark.parametrize("assembly, copy", [

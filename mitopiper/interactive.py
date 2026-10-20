@@ -549,8 +549,8 @@ def _launched_experiments(workspace: Workspace) -> list:
             jobs = exp / "jobs.tsv"
             if jobs.is_file():
                 with open(jobs, encoding="utf-8") as handle:
-                    count = max(sum(1 for _ in handle) - 1, 0)
-                found.append((jobs.stat().st_mtime, exp.name, count))
+                    names = {line.split("\t")[1] for line in list(handle)[1:] if "\t" in line}
+                found.append((jobs.stat().st_mtime, exp.name, len(names)))      # a rerun is the same job
     return [(name, time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime)), count)
             for mtime, name, count in sorted(found, reverse=True)]
 

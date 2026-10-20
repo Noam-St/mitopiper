@@ -80,6 +80,30 @@ def find_experiment_metadata(exp_dir: Path) -> Optional[Path]:
     return None
 
 
+#: Above this size an "mtDNA" reference is probably a whole genome (plant mitogenomes reach ~11 Mb).
+MT_WARN_BYTES, MT_MAX_BYTES = 1_000_000, 50_000_000
+
+
+def mt_reference_size_ok(organism: str, ref) -> bool:
+    """False (with an error) when the mtDNA reference of an mt workflow is far too large to be an mtDNA, e.g.
+    a whole genome registered as ``--fasta`` (seen on BGU: hg38 rotated and indexed for 1.6 h); a warning
+    when it is merely large."""
+    try:
+        size = Path(ref.refpath).stat().st_size
+    except (OSError, TypeError):
+        return True                                   # not on this machine (yet): nothing to check
+    if size > MT_MAX_BYTES:
+        log.error("Skipping samples of %s: its mtDNA reference %s is %.0f MB, a whole genome rather than an mtDNA. "
+                  "Register the mtDNA as --fasta and the genome as --nuc-fasta (refs add %s --fasta MT.fa "
+                  "--nuc-fasta GENOME.fa), or download the mtDNA: refs fetch-mt %s.",
+                  organism, ref.refpath, size / 1e6, organism, organism)
+        return False
+    if size > MT_WARN_BYTES:
+        log.warning("The mtDNA reference of %s (%s) is %.1f MB: larger than most mitochondrial genomes. Check that it "
+                    "is the mtDNA only.", organism, ref.refpath, size / 1e6)
+    return True
+
+
 def list_experiments(workspace: Workspace) -> list:
     if not workspace.output_dir.exists():
         return []
@@ -247,6 +271,11 @@ def build_experiment(
                       "the NUMTs in ('mitopiper refs fetch-genome %s --nuclear-of NAME').", organism, organism, organism)
             skipped.append(organism)
             del refs[organism]
+    if uses_placeholder(workflow, "fasta_rotated"):           # an mtDNA preset, whatever steps this build runs
+        for organism in list(refs):
+            if not mt_reference_size_ok(organism, refs[organism]):
+                skipped.append(organism)
+                del refs[organism]
     samples = [s for s in samples if s.organism in refs]
 
     exp = str(exp_dir)

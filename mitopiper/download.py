@@ -33,6 +33,7 @@ from .metadata import ENA_FASTQ_ROOT, RUN_ACCESSION
 MAX_WAIT = 600
 ENA_HOSTS = (ENA_FASTQ_ROOT.split("/")[0] + "/", "ftp.ebi.ac.uk/")
 SRA_TOOL = "fasterq-dump"
+NETWORK_FAILURE = 4                          # wget's exit code for a network failure
 #: Messages that mitopiper.diagnose recognises.
 FAILED = "download failed {tries} times"
 FAILED_PATTERN = r"download failed (\d+) times"
@@ -75,6 +76,11 @@ def fetch_with_retries(url: str, dest: str, md5: str, downloader: list, tries: i
         rc = runner([*downloader, "-O", dest, source]).returncode
         if rc != 0:
             _say(f"{downloader[0]} failed (exit code {rc})", log)
+            if rc == NETWORK_FAILURE and source.startswith("ftp://") and len(variants) > 1:
+                # FTP's data connection is often blocked from compute nodes (BGU: PASV refused): stop spending
+                # every third attempt on it
+                variants.remove(source)
+                _say("ftp:// cannot connect from here: the next attempts use the other protocols", log)
         elif not md5:
             return True
         else:
@@ -88,6 +94,8 @@ def fetch_with_retries(url: str, dest: str, md5: str, downloader: list, tries: i
             pause = min(wait * 2 ** (attempt - 1), MAX_WAIT)
             _say(f"waiting {pause} s before the next attempt", log)
             sleep(pause)
+    if Path(dest).is_file() and Path(dest).stat().st_size == 0:
+        Path(dest).unlink()                     # wget -O leaves an empty file when nothing came
     return False
 
 
