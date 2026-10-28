@@ -1,0 +1,49 @@
+name: release
+
+# A versioned release (e.g. v2.0.0) of a commit of master whose "tests" and "sge" runs passed: tags the commit,
+# attaches mitopiper-<version>.tar.gz and its MD5, and takes the notes from CHANGELOG.md. Run it from the Actions
+# tab (Run workflow) once mitopiper/__init__.py carries the version. With the Zenodo GitHub integration switched
+# on for this repository, publishing the release archives it on Zenodo and mints a DOI.
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # to push the tag and create the release
+      actions: read            # to look up the test runs of the commit
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the version and the tests of this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$GITHUB_REF" = refs/heads/master || { echo "::error::release from master only"; exit 1; }
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' mitopiper/__init__.py)
+          case "$version" in *dev*|"") echo "::error::mitopiper/__init__.py has version '$version'"; exit 1;; esac
+          grep -q "^version: $version$" CITATION.cff || { echo "::error::CITATION.cff is not at $version"; exit 1; }
+          grep -q "^## $version " CHANGELOG.md || { echo "::error::CHANGELOG.md has no '## $version' section"; exit 1; }
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
+            echo "::error::v$version exists already"; exit 1
+          fi
+          for workflow in tests.yml sge.yml; do
+            passed=$(gh run list --commit "$GITHUB_SHA" --workflow "$workflow" --status success --json databaseId -q length)
+            test "$passed" -gt 0 || { echo "::error::$workflow has not passed on $GITHUB_SHA"; exit 1; }
+          done
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Build the tarball and the notes
+        run: |
+          git tag "v$VERSION"
+          git push origin "refs/tags/v$VERSION"
+          git archive --format=tar.gz --prefix=mitopiper/ -o "mitopiper-$VERSION.tar.gz" "v$VERSION"
+          md5sum "mitopiper-$VERSION.tar.gz" > "mitopiper-$VERSION.tar.gz.md5"
+          awk -v v="## $VERSION " 'index($0, v) == 1 {on = 1; next} on && /^## / {exit} on' CHANGELOG.md > notes.md
+          printf '\nmd5sum mitopiper-%s.tar.gz must print %s. Once installed, mitopiper --version must name commit %s.\n' \
+            "$VERSION" "$(cut -d' ' -f1 "mitopiper-$VERSION.tar.gz.md5")" "$(git rev-parse --short HEAD)" >> notes.md
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" "mitopiper-$VERSION.tar.gz" "mitopiper-$VERSION.tar.gz.md5" \
+            --title "mitopiper $VERSION" --notes-file notes.md --verify-tag

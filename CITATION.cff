@@ -7,7 +7,8 @@ authors:
     given-names: Noam
     email: shtolz@post.bgu.ac.il
     affiliation: "Ben-Gurion University of the Negev"
-version: 2.0.0.dev0
+version: 2.0.0
+date-released: 2026-10-28
 license: Apache-2.0
 repository-code: "https://github.com/Noam-St/mitopiper"
 keywords:

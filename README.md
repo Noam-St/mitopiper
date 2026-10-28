@@ -104,7 +104,7 @@ conda activate mitopiper-tools
 
 ```bash
 pip install .
-mitopiper --version          # e.g. mitopiper 2.0.0.dev0 (commit d0245d6, 2026-10-19)
+mitopiper --version          # e.g. mitopiper 2.0.0 (commit 23af301, 2026-10-28)
 ```
 
 **Which version do I have?** `mitopiper --version` names the commit the installed copy was made from. The
