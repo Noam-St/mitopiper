@@ -675,6 +675,10 @@ not repeated. It writes `rerun.sh`, which submits them with the same dependencie
 | `-p PRESET` | use a preset you fixed instead of the workflow recorded at build time |
 | `-s local` | e.g. rerun on the login node |
 
+A rerun uses the workflow recorded when the experiment was built, so a preset changed since then (`presets set`,
+the menus) is not used unless you pass `-p PRESET`. The rerun says so when the preset it was built from has
+changed, and names what changed.
+
 Fixes that need your input (a missing tool, a wrong reference path) are only suggested, never
 applied automatically. The diagnosis recognises, among others:
 * the scheduler killing the job (out of memory, time limit, cancelled, SGE `Eqw`);

@@ -81,3 +81,8 @@ def test_interactive_session_from_a_fastq_folder(tmp_path, monkeypatch):
     assert (ws.root / "fastq" / "hypoxia_samples" / "ctrl_1.fastq.gz").is_symlink()
     assert sorted(p.name for p in (ws.output_dir / "hypoxia_samples" / "scripts").iterdir()) == [
         "check_hypoxia_samples.sh", "s_ctrl_0.sh"]
+
+
+def test_the_start_menu_can_be_left_with_q(tmp_path, data_dir):
+    ws = Workspace(tmp_path / "ws")
+    assert run_interactive(ws, scripted(["q"])) == 0                 # scheduler question of a new workspace

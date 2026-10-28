@@ -586,13 +586,17 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input, session_fa
             options.append(f"monitor / rerun the jobs of the last build ({', '.join(previous)})")
         if set(name for name, _, _ in launched) - set(previous):
             options.append(f"monitor / rerun other experiments ({len(launched)} launched in this workspace)")
-        what = choose("What would you like to do?", options, allow_exit=False, input_fn=input_fn) if len(options) > 1 else 0
+        what = choose("What would you like to do?", options, input_fn=input_fn) if len(options) > 1 else 0
+        if what is None:                      # 'q' / 'exit' (BGU round 6: the menu had no way out)
+            return 0
         if options[what].startswith("monitor / rerun the jobs of the last build"):
             return session_factory(workspace, previous, input_fn).run()
         if options[what].startswith("monitor / rerun other"):
             return session_factory(workspace, _choose_experiments(launched, input_fn), input_fn).run()
 
-    idx = choose("Choose your job scheduler:", list(SCHEDULERS), allow_exit=False, input_fn=input_fn)
+    idx = choose("Choose your job scheduler:", list(SCHEDULERS), input_fn=input_fn)
+    if idx is None:
+        return 0
     scheduler = SCHEDULERS[idx]
     metadata_files = _choose_metadata(workspace, input_fn)
 
@@ -600,8 +604,10 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input, session_fa
     pidx = choose("Choose a workflow preset:", presets, allow_exit=False, input_fn=input_fn)
     workspace.activate(presets[pidx])
 
+    preset = presets[pidx]
     if yes_no("Would you like to change the configuration first?", False, input_fn):
         Menus(workspace, input_fn).run()
+        preset = None                         # the workflow is no longer that preset
     workflow = workspace.load_workflow("current")
 
     resolver = interactive_resolver(workspace, input_fn)
@@ -622,7 +628,7 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input, session_fa
         print("Steps that will run: " + " -> ".join(steps))
         answer = input_fn("Press enter to keep them all, or list the steps to run (space separated)\n> ").strip()
         chosen_steps = answer.split() if answer else None
-        options = BuildOptions(scheduler=scheduler, steps=chosen_steps)
+        options = BuildOptions(scheduler=scheduler, steps=chosen_steps, preset=preset)
         try:
             result = build_experiment(workspace, workflow, metadata, selection, options, resolver, samples=samples)
         except (KeyError, MetadataError) as exc:

@@ -40,6 +40,7 @@ class Context:
     scheduler: str = ""
     exp_dir: str = ""
     references: dict = field(default_factory=dict)
+    preset: str = ""
 
     @classmethod
     def from_manifest(cls, manifest: Optional[dict], exp_dir: str = "") -> "Context":
@@ -54,7 +55,7 @@ class Context:
 
         return cls(steps=list(manifest.get("steps", [])), pipeline=wf.get("pipeline", {}), memory=gs("qsub_memory"),
                    walltime=gs("walltime"), scheduler=manifest.get("scheduler", ""), exp_dir=exp_dir,
-                   references=manifest.get("references", {}))
+                   references=manifest.get("references", {}), preset=manifest.get("preset") or "")
 
     @property
     def sample_steps(self) -> list:
@@ -250,7 +251,17 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
             {"free_form_hint": f"module load {' '.join(tools)}"}))
         return found
     missing_tool = _find(r"(?:line \d+: )?([\w.+\-]+): command not found", text)
-    if missing_tool or rc == 127:
+    # A program given by its path (the step's 'path' field) that is not there: PATH and 'module load' cannot help
+    missing_program = _find(r"line \d+: (/[^\s:]+): No such file or directory", text) if rc == 127 else None
+    if missing_program and not missing_tool:
+        program, preset = missing_program.group(1), ctx.preset or "PRESET"
+        add(Suggestion(
+            f"The program {program}" + (f" of step '{step}'" if step else "") + " does not exist",
+            ["The step calls the program by its path (its 'path' field or its command), and nothing is there. "
+             "Correct the path, or empty it to use the program on the PATH, then rerun with the changed preset "
+             "(a plain rerun uses the workflow recorded at build time)."],
+            [f"mitopiper presets set {preset} {step or 'STEP'}.path=", f"mitopiper rerun -p {preset} --submit"], {}))
+    elif missing_tool or rc == 127:
         name = missing_tool.group(1) if missing_tool else tool or "the tool"
         add(Suggestion(
             f"'{name}' is not installed or not on the PATH of the compute nodes",

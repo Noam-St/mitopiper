@@ -236,3 +236,29 @@ def test_a_finished_job_named_for_a_rerun_runs_again_from_the_start(tmp_path):
     assert item.start_step == "wget"                                 # from the start, not its last step
     text = describe([item])
     assert "at step" in text and "failed at" not in text
+
+
+def test_a_rerun_says_when_the_preset_changed_after_the_build(tmp_path):
+    # BGU round 6: a step path fixed with 'presets set' after the failure was silently not used by 'rerun'
+    ws = make_ws(tmp_path)
+    out = io.StringIO()
+    assert rerun(ws, dry_run=True, stream=out) == 0
+    assert "has changed" not in out.getvalue()                       # unchanged preset: no note
+    assert main(["-w", str(ws.root), "presets", "set", "demo", "count.path=/opt/mytool"]) == 0
+    out = io.StringIO()
+    assert rerun(ws, dry_run=True, stream=out) == 0
+    assert "Note: preset 'demo' has changed since demo was built (step count)" in out.getvalue()
+    assert "mitopiper rerun demo -p demo" in out.getvalue()
+    out = io.StringIO()
+    assert rerun(ws, options=RerunOptions(preset="demo"), dry_run=True, stream=out) == 0
+    assert "has changed" not in out.getvalue()                       # -p given: nothing to point out
+
+
+def test_a_step_path_that_does_not_exist_is_not_a_missing_module():
+    ctx = _ctx()
+    ctx.preset = "mt-variants"
+    (sug, *_) = diagnose(job(["/w/scripts/s_x_0.sh: line 59: /nonexistent/bwa: No such file or directory"], rc=127), ctx)
+    assert sug.cause == "The program /nonexistent/bwa of step 'bwa-align' does not exist"
+    assert sug.commands == ["mitopiper presets set mt-variants bwa-align.path=", "mitopiper rerun -p mt-variants --submit"]
+    assert not any("module load" in c for s in diagnose(job([
+        "s.sh: line 59: /nonexistent/bwa: No such file or directory"], rc=127), ctx) for c in s.commands)

@@ -30,7 +30,7 @@ from .build import (
     pipeline_tools, split_downloads, uses_array, write_array,
 )
 from .builder import StepCommands, _join, build_experiment_steps, build_sample_job, output_paths, step_scope
-from .config import Workflow, Workspace
+from .config import Workflow, Workspace, migrated
 from .diagnose import Context, diagnose, merged_rerun_options
 from .metadata import load_samples
 from .monitor import (
@@ -106,6 +106,29 @@ def _clean_lines(sample, workflow: Workflow, exp: str, step: str) -> list:
         folder, name = pattern.rsplit("/", 1)
         lines.append(f"find \"{folder}\" -maxdepth 1 -name '{name}' -exec rm -f {{}} +")
     return lines
+
+
+def preset_changes(workspace: Workspace, manifest: dict) -> tuple:
+    """``(preset, changes)``: what differs between the workflow recorded at build time and the preset it came
+    from as it is now (e.g. a step path fixed after the job failed). Empty when the preset is not recorded
+    (builds of older versions, an edited workflow) or no longer exists."""
+    name = manifest.get("preset")
+    try:
+        current = workspace.load_workflow(name).as_dict() if name else None
+    except Exception:                                  # deleted or unreadable preset: nothing to compare
+        current = None
+    if current is None:
+        return name, []
+    # with the defaults a newer mitopiper added, as the preset gets them when loaded: those are not changes
+    recorded = {name: migrated(name, data)[0] for name, data in manifest["workflow"].items()}
+    changes = []
+    for part, label in (("pipeline", "step"), ("settings", "step settings"), ("general_settings", "setting")):
+        old, new = recorded.get(part, {}), current.get(part, {})
+        changes += [f"{label} {key}" for key in sorted(set(old) | set(new))
+                    if old.get(key) != new.get(key) and key != "preset_description"]
+    if recorded.get("run_order") != current.get("run_order"):
+        changes.append("step order")
+    return name, changes
 
 
 def plan(workspace: Workspace, experiments: Optional[list] = None, options: Optional[RerunOptions] = None,
@@ -324,6 +347,14 @@ def rerun(workspace: Workspace, experiments: Optional[list] = None, options: Opt
     for item in items:
         for s in item.suggestions:
             stream.write(f"    - {item.name}: {s.cause}\n")
+    if not options.preset:
+        for exp in dict.fromkeys(i.experiment for i in items):
+            name, changes = preset_changes(workspace, load_manifest(workspace.experiment_dir(exp)))
+            if changes:
+                # BGU round 6: a step path fixed with 'presets set' after the failure was not used by the rerun
+                stream.write(f"Note: preset '{name}' has changed since {exp} was built ({', '.join(changes)}). "
+                             "The rerun uses the workflow of the build; to use the changed preset: "
+                             f"mitopiper rerun {exp} -p {name}\n")
     if dry_run:
         stream.write("[dry-run] nothing was written.\n")
         return 0

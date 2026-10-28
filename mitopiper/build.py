@@ -51,6 +51,7 @@ class BuildOptions:
     skip: Optional[list] = None
     reference: Optional[str] = None
     dry_run: bool = False
+    preset: Optional[str] = None      # the preset the workflow was taken from, recorded for rerun
 
 
 @dataclass
@@ -474,6 +475,7 @@ def write_manifest(exp_dir: Path, workflow: Workflow, options: BuildOptions, sam
         "python": platform.python_version(),
         "host": platform.node(),
         "scheduler": options.scheduler,
+        "preset": options.preset,
         "steps": plan["steps"],
         "reference_override": options.reference,
         "status_tracking": jobscript.tracks_status(workflow),

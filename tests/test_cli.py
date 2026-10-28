@@ -43,6 +43,8 @@ def test_dry_run_writes_plan_only(registered, data_dir):
 
 def test_missing_reference_is_reported(workspace, data_dir):
     assert run(workspace, "build", "--no-check", str(data_dir / "ena_runs.tsv")) == 1
+    # BGU round 6: a dry run that leaves every sample out reported success
+    assert run(workspace, "build", str(data_dir / "ena_runs.tsv"), "--dry-run") == 1
 
 
 def test_reference_override(registered, data_dir):

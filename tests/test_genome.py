@@ -175,3 +175,13 @@ def test_interactive_genome_download_is_confirmed_after_the_warning(tmp_path, mo
     ref = interactive_resolver(ws, lambda prompt="": next(answers))("Danio_rerio")
     assert ref.source == "ncbi_genome" and ReferenceRegistry(ws).active_name("Danio_rerio") == "genome"
     assert capsys.readouterr().out.count("NOT RECOMMENDED") == 2
+
+
+def test_a_small_genome_needs_no_confirmation(tmp_path, monkeypatch, capsys):
+    ws = Workspace(tmp_path / "ws")
+    fake = FakeClient([report("GCF_000146045.2", "R64", "reference genome", length=12_157_105)])
+    monkeypatch.setattr(refs_mod.NCBIClient, "genome_reports", lambda self, *a, **k: fake.genome_reports(*a, **k))
+    monkeypatch.setattr("sys.stdin", __import__("io").StringIO(""))     # not a terminal: no question possible
+    assert main(["-w", str(ws.root), "refs", "fetch-genome", "Danio rerio"]) == 0
+    out = capsys.readouterr().out
+    assert "12.2 Mb of sequence: a small download" in out and "Registered 'genome'" in out

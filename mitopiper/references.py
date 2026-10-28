@@ -419,8 +419,12 @@ class GenomeInfo:
             return "an unknown size"
         return f"{self.size_gb:.1f} Gb" if self.total_length >= 1e9 else f"{self.total_length / 1e6:.1f} Mb"
 
+    @property
+    def small(self) -> bool:
+        return 0 < self.total_length < self.SMALL
+
     def warning(self) -> str:
-        if 0 < self.total_length < self.SMALL:
+        if self.small:
             return (f"{self.organism or 'This'} genome {self.accession} ({self.assembly_name}) has {self.size_text} of "
                     "sequence: a small download. The reference job downloads, checks and indexes it before the samples.")
         size = self.size_text

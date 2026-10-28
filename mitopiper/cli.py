@@ -234,6 +234,7 @@ def cmd_build(ws: Workspace, args) -> int:
         skip=_csv_list(args.skip),
         reference=args.reference,
         dry_run=args.dry_run,
+        preset=args.preset,
     )
     registry = ReferenceRegistry(ws)
 
@@ -251,10 +252,8 @@ def cmd_build(ws: Workspace, args) -> int:
         selection = parse_selection(args.samples, len(samples))
         result = build_experiment(ws, workflow, metadata, selection, options, resolver, name=args.name, samples=samples)
         if result.skipped_organisms:
-            log.error(
-                "No reference for: %s. Register one with 'mitopiper refs add' or rerun with --fetch-mt.",
-                ", ".join(result.skipped_organisms),
-            )
+            log.error("Samples left out: %s (the reason is above). Without a reference, register one with "
+                      "'mitopiper refs add' or rerun with --fetch-mt.", ", ".join(result.skipped_organisms))
         results.append(result)
         if args.dry_run:
             print(f"[dry-run] {result.name}: {len(result.plan['samples'])} sample(s), steps: {' -> '.join(result.plan['steps'])}")
@@ -263,6 +262,9 @@ def cmd_build(ws: Workspace, args) -> int:
             count = len(result.jobs.scripts())
             print(f"{result.name}: {count} job script(s) in {result.directory / 'scripts'}")
     if args.dry_run:
+        if not any(r.plan["samples"] for r in results):
+            log.error("Nothing would be built: no sample is left")       # BGU round 6: this exited 0
+            return 1
         return 0
     if not any(r.jobs.samples or r.jobs.experiment for r in results):
         log.error("No job scripts were generated")
@@ -282,6 +284,11 @@ def cmd_build(ws: Workspace, args) -> int:
                       "or --no-check if the jobs run in a different environment. The scripts are written; "
                       "the check job would stop the pipeline on the cluster anyway.",
                       len(result.missing), ", ".join(result.missing))
+            if toolcheck.jobscript.family(toolcheck.jobscript.shell_of(workflow)) == "csh":
+                # BGU round 6: the tools were found with environment bash, not with tcsh
+                log.error("The job shell is %s, which reads ~/.cshrc in every job; a PATH set there replaces the one "
+                          "of this environment. Activate the environment in 'free_form', or use environment=bash.",
+                          toolcheck.jobscript.shell_of(workflow))
             return 1
     print(f"Submit everything with: bash {master}")
     return 0
@@ -399,8 +406,8 @@ def cmd_refs(ws: Workspace, args) -> int:
         except RefError as exc:
             raise RefError(f"{exc}. Register an existing genome instead: "
                            f"mitopiper refs add {organism} --fasta /path/genome.fa --gtf /path/genes.gtf") from exc
-        print(genome.warning())
-        if not args.yes:
+        print(genome.warning(), flush=True)          # before a confirmation error on stderr
+        if not args.yes and not genome.small:        # a small genome needs no confirmation
             if not sys.stdin.isatty():
                 raise RefError("Confirm the download with --yes")
             if not _confirm("Continue?"):

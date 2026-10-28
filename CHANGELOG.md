@@ -86,6 +86,12 @@ The single `maker.py` script was refactored into the installable `mitopiper` pac
 - pandas and Biopython are no longer needed.
 
 ### Fixed
+- `rerun` notes when the preset an experiment was built from has changed since (e.g. a step path fixed with `presets set` after the failure) and how to use it (`-p PRESET`); before, it silently reran the recorded workflow (BGU round 6). The manifest records the preset.
+- A step whose program path does not exist (`/nonexistent/bwa: No such file or directory`, exit code 127) is diagnosed as such, with the `presets set` and `rerun -p` commands, instead of "not installed: module load bwa".
+- `build --dry-run` exits with an error when every sample is left out (e.g. a whole genome given as mtDNA); the message for left-out samples no longer always blames a missing reference.
+- `refs fetch-genome` asks for no confirmation (`--yes`) for a small genome (under 500 Mb), and prints its size before any confirmation error.
+- The interactive start menu can be left with `q` / `exit`.
+- When the tool check fails with a csh/tcsh job shell, it explains that `~/.cshrc` can reset `PATH` in every job.
 - Opening a workspace (the interactive menu, monitor, refs list, ...) no longer rewrites its preset files to add new settings: presets get the new defaults in memory when they are loaded, and files change only when you change or save a preset (BGU round 5: the menu rewrote every `general_settings.json` of a read-only workspace).
 - `build FOLDER --dry-run` no longer links files or writes the sample table into the workspace.
 - `mitopiper download`: after `ftp://` fails to connect (FTP's data connection is often blocked from compute nodes), the next attempts use the other protocols only; a download that failed every attempt no longer leaves an empty file. Its notices while retrying no longer count as errors of a job that finished.
