@@ -255,3 +255,21 @@ def test_download_retries_are_not_errors(tmp_path):
                    "[mitopiper] ERROR: download failed 10 times: ftp.sra.ebi.ac.uk/x.gz\n")
     count, lines = mon.ErrorScanner().scan(log)
     assert count == 1 and "download failed 10 times" in lines[0].text
+
+
+def test_a_huge_log_is_searched_only_at_its_end(tmp_path):
+    # BGU: 4 million identical error lines made every monitor refresh, menu and rerun take minutes
+    log = tmp_path / "s.err"
+    log.write_text("start\n" + "".join(f"[E::fai_retrieve] Failed to retrieve block {i}\n" for i in range(1, 2001)))
+    scanner = mon.ErrorScanner()
+    scanner.MAX_SCAN, scanner.BLOCK = 4000, 333                   # small, so that the skip and the blocks are used
+    count, errors = scanner.scan(log)
+    assert scanner.partial(log) and 0 < count < 2000
+    assert errors[-1].line == 2001 and errors[-1].text.endswith("block 2000")     # line numbers still right
+    assert [e.line for e in errors] == list(range(2001 - len(errors) + 1, 2002))
+    with open(log, "a") as handle:
+        handle.write("ERROR: the end\n")
+    assert scanner.scan(log)[0] == count + 1 and scanner.scan(log)[1][-1].line == 2002     # then incremental
+    job = mon.JobStatus("E", "s", error_count=count, errors_partial=True)
+    assert mon._error_count(job) == f"{count}+"
+    assert mon.ErrorScanner().scan(log)[0] == 2001 and not mon.ErrorScanner().partial(log)   # small: read in full

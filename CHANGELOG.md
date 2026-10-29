@@ -86,6 +86,9 @@ The single `maker.py` script was refactored into the installable `mitopiper` pac
 - pandas and Biopython are no longer needed.
 
 ### Fixed
+- The monitor, the start menu and `rerun` took minutes per command when a job's stderr held millions of error lines (BGU: 4.1 million from `samtools mpileup`): logs are read in blocks, of a large unread part only the last 8 MB is searched (the error count then shows as a lower bound, e.g. `133152+`), and the monitor's rerun reuses the logs it has read. 47 s → 1.7 s for that log.
+- A job that hit its time limit while repeating an error (10,000 or more error lines) is no longer given more time by `--auto-fix`; the diagnosis says it was stuck. `[E::fai_retrieve] Failed to retrieve block` gets its own diagnosis: the reference FASTA does not match its `.fai`.
+- `rerun` refuses an mt experiment built (before the size check) with a whole genome as the mtDNA reference, which it would reuse, and says how to register the mtDNA and build again.
 - `rerun` notes when the preset an experiment was built from has changed since (e.g. a step path fixed with `presets set` after the failure) and how to use it (`-p PRESET`); before, it silently reran the recorded workflow (BGU round 6). The manifest records the preset.
 - A step whose program path does not exist (`/nonexistent/bwa: No such file or directory`, exit code 127) is diagnosed as such, with the `presets set` and `rerun -p` commands, instead of "not installed: module load bwa".
 - `build --dry-run` exits with an error when every sample is left out (e.g. a whole genome given as mtDNA); the message for left-out samples no longer always blames a missing reference.

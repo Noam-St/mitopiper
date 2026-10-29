@@ -262,3 +262,34 @@ def test_a_step_path_that_does_not_exist_is_not_a_missing_module():
     assert sug.commands == ["mitopiper presets set mt-variants bwa-align.path=", "mitopiper rerun -p mt-variants --submit"]
     assert not any("module load" in c for s in diagnose(job([
         "s.sh: line 59: /nonexistent/bwa: No such file or directory"], rc=127), ctx) for c in s.commands)
+
+
+def test_a_step_repeating_an_error_until_the_time_limit_gets_no_more_time():
+    ctx = _ctx()
+    stuck = job(["[E::fai_retrieve] Failed to retrieve block: error reading file"] * 3, sched="TIMEOUT",
+                state=mon.KILLED, step="mpileup")
+    stuck.error_count = 4_136_594
+    suggestions = diagnose(stuck, ctx)
+    assert suggestions[0].cause == "'mpileup' cannot read the reference FASTA through its index (.fai)"
+    assert "samtools faidx /refs/hs.fa" in suggestions[0].commands
+    assert any("while repeating an error (4,136,594 error lines)" in s.cause for s in suggestions)
+    assert "walltime" not in merged_rerun_options(suggestions)
+    slow = job([], sched="TIMEOUT", state=mon.KILLED, step="mpileup")                  # a real time-out
+    assert merged_rerun_options(diagnose(slow, ctx))["walltime"] == "3-16:00:00"
+
+
+def test_a_build_with_a_whole_genome_as_mtdna_cannot_be_rerun(tmp_path):
+    from mitopiper.build import BuildError
+    from mitopiper.config import Workflow
+    from mitopiper.defaults import bundled_presets
+    from mitopiper.rerun import _refuse_whole_genome_mt
+
+    genome = tmp_path / "hg38.fa"
+    with open(genome, "wb") as handle:
+        handle.truncate(60_000_000)                                   # sparse: 60 MB without the disk
+    mt = Workflow(**bundled_presets()["mt-variants"]).as_dict()
+    manifest = {"workflow": mt, "references": {"Homo_sapiens": {"refpath": str(genome)}}}
+    with pytest.raises(BuildError, match="whole genome as the mtDNA reference of Homo_sapiens"):
+        _refuse_whole_genome_mt("E", manifest)
+    _refuse_whole_genome_mt("E", dict(manifest, workflow=Workflow.default().as_dict()))   # not an mt workflow
+    _refuse_whole_genome_mt("E", dict(manifest, references={"Homo_sapiens": {"refpath": "/not/here.fa"}}))

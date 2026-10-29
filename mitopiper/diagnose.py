@@ -152,6 +152,10 @@ def _find(pattern: str, text: str) -> Optional[re.Match]:
     return re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
 
 
+#: From this many error lines on, a job that hit its time limit was stuck repeating an error.
+LOOPING_ERRORS = 10_000
+
+
 def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int = 60) -> list:
     """Return the likely causes of a failed job, most specific first."""
     ctx = context or Context()
@@ -183,6 +187,20 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
         return [Suggestion("Not run because a job it depends on failed",
                            ["It is rerun automatically together with the failed job."], ["mitopiper rerun"], {})]
 
+    # A step that repeats one error until it is killed (BGU: samtools mpileup, 4 million "[E::fai_retrieve] Failed
+    # to retrieve block" lines in 1 day): the error is the cause, and more time would only repeat it.
+    looping = job.error_count >= LOOPING_ERRORS
+    if _find(r"fai_retrieve|Failed to retrieve block", text):
+        fasta = next((r.get("refpath") for r in ctx.references.values() if r.get("refpath")), "REF.fa")
+        add(Suggestion(
+            f"'{step or tool or 'The step'}' cannot read the reference FASTA through its index (.fai)",
+            ["The FASTA does not match its .fai: it was changed or replaced after it was indexed, is compressed "
+             "with plain gzip (only bgzip works with an index), or cannot be read from the compute node. Check it "
+             f"('samtools faidx {fasta} <first contig>:1-100' on a compute node), make the index again and rerun. "
+             "For the mt presets the reference must be the mtDNA only (a whole genome as --fasta is refused by "
+             "builds of newer versions)."],
+            [f"samtools faidx {fasta}", "mitopiper rerun"], {}))
+
     # --- killed by the scheduler -------------------------------------------------
     if sched == "OUT_OF_MEMORY" or _find(r"out of memory|oom[- ]kill|cannot allocate memory|std::bad_alloc|"
                                          r"memoryerror|exceeded (job )?memory|memory limit|TERM_MEMLIMIT", text) \
@@ -196,11 +214,18 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
             {"memory": new}))
     if sched in ("TIMEOUT", "DEADLINE") or _find(r"due to time limit|time limit|TERM_RUNLIMIT|h_rt", text):
         new = double_walltime(ctx.walltime)
-        advice = [f"The job exceeded its run-time limit ({ctx.walltime or 'scheduler default'})."]
-        if ctx.scheduler in ("sge", "lsf"):
-            advice.append("If the queue itself has a shorter limit, also ask for a longer queue with --queue.")
-        add(Suggestion("The job hit its time limit" + (f" in step '{step}'" if step else ""), advice,
-                       [f"mitopiper rerun --walltime {new}"], {"walltime": new}))
+        where = f" in step '{step}'" if step else ""
+        if looping:
+            add(Suggestion(f"The job hit its time limit{where} while repeating an error "
+                           f"({job.error_count:,} error lines)",
+                           ["The step was stuck: fix the error the log repeats ('e' in the monitor shows it); more time "
+                            "would only repeat it."], ["mitopiper rerun"], {}))
+        else:
+            advice = [f"The job exceeded its run-time limit ({ctx.walltime or 'scheduler default'})."]
+            if ctx.scheduler in ("sge", "lsf"):
+                advice.append("If the queue itself has a shorter limit, also ask for a longer queue with --queue.")
+            add(Suggestion(f"The job hit its time limit{where}", advice,
+                           [f"mitopiper rerun --walltime {new}"], {"walltime": new}))
     if sched.startswith("CANCELLED") and not found:
         add(Suggestion("The job was cancelled (scancel/qdel/bkill or an administrator)",
                        ["If that was not intentional, just run it again."], ["mitopiper rerun"], {}))

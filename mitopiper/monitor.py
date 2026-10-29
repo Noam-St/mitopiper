@@ -14,6 +14,7 @@ Run ``mitopiper monitor`` (or ``python monitor.py``) after ``bash master.sh``.
 
 from __future__ import annotations
 
+import collections
 import csv
 import datetime as _dt
 import json
@@ -95,6 +96,7 @@ class JobStatus:
     stdout: str = ""
     stderr: str = ""
     error_count: int = 0
+    errors_partial: bool = False          # a huge log was only partly searched: error_count is a lower bound
     errors: list = field(default_factory=list)
     steps: list = field(default_factory=list)
 
@@ -361,7 +363,16 @@ def task_state(info: dict, job_id: str) -> Optional[tuple]:
 
 # --------------------------------------------------------------- errors
 class ErrorScanner:
-    """Find error lines in log files; re-scans only what was appended since last time."""
+    """Find error lines in log files; re-scans only what was appended since last time.
+
+    A log can hold millions of error lines (BGU: samtools mpileup repeating one error 4 million times until the
+    time limit), and every monitor, menu and rerun reads it. So the file is read in blocks, and of a part not
+    read yet that is larger than ``MAX_SCAN`` only the last ``MAX_SCAN`` bytes are searched: the lines before are
+    only counted. :meth:`partial` then says the error count is a lower bound."""
+
+    MAX_SCAN = 8 << 20
+    BLOCK = 4 << 20
+    HEAD = 256  # bytes compared to recognise a rewritten file
 
     def __init__(self, patterns=DEFAULT_ERROR_PATTERNS, ignore=DEFAULT_IGNORE_PATTERNS, keep: int = 50):
         # Scheduler headers are also written to stderr on some systems; they are not errors.
@@ -369,6 +380,10 @@ class ErrorScanner:
         self.ignore = re.compile("|".join(ignore), re.IGNORECASE) if ignore else None
         self.keep = keep
         self._cache: dict = {}
+
+    def partial(self, path: Optional[Path]) -> bool:
+        """Whether part of ``path`` was skipped, so that its error count is a lower bound."""
+        return bool(path) and self._cache.get(str(path), (0, 0, 0, None, b"", False))[5]
 
     def scan(self, path: Optional[Path]) -> tuple:
         """Return ``(count, [ErrorLine, ...])`` (the last ``keep`` matches)."""
@@ -379,31 +394,54 @@ class ErrorScanner:
         except OSError:
             return 0, []
         key = str(path)
-        offset, line_no, count, errors, head = self._cache.get(key, (0, 0, 0, [], b""))
+        offset, line_no, count, errors, head, partial = self._cache.get(key, (0, 0, 0, None, b"", False))
         if size < offset or (head and self._head(path, len(head)) != head):
             # Truncated or rewritten (e.g. the same log reused by a rerun), even if it is
             # already longer than what was read before: start over.
-            offset, line_no, count, errors, head = 0, 0, 0, [], b""
+            offset, line_no, count, errors, head, partial = 0, 0, 0, None, b"", False
+        errors = errors if errors is not None else collections.deque(maxlen=self.keep)
         if size > offset:
-            with open(path, "rb") as handle:
-                handle.seek(offset)
-                chunk = handle.read()
-            # Only consume complete lines; a partial last line is re-read next time.
-            end = chunk.rfind(b"\n")
-            if end >= 0:
-                for raw in chunk[:end].split(b"\n"):
-                    line_no += 1
-                    text = raw.decode("utf-8", errors="replace").rstrip("\r")
-                    if self.pattern.search(text) and not (self.ignore and self.ignore.search(text)):
-                        count += 1
-                        errors = (errors + [ErrorLine(line_no, text.strip())])[-self.keep:]
-                offset += end + 1
+            try:
+                with open(path, "rb") as handle:
+                    skip_partial_line = False
+                    if size - offset > self.MAX_SCAN:
+                        skip_to = size - self.MAX_SCAN
+                        handle.seek(offset)
+                        while handle.tell() < skip_to:
+                            line_no += handle.read(min(self.BLOCK, skip_to - handle.tell())).count(b"\n")
+                        offset, partial, skip_partial_line = skip_to, True, True
+                    handle.seek(offset)
+                    rest = b""                      # bytes from offset on that are not a complete line yet
+                    while True:
+                        block = handle.read(self.BLOCK)
+                        if not block:
+                            break
+                        data = rest + block         # data[0] is at file position offset
+                        if skip_partial_line:       # the line cut by the skip is not searched
+                            cut = data.find(b"\n")
+                            if cut < 0:
+                                offset, rest = offset + len(data), b""
+                                continue
+                            line_no, offset, data = line_no + 1, offset + cut + 1, data[cut + 1:]
+                            skip_partial_line = False
+                        # Only consume complete lines; a partial last line is re-read next time.
+                        end = data.rfind(b"\n")
+                        if end < 0:
+                            rest = data
+                            continue
+                        for raw in data[:end].split(b"\n"):
+                            line_no += 1
+                            text = raw.decode("utf-8", errors="replace").rstrip("\r")
+                            if self.pattern.search(text) and not (self.ignore and self.ignore.search(text)):
+                                count += 1
+                                errors.append(ErrorLine(line_no, text.strip()))
+                        offset, rest = offset + end + 1, data[end + 1:]
+            except OSError:
+                pass
         if len(head) < self.HEAD and offset:
             head = self._head(path, min(self.HEAD, offset))
-        self._cache[key] = (offset, line_no, count, errors, head)
+        self._cache[key] = (offset, line_no, count, errors, head, partial)
         return count, list(errors)
-
-    HEAD = 256  # bytes compared to recognise a rewritten file
 
     @staticmethod
     def _head(path: Path, size: int) -> bytes:
@@ -527,12 +565,17 @@ def collect(workspace: Workspace, experiments: list, scanner: ErrorScanner,
             stderr = find_log(exp_dir, "stderr", name, job.job_id)
             job.stderr = str(stderr or "")
             job.error_count, job.errors = scanner.scan(stderr)
+            job.errors_partial = scanner.partial(stderr)
             job.steps = read_steps_file(exp_dir, name)
             statuses.append(job)
     return statuses
 
 
 # ------------------------------------------------------------- display
+def _error_count(job: JobStatus) -> str:
+    return f"{job.error_count}+" if job.errors_partial and job.error_count else str(job.error_count or "")
+
+
 _COLORS = {ENDED: "2", SKIPPED: "33", FAILED: "31", KILLED: "31", RUNNING: "36", PENDING: "33", DONE: "32", UNKNOWN: "35", NOT_SUBMITTED: "2"}
 
 
@@ -577,7 +620,7 @@ def render_table(statuses: list, color: bool = False, width: int = 120) -> str:
         out.append(head)
         for job, state in zip(jobs, states):
             prefix = (f"{job.name:<{name_w}}  {job.job_id or '-':>9}  {state:<{state_w}}  {job.step or '-':<{step_w}}  "
-                      f"{_fmt_duration(job.elapsed):>8}  {job.error_count or '':>4}  ")
+                      f"{_fmt_duration(job.elapsed):>8}  {_error_count(job):>4}  ")
             last = (job.last_error or (job.scheduler_state if job.state == SKIPPED else ""))[: max(10, width - len(prefix))]
             line = prefix + last
             out.append(_color(line, job.state, color))
@@ -612,7 +655,7 @@ def render_detail(job: JobStatus, tail_lines: int = 20, suggestions: Optional[li
             mark = "  <-- failed here" if job.state in (FAILED, KILLED) and step == job.step else ""
             out.append(f"   {step:<20} {took:>8}{mark}")
     if job.errors:
-        out.append(f"error lines in stderr ({job.error_count}, last {len(job.errors)} shown):")
+        out.append(f"error lines in stderr ({_error_count(job)}, last {len(job.errors)} shown):")
         out += [f"   {e.line:>6}: {e.text}" for e in job.errors]
     lines = tail(Path(job.stderr)) if job.stderr else []
     if lines:

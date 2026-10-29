@@ -187,7 +187,7 @@ class MonitorSession:
             if options is None:
                 return False
         try:
-            items = plan(self.ws, self.experiments, options, query=self.query)
+            items = plan(self.ws, self.experiments, options, query=self.query, scanner=self.scanner)
         except Exception as exc:  # noqa: BLE001 - shown to the user, session continues
             self.write(f"Cannot rerun: {exc}")
             self.pause()

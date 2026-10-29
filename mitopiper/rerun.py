@@ -27,7 +27,7 @@ from typing import Optional
 from . import jobscript, toolcheck
 from .build import (
     BuildError, _write_script, download_mode, max_running, download_resources, find_experiment_metadata, job_resources, load_manifest,
-    pipeline_tools, split_downloads, uses_array, write_array,
+    MT_MAX_BYTES, pipeline_tools, split_downloads, uses_array, write_array,
 )
 from .builder import StepCommands, _join, build_experiment_steps, build_sample_job, output_paths, step_scope
 from .config import Workflow, Workspace, migrated
@@ -36,7 +36,7 @@ from .metadata import load_samples
 from .monitor import (
     DONE, FAILED, KILLED, PENDING, RUNNING, SKIPPED, UNKNOWN, ErrorScanner, collect, default_experiments, stranded,
 )
-from .references import ReferenceSet, prepare_job_lines
+from .references import ReferenceSet, prepare_job_lines, uses_placeholder
 from .schedulers import STAGES, ExperimentJobs, check_resources, header, job_name, master_script, stage_dependencies
 
 log = logging.getLogger(__name__)
@@ -131,13 +131,33 @@ def preset_changes(workspace: Workspace, manifest: dict) -> tuple:
     return name, changes
 
 
+def _refuse_whole_genome_mt(exp: str, manifest: dict) -> None:
+    """A build of an mt workflow made before the size check with a whole genome as the mtDNA reference (BGU
+    real_data_runs: hg38, rotated and indexed for 1.6 h, then mpileup -a over 3 Gb until the time limit) cannot be
+    repaired by a rerun, which reuses the references recorded at build time."""
+    if "workflow" not in manifest or not uses_placeholder(Workflow(**manifest["workflow"]), "fasta_rotated"):
+        return
+    for organism, data in manifest.get("references", {}).items():
+        try:
+            size = Path(data.get("refpath") or "").stat().st_size
+        except OSError:
+            continue
+        if size > MT_MAX_BYTES:
+            raise BuildError(
+                f"{exp} was built with a whole genome as the mtDNA reference of {organism} ({data['refpath']}, "
+                f"{size / 1e6:.0f} MB), which a rerun would use again. Register the mtDNA as --fasta and the genome as "
+                f"--nuc-fasta ('mitopiper refs add {organism} --fasta MT.fa --nuc-fasta GENOME.fa', or 'mitopiper refs "
+                f"fetch-mt {organism}'), then build the experiment again.")
+
+
 def plan(workspace: Workspace, experiments: Optional[list] = None, options: Optional[RerunOptions] = None,
-         query=None) -> list:
-    """Decide which jobs to rerun and from which step (nothing is written)."""
+         query=None, scanner: Optional[ErrorScanner] = None) -> list:
+    """Decide which jobs to rerun and from which step (nothing is written). ``scanner``: the monitor's, which has
+    read the logs already."""
     options = options or RerunOptions()
     experiments = experiments or default_experiments(workspace)
     kwargs = {"query": query} if query else {}
-    statuses = collect(workspace, experiments, ErrorScanner(), **kwargs)
+    statuses = collect(workspace, experiments, scanner or ErrorScanner(), **kwargs)
     wanted = set(RERUN_STATES) | ({PENDING} if options.include_pending else set())
     by_exp: dict = {}
     for job in statuses:
@@ -147,6 +167,7 @@ def plan(workspace: Workspace, experiments: Optional[list] = None, options: Opti
     for exp, jobs in by_exp.items():
         exp_dir = workspace.experiment_dir(exp)
         manifest = load_manifest(exp_dir)
+        _refuse_whole_genome_mt(exp, manifest)
         ctx = Context.from_manifest(manifest, str(exp_dir))
         sample_steps = [s for s in manifest.get("steps", []) if ctx.pipeline.get(s, {}).get("scope", "sample") == "sample"]
         chosen = [j for j in jobs if (j.name in options.jobs or j.job_id in options.jobs)] if options.jobs else \
