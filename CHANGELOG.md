@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.0 (2026-10-28)
+## 2.0.0 (2026-11-03)
 
 The single `maker.py` script was refactored into the installable `mitopiper` package.
 
