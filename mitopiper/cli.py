@@ -87,7 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("name", nargs="?", default="default")
     ps.add_argument("--json", action="store_true", help="dump the full preset as JSON")
     pset = psub.add_parser("set", help="change general settings or step fields of presets",
-                           description="Examples: presets set mt-variants qsub_queue=bioinfo.q walltime=02:00:00; "
+                           description="Examples: presets set mt-variants qsub_queue=long.q walltime=02:00:00; "
                                        "presets set mt-variants,mt-variants-numt numt-parser.memory=32G mpileup.path=/opt/bin/samtools")
     pset.add_argument("names", help="preset, or several separated by commas")
     pset.add_argument("assignments", nargs="+", metavar="KEY=VALUE",

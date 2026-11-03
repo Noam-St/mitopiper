@@ -246,7 +246,7 @@ DEFAULT_ORDER = ["wget", "fastqc_pre", "trim", "fastqc", "bwa-align", "view", "s
 # compatibility with configs written by the original maker.py.
 DEFAULT_MAIN = {
     "ignore_paired_end": [False, "Ignore paired-end reads"],
-    "qsub_queue": ["bioinfo.q", "choose which cluster queue/partition to send the jobs into (empty = scheduler default)"],
+    "qsub_queue": ["", "choose which cluster queue/partition to send the jobs into (empty = scheduler default)"],
     "environment": ["bash", "choose the linux shell to run the job scripts with"],
     "qsub_threads": [1, "number of threads for each job, or 'auto' to use the largest thread setting of the active steps"],
     "qsub_memory": ["30G", "choose the amount of memory to use for each job"],

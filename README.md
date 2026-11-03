@@ -497,7 +497,7 @@ the command line and use `mitopiper monitor -i` to handle failures.
 | `mitopiper build META… [options]` | Generate job scripts; `META` is a table, a previous experiment, or an accession |
 | `mitopiper fetch-metadata ACCESSION` | Only download the ENA run table of an accession |
 | `mitopiper presets list \| show NAME \| save NAME` | Inspect and save workflow presets |
-| `mitopiper presets set NAME[,NAME2] KEY=VALUE ...` | Change general settings (`qsub_queue=bioinfo.q`) or step fields (`trim.threads=4`) of presets |
+| `mitopiper presets set NAME[,NAME2] KEY=VALUE ...` | Change general settings (`qsub_queue=long.q`) or step fields (`trim.threads=4`) of presets |
 | `mitopiper refs list \| add \| use \| remove \| fetch-mt \| fetch-genome` | Manage reference genomes (mtDNA or whole nuclear genome from NCBI) |
 | `mitopiper make-tsv FOLDER --org NAME` | Build a metadata table for local FASTQ files |
 | `mitopiper monitor [EXP…] [options]` | Follow submitted jobs and their errors |
@@ -557,7 +557,7 @@ used are `Run`, `BioSample`/`Sample`, `ScientificName`/`Organism`, `LibraryLayou
 ### Local FASTQ files
 Give `build` a folder of `.fastq`, `.fq`, `.fastq.gz` or `.fq.gz` files instead of a table or an accession:
 ```bash
-mitopiper build /data/hypoxia_samples --org "Homo sapiens" --lib-strat RNA-Seq -s sge
+mitopiper build /data/my_fastqs --org "Homo sapiens" --lib-strat RNA-Seq -s sge
 mitopiper build --browse --org "Homo sapiens" -s sge        # choose the folder in a file browser
 ```
 The files are brought into the workspace, under `fastq/<folder name>/`, and described in

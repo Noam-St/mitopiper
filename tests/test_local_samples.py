@@ -34,7 +34,7 @@ from mitopiper.metadata import load_samples  # noqa: E402
 
 
 def fastq_folder(tmp_path):
-    folder = tmp_path / "hypoxia_samples"
+    folder = tmp_path / "fastq_folder"
     folder.mkdir()
     for name in ("ctrl_R1.fastq.gz", "ctrl_R2.fastq.gz", "hyp.fq.gz"):
         (folder / name).write_text(f"@{name}\nACGT\n+\nIIII\n")
@@ -45,8 +45,8 @@ def fastq_folder(tmp_path):
 def test_a_fastq_folder_is_brought_into_the_workspace(tmp_path, mode):
     folder, ws = fastq_folder(tmp_path), tmp_path / "ws"
     table = local_samples.import_fastq_folder(ws, folder, "Homo sapiens", mode, library_strategy="RNA-Seq")
-    placed = ws / "fastq" / "hypoxia_samples"
-    assert table == ws / "metadata" / "hypoxia_samples.tsv"
+    placed = ws / "fastq" / "fastq_folder"
+    assert table == ws / "metadata" / "fastq_folder.tsv"
     assert sorted(p.name for p in placed.iterdir()) == ["ctrl_R1.fastq.gz", "ctrl_R2.fastq.gz", "hyp.fq.gz"]
     assert (placed / "hyp.fq.gz").is_symlink() == (mode == "link")
     assert (folder / "hyp.fq.gz").exists() == (mode != "move")
@@ -56,7 +56,7 @@ def test_a_fastq_folder_is_brought_into_the_workspace(tmp_path, mode):
     # importing again is harmless; a different file of the same name is not overwritten
     assert local_samples.import_fastq_folder(ws, folder, "Homo sapiens", mode) == table
     if mode != "move":
-        other = tmp_path / "other" / "hypoxia_samples"
+        other = tmp_path / "other" / "fastq_folder"
         other.mkdir(parents=True)
         (other / "hyp.fq.gz").write_text("@x\nA\n+\nI\n")
         with pytest.raises(FileExistsError, match="exists already"):
@@ -72,8 +72,8 @@ def test_build_takes_a_fastq_folder(tmp_path, capsys, caplog):
     assert main(["-w", str(ws), "build", "--no-check", str(folder), "--org", "Homo sapiens", "-s", "local",
                  "--steps", "wget"]) == 0
     assert "files linked into" in capsys.readouterr().out
-    script = (ws / "output" / "hypoxia_samples" / "scripts" / "s_ctrl_0.sh").read_text()
-    assert f'ln -sf "{ws.resolve()}/fastq/hypoxia_samples/ctrl_R1.fastq.gz"' in script
+    script = (ws / "output" / "fastq_folder" / "scripts" / "s_ctrl_0.sh").read_text()
+    assert f'ln -sf "{ws.resolve()}/fastq/fastq_folder/ctrl_R1.fastq.gz"' in script
 
 
 def test_build_can_browse_for_the_folder(tmp_path, monkeypatch, capsys):
@@ -83,7 +83,7 @@ def test_build_can_browse_for_the_folder(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert f"FASTQ folder: {folder}" in out and "files would be linked into" in out
     # a dry run places nothing and writes no table in the workspace (BGU round 5)
-    assert not (ws / "fastq").exists() and not (ws / "metadata" / "hypoxia_samples.tsv").exists()
+    assert not (ws / "fastq").exists() and not (ws / "metadata" / "fastq_folder.tsv").exists()
 
 
 def test_no_file_browser_without_a_display(monkeypatch):

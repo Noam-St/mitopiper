@@ -21,7 +21,7 @@ The single `maker.py` script was refactored into the installable `mitopiper` pac
 - `mitopiper presets reset NAME ...` restores bundled presets to the version of the installed mitopiper (workspaces keep their own copies, so upgrades did not reach them); the old copy is kept as `NAME_old_DATE`.
 - Steps can be marked `"temporary": true`: their outputs are deleted at the end of a successful sample job. The mt presets mark their intermediate SAM/BAM files, which took 93 GB of the 116 GB of one preset's full run (10 RNA-seq samples) on the BGU cluster.
 - `benchmark/sge_usage.sh`: run time, CPU time and peak memory of every job of an experiment from Grid Engine's `qacct` (failed attempts included), with core-hours per experiment.
-- `mitopiper presets set PRESET[,PRESET...] KEY=VALUE ...` changes general settings (`qsub_queue=bioinfo.q`) and step fields (`numt-parser.memory=32G`) without editing JSON. Every name is checked first, so a typo changes nothing.
+- `mitopiper presets set PRESET[,PRESET...] KEY=VALUE ...` changes general settings (`qsub_queue=long.q`) and step fields (`numt-parser.memory=32G`) without editing JSON. Every name is checked first, so a typo changes nothing.
 - mtDNA circularity, based on the original `circulize.py` / `combine_processed_pileups.py`: samples are also aligned to a rotated copy of the mtDNA (`mt_rotation`, default half the mtDNA length), and `mitopiper mt combine-pileups` merges both pileups so the `mt_junction_window` positions (default 400) on either side of the origin come from the rotated alignment.
 - NUMT-aware alignment: `mt-variants-numt` aligns to nuclear genome + mtDNA (`mitopiper mt combine-references` drops duplicate mitochondrial sequences of the assembly), keeps reads mapping to the mtDNA with MAPQ ≥ `numt_min_mapq`, and realigns only those to the rotated mtDNA.
 - Tutorial (`docs/tutorial.md`): `tutorial/simulate.py` makes a deterministic mtDNA dataset with a known answer: heteroplasmies of 5–20% (one next to the origin), a homoplasmic variant, a diverged NUMT plus a `chrM` copy in a synthetic nuclear genome, NUMT contamination, and reads spanning the origin. The tutorial runs it through all three mt presets and checks the result against the truth. It was run end to end with the tools of `envs/mitopiper-tools.yml`, whose pins resolve.
@@ -72,6 +72,7 @@ The single `maker.py` script was refactored into the installable `mitopiper` pac
 - Test suite and CI.
 
 ### Changed
+- `qsub_queue` is empty by default (the scheduler's default queue) instead of a queue name of the cluster mitopiper was developed on.
 - **`mt-variants-numtparser` is haplotype-aware.** Numt Parser compared each read with the reference mtDNA, so a read carrying the sample's common allele where the rCRS has a rare one (4769, 8860) was closer to a NUMT carrying that allele and was removed: on a human RNA-seq project two real homoplasmic variants were lost in every sample. Each sample's own mtDNA (`mitopiper mt consensus`: the reference with its major alleles) is now what Numt Parser compares the reads with, and `undetermined` reads are kept by default (`cymt-reads.keep=not-numt`). The tutorial reproduces the case with a recent NUMT on chr3 that carries the samples' allele at 10,000: the old comparison lost that variant (depth 0), the new one keeps it (depth 274, as without filtering); the MAPQ filter loses it too (depth 8).
 - Scripts are written to `output/<exp>/scripts/<job name>.sh` (`prep_<exp>.sh`, `s_<sample>_<i>.sh`, `e_<exp>.sh`). The submit script is `master.sh`.
 - With the `local` scheduler, a failing job no longer stops the remaining jobs.
@@ -81,7 +82,7 @@ The single `maker.py` script was refactored into the installable `mitopiper` pac
 - Indexing of automatically downloaded references runs once in `prepare_refs.sh`, before the sample jobs. Before, it was appended to the first sample's script while other samples could already be running.
 - Default preset: `samtools sort` writes `<sample>.sorted.bam`, which `index`/`mpileup` then read. Before, it overwrote its input through a glob.
 - Default step paths no longer point to a specific cluster (a lab cluster's absolute tool paths).
-- `--account=shtolz` (SLURM) and `-P dreem` (LSF) are no longer hard-coded.
+- The SLURM account and the LSF project are no longer hard-coded.
 - SLURM/LSF logs are written as per-job files inside `stdout/` and `stderr/`.
 - pandas and Biopython are no longer needed.
 

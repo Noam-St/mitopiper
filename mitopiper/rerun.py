@@ -133,7 +133,7 @@ def preset_changes(workspace: Workspace, manifest: dict) -> tuple:
 
 def _refuse_whole_genome_mt(exp: str, manifest: dict) -> None:
     """A build of an mt workflow made before the size check with a whole genome as the mtDNA reference (BGU
-    real_data_runs: hg38, rotated and indexed for 1.6 h, then mpileup -a over 3 Gb until the time limit) cannot be
+    workspace: hg38, rotated and indexed for 1.6 h, then mpileup -a over 3 Gb until the time limit) cannot be
     repaired by a rerun, which reuses the references recorded at build time."""
     if "workflow" not in manifest or not uses_placeholder(Workflow(**manifest["workflow"]), "fasta_rotated"):
         return

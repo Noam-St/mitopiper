@@ -88,9 +88,9 @@ def test_presets_and_cleanup(registered, data_dir, capsys):
 def test_presets_set(tmp_path, capsys):
     ws = Workspace(tmp_path / "ws")
     assert run(ws, "init") == 0
-    assert run(ws, "presets", "set", "mt-variants,mt-variants-numt", "qsub_queue=bioinfo.q", "qsub_threads=2",
+    assert run(ws, "presets", "set", "mt-variants,mt-variants-numt", "qsub_queue=long.q", "qsub_threads=2",
                "array_jobs=true", "index.path=/opt/bin/samtools", "index.memory=4G") == 0
-    assert "mt-variants: qsub_queue = 'bioinfo.q' (was 'bioinfo.q')" in capsys.readouterr().out
+    assert "mt-variants: qsub_queue = 'long.q' (was '')" in capsys.readouterr().out
     for preset in ("mt-variants", "mt-variants-numt"):
         wf = ws.load_workflow(preset)
         assert (wf.general("qsub_threads"), wf.general("array_jobs")) == (2, True)

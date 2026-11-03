@@ -56,7 +56,7 @@ def test_key_fixer():
 
 
 def test_interactive_session_from_a_fastq_folder(tmp_path, monkeypatch):
-    folder = tmp_path / "hypoxia_samples"
+    folder = tmp_path / "fastq_folder"
     folder.mkdir()
     for name in ("ctrl_1.fastq.gz", "ctrl_2.fastq.gz"):
         (folder / name).write_text("@r\nACGT\n+\nIIII\n")
@@ -78,9 +78,9 @@ def test_interactive_session_from_a_fastq_folder(tmp_path, monkeypatch):
         "n",                                # don't launch now
     ]
     assert run_interactive(ws, scripted(answers)) == 0
-    assert (ws.root / "fastq" / "hypoxia_samples" / "ctrl_1.fastq.gz").is_symlink()
-    assert sorted(p.name for p in (ws.output_dir / "hypoxia_samples" / "scripts").iterdir()) == [
-        "check_hypoxia_samples.sh", "s_ctrl_0.sh"]
+    assert (ws.root / "fastq" / "fastq_folder" / "ctrl_1.fastq.gz").is_symlink()
+    assert sorted(p.name for p in (ws.output_dir / "fastq_folder" / "scripts").iterdir()) == [
+        "check_fastq_folder.sh", "s_ctrl_0.sh"]
 
 
 def test_the_start_menu_can_be_left_with_q(tmp_path, data_dir):

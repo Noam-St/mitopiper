@@ -214,13 +214,13 @@ def test_bwa_info_lines_are_not_a_missing_index():
 # qacct -j 17163 on the BGU cluster (N1GE 6.0u8): the job number was used twice before, by other people,
 # and a time limit is recorded as failed 100 with no category line. Shortened.
 N1GE_17163 = (
-    "==============================================================\nqname        barlev.q\nhostname     bhn1080\n"
+    "==============================================================\nqname        lab.q\nhostname     node080\n"
     "owner        someone\njobname      prf_v146_f\njobnumber    17163\nqsub_time    Thu May 21 10:00:00 2026\n"
     "failed       0    \nexit_status  0\nru_wallclock 1177\nmaxvmem      34.7G\n"
-    "==============================================================\nqname        intel_all.q\nhostname     bhn1099\n"
+    "==============================================================\nqname        all.q\nhostname     node099\n"
     "owner        other\njobname      run.sh\njobnumber    17163\nqsub_time    Thu Jul 30 09:00:00 2026\n"
     "failed       0    \nexit_status  0\nru_wallclock 159\nmaxvmem      2.1G\n"
-    "==============================================================\nqname        bioinfo.q\nhostname     bhn1109\n"
+    "==============================================================\nqname        main.q\nhostname     node109\n"
     "owner        labuser\njobname      s_control_0\njobnumber    17163\nqsub_time    Mon Oct 12 15:38:10 2026\n"
     "failed       100 : assumedly after job\nexit_status  137\nru_wallclock 6\nmaxvmem      4.4G\n"
 )
@@ -243,7 +243,7 @@ def test_sge_accounting_on_n1ge_with_reused_job_numbers(monkeypatch, tmp_path):
     old_only = N1GE_17163.rsplit("=" * 62, 1)[0]
     assert mon.sge_accounting("17163", lambda cmd: old_only, "s_control_0", submitted, requested=5) is None
     records = mon.own_records(mon.qacct_records(N1GE_17163), "s_control_0", submitted)
-    assert [r["qname"] for r in records] == ["bioinfo.q"]
+    assert [r["qname"] for r in records] == ["main.q"]
 
 
 def test_download_retries_are_not_errors(tmp_path):

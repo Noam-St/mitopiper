@@ -37,7 +37,7 @@ For every preset you'll test, set these general settings, e.g.
 `mitopiper -w ws presets set mt-variants,mt-variants-numt,mt-variants-numtparser qsub_queue=short qsub_memory=8G`
 (or edit `ws/config/<preset>/general_settings.json`, where each entry is `[value, description]`).
 
-- [ ] `qsub_queue`: your partition. The default `bioinfo.q` probably doesn't exist.
+- [ ] `qsub_queue`: your queue/partition (empty by default: the scheduler's default queue).
 - [ ] `account`, if your cluster needs one.
 - [ ] `qsub_memory` / `qsub_threads` / `walltime`: small values for testing, e.g. `8G`, `2`, `02:00:00`.
 - [ ] `free_form`, e.g. `conda activate mitopiper-tools`.
