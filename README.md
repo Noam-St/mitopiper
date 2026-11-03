@@ -1,6 +1,6 @@
 # mitopiper
 
-[![tests](https://github.com/Noam-St/mitopiper/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/Noam-St/mitopiper/actions/workflows/tests.yml)
+[![tests](https://github.com/Noam-St/mitopiper/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/Noam-St/mitopiper/actions/workflows/tests.yml) [![DOI](https://zenodo.org/badge/301351537.svg)](https://doi.org/10.5281/zenodo.23916174)
 
 **Build, launch and babysit sequencing pipelines on an HPC cluster, straight from ENA/SRA metadata.**
 
