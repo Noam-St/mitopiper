@@ -408,7 +408,10 @@ class ErrorScanner:
                         skip_to = size - self.MAX_SCAN
                         handle.seek(offset)
                         while handle.tell() < skip_to:
-                            line_no += handle.read(min(self.BLOCK, skip_to - handle.tell())).count(b"\n")
+                            block = handle.read(min(self.BLOCK, skip_to - handle.tell()))
+                            if not block:           # shrunk since stat(): the next scan starts over
+                                break
+                            line_no += block.count(b"\n")
                         offset, partial, skip_partial_line = skip_to, True, True
                     handle.seek(offset)
                     rest = b""                      # bytes from offset on that are not a complete line yet

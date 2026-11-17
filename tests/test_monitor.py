@@ -273,3 +273,24 @@ def test_a_huge_log_is_searched_only_at_its_end(tmp_path):
     job = mon.JobStatus("E", "s", error_count=count, errors_partial=True)
     assert mon._error_count(job) == f"{count}+"
     assert mon.ErrorScanner().scan(log)[0] == 2001 and not mon.ErrorScanner().partial(log)   # small: read in full
+
+
+def test_a_log_that_shrinks_while_it_is_counted_does_not_hang(tmp_path, monkeypatch):
+    log = tmp_path / "s.err"
+    log.write_text("ERROR x\n" * 5000)
+    scanner = mon.ErrorScanner()
+    scanner.MAX_SCAN, scanner.BLOCK = 1000, 256
+    real_stat = type(log).stat
+
+    def stat_then_truncate(self, *args, **kwargs):
+        result = real_stat(self, *args, **kwargs)
+        if self == log:
+            with open(log, "r+b") as handle:      # rewritten by a rerun right after the size was taken
+                handle.truncate(100)
+        return result
+
+    monkeypatch.setattr(type(log), "stat", stat_then_truncate)
+    scanner.scan(log)                             # returns instead of looping forever
+    monkeypatch.undo()
+    log.write_text("ERROR y\n")
+    assert scanner.scan(log)[0] == 1              # and the next scan starts over

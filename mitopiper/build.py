@@ -475,7 +475,8 @@ def write_manifest(exp_dir: Path, workflow: Workflow, options: BuildOptions, sam
         "python": platform.python_version(),
         "host": platform.node(),
         "scheduler": options.scheduler,
-        "preset": options.preset,
+        # last_used is overwritten by every build: as a record of this one it would soon name another workflow
+        "preset": options.preset if options.preset not in ("last_used", "current") else None,
         "steps": plan["steps"],
         "reference_override": options.reference,
         "status_tracking": jobscript.tracks_status(workflow),

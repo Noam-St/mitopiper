@@ -293,3 +293,38 @@ def test_a_build_with_a_whole_genome_as_mtdna_cannot_be_rerun(tmp_path):
         _refuse_whole_genome_mt("E", manifest)
     _refuse_whole_genome_mt("E", dict(manifest, workflow=Workflow.default().as_dict()))   # not an mt workflow
     _refuse_whole_genome_mt("E", dict(manifest, references={"Homo_sapiens": {"refpath": "/not/here.fa"}}))
+
+
+def test_an_unreadable_reference_does_not_suggest_deleting_outputs_or_more_memory():
+    ctx = _ctx()
+    lines = ["[E::fai_retrieve] Failed to retrieve block: unexpected end of file"] * 3
+    for kwargs in (dict(sched="TIMEOUT", state=mon.KILLED), dict(rc=137, state=mon.KILLED)):
+        stuck = job(lines, step="mpileup", **kwargs)
+        stuck.error_count = 4_000_000
+        suggestions = diagnose(stuck, ctx)
+        assert suggestions[0].cause.startswith("'mpileup' cannot read the reference FASTA")
+        assert not any("corrupt" in s.cause or "memory" in s.cause for s in suggestions)
+        assert merged_rerun_options(suggestions) == {}
+
+
+@pytest.mark.parametrize("lines", [
+    ["s.sh: line 5: module: command not found", "s.sh: line 40: /opt/bin/samtools: No such file or directory"],
+    ["/opt/bin/samtools: Command not found."],                                   # tcsh
+])
+def test_a_missing_program_path_is_found_next_to_other_messages_and_in_tcsh(lines):
+    ctx = _ctx()
+    ctx.preset = "mt-variants"
+    causes = [s.cause for s in diagnose(job(lines, rc=127, step="mpileup"), ctx)]
+    assert causes[0] == "The program /opt/bin/samtools of step 'mpileup' does not exist"
+    assert not any("'samtools' is not installed" in c for c in causes)
+
+
+def test_last_used_is_not_recorded_as_the_preset_of_a_build(registered, data_dir):
+    import json
+
+    ws = registered
+    ws.copy_preset("default", "last_used")
+    assert main(["-w", str(ws.root), "build", "--no-check", str(data_dir / "ena_runs.tsv"), "-s", "sge",
+                 "-p", "last_used"]) == 0
+    manifest = json.loads((ws.output_dir / "ena_runs" / "mitopiper_manifest.json").read_text())
+    assert manifest["preset"] is None

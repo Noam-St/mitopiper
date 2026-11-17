@@ -190,7 +190,8 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
     # A step that repeats one error until it is killed (BGU: samtools mpileup, 4 million "[E::fai_retrieve] Failed
     # to retrieve block" lines in 1 day): the error is the cause, and more time would only repeat it.
     looping = job.error_count >= LOOPING_ERRORS
-    if _find(r"fai_retrieve|Failed to retrieve block", text):
+    reference_unreadable = _find(r"fai_retrieve|Failed to retrieve block", text)
+    if reference_unreadable:
         fasta = next((r.get("refpath") for r in ctx.references.values() if r.get("refpath")), "REF.fa")
         add(Suggestion(
             f"'{step or tool or 'The step'}' cannot read the reference FASTA through its index (.fai)",
@@ -204,7 +205,7 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
     # --- killed by the scheduler -------------------------------------------------
     if sched == "OUT_OF_MEMORY" or _find(r"out of memory|oom[- ]kill|cannot allocate memory|std::bad_alloc|"
                                          r"memoryerror|exceeded (job )?memory|memory limit|TERM_MEMLIMIT", text) \
-            or (rc == 137 and not _find(r"time limit", text)):
+            or (rc == 137 and not _find(r"time limit", text) and not (looping or reference_unreadable)):
         new = double_memory(ctx.memory)
         add(Suggestion(
             "The job ran out of memory" + (f" in step '{step}'" if step else ""),
@@ -276,9 +277,13 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
             {"free_form_hint": f"module load {' '.join(tools)}"}))
         return found
     missing_tool = _find(r"(?:line \d+: )?([\w.+\-]+): command not found", text)
-    # A program given by its path (the step's 'path' field) that is not there: PATH and 'module load' cannot help
-    missing_program = _find(r"line \d+: (/[^\s:]+): No such file or directory", text) if rc == 127 else None
-    if missing_program and not missing_tool:
+    # A program given by its path (the step's 'path' field) that is not there: PATH and 'module load' cannot help.
+    # bash: "line 40: /opt/bin/samtools: No such file or directory"; tcsh: "/opt/bin/samtools: Command not found."
+    missing_program = (_find(r"line \d+: (/[^\s:]+): No such file or directory", text) if rc == 127 else None) \
+        or _find(r"^\s*(/[^\s:]+): Command not found\.", text)
+    if missing_program and missing_tool and missing_tool.group(1) == missing_program.group(1).rsplit("/", 1)[-1]:
+        missing_tool = None                   # tcsh's line for that program, not a second missing tool
+    if missing_program:
         program, preset = missing_program.group(1), ctx.preset or "PRESET"
         add(Suggestion(
             f"The program {program}" + (f" of step '{step}'" if step else "") + " does not exist",
@@ -286,7 +291,7 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
              "Correct the path, or empty it to use the program on the PATH, then rerun with the changed preset "
              "(a plain rerun uses the workflow recorded at build time)."],
             [f"mitopiper presets set {preset} {step or 'STEP'}.path=", f"mitopiper rerun -p {preset} --submit"], {}))
-    elif missing_tool or rc == 127:
+    if missing_tool or (rc == 127 and not missing_program):
         name = missing_tool.group(1) if missing_tool else tool or "the tool"
         add(Suggestion(
             f"'{name}' is not installed or not on the PATH of the compute nodes",
@@ -328,8 +333,11 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
     corrupt = (r"unexpected end of file|invalid compressed data|crc error|not in gzip format|"
                r"md5sum: warning|computed checksum did not match|: FAILED$|premature end|truncated (gzip|file)|"
                r"ran out of data in the middle of a fastq entry|file is probably truncated")  # the last two: FastQC
-    if _find(corrupt, text):
-        producer, path = ctx.input_producer(step, text, corrupt)
+    # htslib's "[E::fai_retrieve] Failed to retrieve block: unexpected end of file" is the reference (above), not a
+    # damaged input of this step: resuming earlier and deleting outputs would not change the FASTA
+    inputs = "\n".join(line for line in text.splitlines() if "fai_retrieve" not in line)
+    if _find(corrupt, inputs):
+        producer, path = ctx.input_producer(step, inputs, corrupt)
         if not producer and step == "wget" and (not path or path.startswith(ctx.exp_dir.rstrip("/") + "/")):
             # The download step checks its own files: a full-size but corrupt download must be deleted,
             # or 'wget -c' finds it complete and the checksum fails again (seen on the BGU cluster).

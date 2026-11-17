@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.1 (unreleased)
+
+### Fixed
+- The monitor could hang when a stderr log larger than 8 MB shrank (e.g. was rewritten by a rerun) while its lines were being counted.
+- `[E::fai_retrieve] Failed to retrieve block: unexpected end of file` was also diagnosed as a corrupt input, and `--auto-fix` reran from the previous step, deleting its outputs; with exit code 137 it also asked for more memory. Neither helps a reference that does not match its index: the diagnosis now only says that.
+- A step program path that does not exist was missed when the log also had an unrelated `command not found` line (e.g. `module: command not found`), and in tcsh jobs (`/path: Command not found.`); it was reported as a missing module.
+- A build from the `last_used` preset no longer records it as its preset: every later build overwrites `last_used`, so `rerun` would have compared with, and suggested, another experiment's workflow.
+
 ## 2.0.0 (2026-11-03)
 
 The single `maker.py` script was refactored into the installable `mitopiper` package.
