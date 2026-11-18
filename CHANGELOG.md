@@ -3,6 +3,8 @@
 ## 2.0.1 (unreleased)
 
 ### Fixed
+- LSF: a job's slots are kept on one host (`-R "span[hosts=1]"`, combined with the memory request in one `-R`): the tools are multi-threaded, and slots spread over several hosts left the threads on one host with only part of its cores reserved.
+- LSF array jobs write each task's LSF job report to its own file (`%J_%I.out`); every task wrote to the same `%J.out` before. The tasks' own logs were already separate.
 - The monitor could hang when a stderr log larger than 8 MB shrank (e.g. was rewritten by a rerun) while its lines were being counted.
 - `[E::fai_retrieve] Failed to retrieve block: unexpected end of file` was also diagnosed as a corrupt input, and `--auto-fix` reran from the previous step, deleting its outputs; with exit code 137 it also asked for more memory. Neither helps a reference that does not match its index: the diagnosis now only says that.
 - A step program path that does not exist was missed when the log also had an unrelated `command not found` line (e.g. `module: command not found`), and in tcsh jobs (`/path: Command not found.`); it was reported as a missing module.

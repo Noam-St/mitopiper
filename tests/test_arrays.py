@@ -29,7 +29,12 @@ def test_array_directives():
     assert "#SBATCH --array=1-40\n" in header("slurm", "a_E", "/e", res, (40, 0))
     sge = header("sge", "a_E", "/e", res, (40, 5))
     assert "#$ -t 1-40" in sge and "#$ -tc 5" in sge
-    assert '#BSUB -J "a_E[1-40]%5"' in header("lsf", "a_E", "/e", res, (40, 5))
+    lsf = header("lsf", "a_E", "/e", res, (40, 5))
+    assert '#BSUB -J "a_E[1-40]%5"' in lsf
+    # every task has the same %J: %I keeps the LSF job reports of the tasks apart
+    assert "#BSUB -o /e/stdout/%J_%I.out" in lsf and "#BSUB -e /e/stderr/%J_%I.err" in lsf
+    single = header("lsf", "s_1", "/e", res)
+    assert "#BSUB -o /e/stdout/%J.out" in single and '#BSUB -R "span[hosts=1]"' in single   # threads on one host
     assert "--array" not in header("slurm", "s_1", "/e", res)
 
 

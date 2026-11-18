@@ -121,14 +121,19 @@ def header(scheduler: str, job_name: str, log_dir: str, res: JobResources, array
             lines.append(f"#SBATCH --account={res.account}")
     elif scheduler == "lsf":
         name = f'"{job_name}[1-{tasks}]' + (f"%{limit}" if limit else "") + '"' if tasks else job_name
-        lines += [f"#BSUB -o {out}/%J.out", f"#BSUB -e {err}/%J.err", f"#BSUB -J {name}"]
+        # Every task of an array has the same %J: %I (the task index) keeps their LSF job reports apart.
+        log = "%J_%I" if tasks else "%J"
+        lines += [f"#BSUB -o {out}/{log}.out", f"#BSUB -e {err}/{log}.err", f"#BSUB -J {name}"]
         if res.account:
             lines.append(f"#BSUB -P {res.account}")
         if res.queue:
             lines.append(f"#BSUB -q {res.queue}")
         lines.append(f"#BSUB -n {res.threads}")
-        if res.memory:
-            lines.append(f'#BSUB -R "rusage[mem={res.memory}]"')
+        # All slots on one host (as SLURM's --nodes=1): the tools are multi-threaded, not MPI, so slots spread over
+        # several hosts would leave the threads on one host with only part of the cores reserved there. One -R with
+        # both sections: older LSF versions do not merge several -R options.
+        rusage = f"rusage[mem={res.memory}] " if res.memory else ""
+        lines.append(f'#BSUB -R "{rusage}span[hosts=1]"')
         if walltime_seconds(res.walltime):
             lines.append(f"#BSUB -W {_lsf_time(walltime_seconds(res.walltime))}")
     elif scheduler != "local":
