@@ -7,9 +7,13 @@ workstation or for testing).
 
 from __future__ import annotations
 
+import functools
+import math
 import posixpath
 import re
 import shlex
+import shutil
+import subprocess
 from dataclasses import dataclass, replace
 from typing import Optional
 
@@ -34,6 +38,7 @@ class JobResources:
     account: str = ""
     shell: str = "bash"
     parallel_env: str = "shared"
+    memory_per_slot: Optional[bool] = None   # LSF: memory request per slot; None: as the site does (bparams)
 
 
 def walltime_seconds(text: str) -> Optional[int]:
@@ -57,6 +62,29 @@ def memory_mb(text: str) -> Optional[float]:
         return None
     factor = {"K": 1 / 1024, "": 1, "M": 1, "G": 1024, "T": 1024 * 1024}[match.group(2).upper()]
     return float(match.group(1)) * factor
+
+
+@functools.lru_cache(maxsize=1)
+def lsf_reserves_per_slot() -> bool:
+    """Whether this LSF cluster reserves (and enforces) ``rusage[mem=...]`` per slot (``RESOURCE_RESERVE_PER_TASK=Y``),
+    so that a job with ``-n 8`` and ``mem=32G`` gets 256 GB. False when ``bparams`` is not available."""
+    if not shutil.which("bparams"):
+        return False
+    try:
+        out = subprocess.run(["bparams", "-a"], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return re.search(r"RESOURCE_RESERVE_PER_TASK\s*=\s*Y", out, re.IGNORECASE) is not None
+
+
+def lsf_memory(res: "JobResources") -> str:
+    """The ``rusage[mem=...]`` value: the job's memory, or its share per slot where LSF multiplies it by the slots."""
+    per_slot = res.memory_per_slot if res.memory_per_slot is not None else lsf_reserves_per_slot()
+    mb = memory_mb(res.memory)
+    if not per_slot or res.threads <= 1 or not mb:
+        return res.memory
+    share = math.ceil(mb / res.threads)
+    return f"{share // 1024}G" if share % 1024 == 0 else f"{share}M"
 
 
 def format_walltime(seconds: int) -> str:
@@ -132,7 +160,7 @@ def header(scheduler: str, job_name: str, log_dir: str, res: JobResources, array
         # All slots on one host (as SLURM's --nodes=1): the tools are multi-threaded, not MPI, so slots spread over
         # several hosts would leave the threads on one host with only part of the cores reserved there. One -R with
         # both sections: older LSF versions do not merge several -R options.
-        rusage = f"rusage[mem={res.memory}] " if res.memory else ""
+        rusage = f"rusage[mem={lsf_memory(res)}] " if res.memory else ""
         lines.append(f'#BSUB -R "{rusage}span[hosts=1]"')
         if walltime_seconds(res.walltime):
             lines.append(f"#BSUB -W {_lsf_time(walltime_seconds(res.walltime))}")

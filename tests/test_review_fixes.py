@@ -280,3 +280,85 @@ def test_local_runner_replaces_the_status_of_an_earlier_run(tmp_path):
     submit = _SUBMIT_FUNCTIONS["local"].replace("SHELL_BIN", "/bin/sh")
     subprocess.run(["bash", "-c", f"{submit}\nsubmit {script}"], check=True, capture_output=True)
     assert (exp / "status" / "j.status").read_text().startswith("DONE")
+
+
+# --- LSF test of 2026-11-18 ------------------------------------------------------------------
+@pytest.mark.parametrize("shell", [s for s in ("bash", "sh") if shutil.which(s)])
+@pytest.mark.parametrize("signal_name, code", [("USR2", 140), ("TERM", 143)])
+def test_a_job_ended_by_a_signal_is_recorded_as_failed(tmp_path, shell, signal_name, code):
+    """LSF's run limit sends USR2, SLURM's TERM: the job was recorded DONE with exit code 0."""
+    import os
+    import signal
+    import time
+
+    from mitopiper import jobscript
+    from mitopiper.builder import StepCommands
+    from mitopiper.config import Workflow
+
+    wf = Workflow.default()
+    wf.set_general("environment", shell)
+    script = tmp_path / "j.sh"
+    script.write_text(jobscript.preamble(wf, str(tmp_path), "j") +
+                      jobscript.body([StepCommands("s", "d", ["sleep 30"])], "x", wf))
+    job = subprocess.Popen([shell, str(script)], cwd=tmp_path, stdout=subprocess.DEVNULL, start_new_session=True)
+    status = tmp_path / "status" / "j.status"
+    for _ in range(100):
+        if status.exists() and status.read_text().startswith("RUNNING s"):
+            break
+        time.sleep(0.1)
+    os.killpg(job.pid, getattr(signal, f"SIG{signal_name}"))         # the scheduler signals the job's processes
+    assert job.wait(timeout=20) == code
+    assert status.read_text().split()[0] == "FAILED" and status.read_text().split()[-1] == str(code)
+
+
+def test_a_failing_set_up_line_stops_the_job(tmp_path):
+    from mitopiper import jobscript
+    from mitopiper.config import Workflow
+
+    wf = Workflow.default()
+    wf.set_general("free_form", "false")
+    text = jobscript.preamble(wf, str(tmp_path), "j")
+    assert text.index("set -eo pipefail") < text.index("\nfalse\n")
+
+
+def test_the_scheduler_s_failure_wins_over_a_done_status(tmp_path):
+    """Job scripts written before the signal traps recorded a killed job as DONE; LSF said EXIT."""
+    ws = Workspace(tmp_path / "ws")
+    exp = ws.output_dir / "E"
+    (exp / "status").mkdir(parents=True)
+    (exp / "jobs.tsv").write_text("job_id\tjob_name\tscript\tkind\n7\tprep_E\t/x\tprepare\n8\ts_a_0\t/y\tsample\n"
+                                  "9\te_E\t/z\texperiment\n")
+    (exp / "status" / "prep_E.status").write_text("DONE - 100 155 0\n")
+    (exp / "stdout").mkdir()
+    (exp / "stdout" / "7.out").write_text("Subject: Job 7: <prep_E> in cluster <c> Exited\n"
+                                          "TERM_RUNLIMIT: job killed after reaching LSF run time limit.\n")
+    info = {"7": (mon.FAILED, "EXIT"), "8": (mon.PENDING, "PEND"), "9": (mon.PENDING, "PEND")}
+    jobs = {j.name: j for j in mon.collect(ws, ["E"], mon.ErrorScanner(), lambda s, ids: info)}
+    assert jobs["prep_E"].state == mon.KILLED
+    # the jobs after it wait for good on LSF/SLURM: the monitor says so
+    assert jobs["s_a_0"].scheduler_state == mon.BLOCKED == jobs["e_E"].scheduler_state
+    from mitopiper.diagnose import diagnose, merged_rerun_options
+    suggestions = diagnose(jobs["prep_E"])
+    assert "time limit" in suggestions[0].cause and "walltime" in merged_rerun_options(suggestions)
+
+
+def test_lsf_reasons_cancelled_and_never_started(tmp_path):
+    from mitopiper.diagnose import diagnose
+
+    report = tmp_path / "77075.out"
+    report.write_text("Exited with exit code 130.\nTERM_OWNER: job killed by owner.\n")
+    killed = mon.JobStatus("E", "s_a_0", state=mon.FAILED, exit_code=130, step="fastqc_pre", stdout=str(report),
+                           started=1)
+    assert diagnose(killed)[0].cause.startswith("The job was cancelled")
+    pending = mon.JobStatus("E", "e_E", state=mon.FAILED, scheduler_state="EXIT")   # bkill while pending: no logs
+    assert diagnose(pending)[0].cause.startswith("The job ended before it started")
+
+
+def test_lsf_memory_per_slot():
+    from mitopiper.schedulers import JobResources, header
+
+    res = JobResources(threads=8, memory="32G", memory_per_slot=True)
+    assert '#BSUB -R "rusage[mem=4G] span[hosts=1]"' in header("lsf", "j", "/e", res)     # 8 x 4G = 32G in all
+    odd = JobResources(threads=3, memory="2G", memory_per_slot=True)
+    assert "rusage[mem=683M]" in header("lsf", "j", "/e", odd)
+    assert "rusage[mem=32G]" in header("lsf", "j", "/e", JobResources(threads=8, memory="32G", memory_per_slot=False))

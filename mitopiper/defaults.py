@@ -258,6 +258,9 @@ DEFAULT_MAIN = {
     "verify_md5": [True, "verify downloaded FASTQ files against ENA's fastq_md5 column when available"],
     "download_delay": [30, "seconds to wait between consecutive downloads (be kind to ENA); a failed download "
                            "waits this long before its 2nd attempt, then twice as long each time (up to 10 min)"],
+    "lsf_memory_per_slot": ["auto", "LSF only: request the memory per slot (the job's memory divided by its threads), "
+                                    "for sites that multiply rusage[mem] by the slots (RESOURCE_RESERVE_PER_TASK=Y); "
+                                    "auto: ask bparams when the scripts are built, yes/no: force it"],
     "unset_perl_env": [True, "unset PERL5LIB and PERL5OPT in every job (a site-wide Perl breaks FastQC and Trim Galore "
                              "of conda; set them again in free_form if a step of yours needs them)"],
     "keep_reads": [True, "keep the downloaded and trimmed FASTQ files of a sample; false: delete them when its job "

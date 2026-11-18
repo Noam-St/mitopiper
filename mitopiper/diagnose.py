@@ -160,6 +160,8 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
     """Return the likely causes of a failed job, most specific first."""
     ctx = context or Context()
     lines = [e.text for e in job.errors] + (tail(Path(job.stderr), tail_lines) if job.stderr else [])
+    # LSF writes why it ended a job (TERM_RUNLIMIT, TERM_MEMLIMIT, TERM_OWNER ...) into its report on stdout
+    lines += [line for line in (tail(Path(job.stdout), tail_lines) if job.stdout else []) if "TERM_" in line]
     text = "\n".join(lines)
     rc = job.exit_code
     sched = (job.scheduler_state or "").upper()
@@ -227,9 +229,14 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
                 advice.append("If the queue itself has a shorter limit, also ask for a longer queue with --queue.")
             add(Suggestion(f"The job hit its time limit{where}", advice,
                            [f"mitopiper rerun --walltime {new}"], {"walltime": new}))
-    if sched.startswith("CANCELLED") and not found:
+    if (sched.startswith("CANCELLED") or _find(r"TERM_(FORCE_)?(OWNER|ADMIN)", text)) and not found:
         add(Suggestion("The job was cancelled (scancel/qdel/bkill or an administrator)",
                        ["If that was not intentional, just run it again."], ["mitopiper rerun"], {}))
+    if not found and job.state in (FAILED, KILLED) and job.started is None and not step and not text.strip():
+        # No status file and no log: the scheduler ended it while it was waiting (LSF: bkill of a pending job)
+        add(Suggestion("The job ended before it started: cancelled while waiting in the queue, or rejected",
+                       ["If that was not intentional (or the job it waited for has been fixed), run it again."],
+                       ["mitopiper rerun --submit"], {}))
     # qstat's state letters (Eqw, E): not the accounting words (TIMEOUT, CANCELLED ...)
     if ctx.scheduler == "sge" and re.fullmatch(r"[a-z]*E[a-z]*", job.scheduler_state or ""):
         add(Suggestion("SGE put the job in an error state (Eqw)",

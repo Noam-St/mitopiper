@@ -3,6 +3,13 @@
 ## 2.0.1 (unreleased)
 
 ### Fixed
+- **A job ended by a signal was recorded as `DONE`** (exit code 0): LSF's run limit (USR2), SLURM's (TERM) and other signals made the shell exit while the status file still recorded the last finished command's status. The monitor showed DONE, `rerun` found nothing to rerun, and the jobs after it waited forever. Job scripts now exit with 128 + the signal's number, which is recorded as `FAILED`, and the monitor no longer believes `DONE` when the scheduler reports the job failed. Found in the first LSF test (IBM Spectrum LSF 10.1).
+- LSF: array tasks each show their own state while the array runs. `bjobs` gives every task the array's id, so all tasks showed the state of the last one (a pending task `DONE`, a running one `KILLED`); the monitor now asks for the task index too.
+- LSF: sites that reserve memory per slot (`RESOURCE_RESERVE_PER_TASK=Y`) multiplied the memory request by the threads (STAR, 8 × 32G: 256 GB). New general setting `lsf_memory_per_slot` (`auto`: read from `bparams` when the scripts are built; `yes`/`no`) writes the job's memory divided by its slots.
+- Jobs waiting for a failed job (SLURM `afterok`, LSF `done()`: they never start) are marked in the monitor: "waits for a failed job: starts only after a rerun".
+- The diagnosis reads LSF's reason for ending a job (`TERM_RUNLIMIT`, `TERM_MEMLIMIT`, `TERM_OWNER` ...) from its job report, and says when a job was cancelled before it started instead of "unrecognised failure".
+- A failing `free_form` line (a module or environment that does not load) stops the job: `fail_fast` is now set before it.
+- README: how to create the tools environment when `.condarc` adds the `defaults` channel.
 - LSF: a job's slots are kept on one host (`-R "span[hosts=1]"`, combined with the memory request in one `-R`): the tools are multi-threaded, and slots spread over several hosts left the threads on one host with only part of its cores reserved.
 - LSF array jobs write each task's LSF job report to its own file (`%J_%I.out`); every task wrote to the same `%J.out` before. The tasks' own logs were already separate.
 - The monitor could hang when a stderr log larger than 8 MB shrank (e.g. was rewritten by a rerun) while its lines were being counted.

@@ -197,6 +197,8 @@ def job_resources(workflow: Workflow, steps: Optional[list] = None) -> JobResour
         account=str(workflow.general("account", "") or ""),
         shell=str(workflow.general("environment", "bash") or "bash"),
         parallel_env=str(workflow.general("parallel_env", "shared") or "shared"),
+        memory_per_slot={"yes": True, "true": True, "no": False, "false": False}.get(
+            str(workflow.general("lsf_memory_per_slot", "auto")).strip().lower()),
     )
 
 

@@ -68,6 +68,10 @@ pm_exit() {
     echo "$pm_state $PM_STEP $PM_START $(date +%s) $pm_rc" > "$PM_STATUS"
 }
 trap pm_exit EXIT
+# A scheduler ends a job with a signal (LSF run limit: USR2, SLURM: TERM, ...). Exit with 128 + its number (Linux
+# numbers), so that pm_exit records FAILED: otherwise $? is the status of the last command that finished (0).
+trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 131' QUIT; trap 'exit 138' USR1; trap 'exit 140' USR2
+trap 'exit 143' TERM; trap 'exit 152' XCPU 2>/dev/null; trap 'exit 153' XFSZ 2>/dev/null
 echo "RUNNING - $PM_START $PM_START -" > "$PM_STATUS"
 """
 
@@ -145,11 +149,12 @@ def preamble(workflow: Workflow, exp_dir: str, job_name: str, depends_on: Option
         # A site Perl's PERL5LIB (set by ~/.cshrc or a module) breaks the Perl tools of conda environments
         # (FastQC, Trim Galore: "Perl API version v5.24.0 of Cwd.c does not match"), and jobs inherit it.
         text += "unsetenv PERL5LIB\nunsetenv PERL5OPT\n" if fam == "csh" else "unset PERL5LIB PERL5OPT\n"
+    # fail_fast before free_form: a set-up line that fails (a module or environment that does not load) stops the job
+    if fail_fast(workflow) and fam == "posix":
+        text += "set -eo pipefail\n" if shell in PIPEFAIL_SHELLS else "set -e\n"
     free_form = str(workflow.general("free_form", "") or "")
     if free_form:
         text += free_form if free_form.endswith("\n") else free_form + "\n"
-    if fail_fast(workflow) and fam == "posix":
-        text += "set -eo pipefail\n" if shell in PIPEFAIL_SHELLS else "set -e\n"
     return text
 
 

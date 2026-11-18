@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .config import Workspace, manifest_path
-from .schedulers import kind_of, walltime_seconds
+from .schedulers import STAGES, kind_of, walltime_seconds
 
 # Job states, in display order.
 NOT_SUBMITTED, PENDING, RUNNING, DONE, FAILED, KILLED, UNKNOWN = (
@@ -341,14 +341,16 @@ def query_scheduler(scheduler: str, job_ids: list, runner: Callable = _run) -> O
                 found[parts[0]] = (state, raw)
         return found
     if scheduler == "lsf":
-        out = runner(["bjobs", "-a", "-noheader", "-o", "jobid stat delimiter='|'", *ids])
+        # Every task of an array has the array's job id: jobindex (0 outside arrays) tells them apart, as the
+        # <id>_<task> under which master.sh records them.
+        out = runner(["bjobs", "-a", "-noheader", "-o", "jobid jobindex stat delimiter='|'", *ids])
         if out is None:
             return None
         for line in out.splitlines():
-            parts = line.split("|")
-            if len(parts) == 2 and parts[0].strip().isdigit():
-                raw = parts[1].strip()
-                found[parts[0].strip()] = (_LSF.get(raw, UNKNOWN), raw)
+            parts = [part.strip() for part in line.split("|")]
+            if len(parts) == 3 and parts[0].isdigit():
+                key = f"{parts[0]}_{parts[1]}" if parts[1] not in ("", "0") else parts[0]
+                found[key] = (_LSF.get(parts[2], UNKNOWN), parts[2])
         return found
     return None
 
@@ -541,6 +543,10 @@ def collect(workspace: Workspace, experiments: list, scanner: ErrorScanner,
                 job.started, job.updated, job.exit_code = status["started"], status["updated"], status["exit_code"]
                 if status["state"] == "DONE":
                     job.state = DONE
+                    if sched and sched[0] in (FAILED, KILLED):
+                        # The scheduler ended it (e.g. LSF's run limit) although the script recorded success: a job
+                        # script written before the signal traps, or a set-up line that failed before fail_fast.
+                        job.state = KILLED
                 elif status["state"] == "FAILED":
                     job.state = FAILED
                 elif status["state"] == "SKIPPED":
@@ -571,7 +577,22 @@ def collect(workspace: Workspace, experiments: list, scanner: ErrorScanner,
             job.errors_partial = scanner.partial(stderr)
             job.steps = read_steps_file(exp_dir, name)
             statuses.append(job)
+        _mark_blocked([j for j in statuses if j.experiment == exp])
     return statuses
+
+
+BLOCKED = "waits for a failed job: starts only after a rerun"
+
+
+def _mark_blocked(jobs: list) -> None:
+    """Pending jobs of a later stage than a failed one: SLURM (afterok) and LSF (done()) keep them waiting for good
+    (LSF: "Dependency condition invalid or never satisfied"). Says so; ``rerun`` cancels and resubmits them."""
+    failed = [STAGES.index(j.kind) for j in jobs if j.state in (FAILED, KILLED) and j.kind in STAGES]
+    if not failed:
+        return
+    for job in jobs:
+        if job.state == PENDING and job.kind in STAGES and STAGES.index(job.kind) > min(failed):
+            job.scheduler_state = BLOCKED
 
 
 # ------------------------------------------------------------- display
@@ -624,7 +645,8 @@ def render_table(statuses: list, color: bool = False, width: int = 120) -> str:
         for job, state in zip(jobs, states):
             prefix = (f"{job.name:<{name_w}}  {job.job_id or '-':>9}  {state:<{state_w}}  {job.step or '-':<{step_w}}  "
                       f"{_fmt_duration(job.elapsed):>8}  {_error_count(job):>4}  ")
-            last = (job.last_error or (job.scheduler_state if job.state == SKIPPED else ""))[: max(10, width - len(prefix))]
+            note = job.scheduler_state if job.state == SKIPPED or job.scheduler_state == BLOCKED else ""
+            last = (job.last_error or note)[: max(10, width - len(prefix))]
             line = prefix + last
             out.append(_color(line, job.state, color))
         out.append("")

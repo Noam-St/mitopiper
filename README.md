@@ -100,6 +100,10 @@ conda activate mitopiper-tools
 #   conda activate /path/to/envs/mitopiper-tools
 ```
 
+If it fails to resolve (e.g. `cutadapt =4.9 requires xopen >=1.6.0, which does not exist`), your `.condarc`
+probably adds the `defaults` channel with flexible priority. Use only the channels the file lists:
+`CONDA_CHANNEL_PRIORITY=strict mamba env create -f envs/mitopiper-tools.yml --override-channels -c conda-forge -c bioconda`.
+
 **4. mitopiper itself**, into that environment:
 
 ```bash

@@ -122,15 +122,19 @@ def test_query_scheduler_parsing():
     outputs = {
         "sacct": "11|TIMEOUT\n12|RUNNING\n13|CANCELLED by 42\n",
         "qstat": "job-ID prior name user state\n----\n  21 0.5 s_a u r 01/01\n  22 0.5 s_b u qw 01/01\n  23 0.5 s_c u Eqw 01/01\n",
-        "bjobs": "31|RUN\n32|EXIT\n33|PEND\n",
+        # LSF: jobindex is 0 outside arrays; an array's tasks share its id (BGU-style ids, LSF test of 2026-11-18)
+        "bjobs": "31|0|RUN\n32|0|EXIT\n33|0|PEND\n40|1|DONE\n40|2|PEND\n",
     }
     runner = lambda cmd: outputs.get(cmd[0])  # noqa: E731
     assert mon.query_scheduler("slurm", ["11", "12", "13"], runner) == {
         "11": (mon.KILLED, "TIMEOUT"), "12": (mon.RUNNING, "RUNNING"), "13": (mon.KILLED, "CANCELLED")}
     assert mon.query_scheduler("sge", ["21", "22", "23"], runner) == {
         "21": (mon.RUNNING, "r"), "22": (mon.PENDING, "qw"), "23": (mon.FAILED, "Eqw")}
-    assert mon.query_scheduler("lsf", ["31", "32", "33"], runner) == {
-        "31": (mon.RUNNING, "RUN"), "32": (mon.FAILED, "EXIT"), "33": (mon.PENDING, "PEND")}
+    lsf = mon.query_scheduler("lsf", ["31", "32", "33", "40_1", "40_2"], runner)
+    assert lsf == {"31": (mon.RUNNING, "RUN"), "32": (mon.FAILED, "EXIT"), "33": (mon.PENDING, "PEND"),
+                   "40_1": (mon.DONE, "DONE"), "40_2": (mon.PENDING, "PEND")}
+    # each array task keeps its own state (all tasks took the last row's before)
+    assert mon.task_state(lsf, "40_2") == (mon.PENDING, "PEND") and mon.task_state(lsf, "40_1")[0] == mon.DONE
     assert mon.query_scheduler("slurm", ["1"], lambda cmd: None) is None
     assert mon.query_scheduler("local", ["1"], runner) is None
 
