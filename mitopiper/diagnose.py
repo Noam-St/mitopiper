@@ -212,7 +212,9 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
         add(Suggestion(
             "The job ran out of memory" + (f" in step '{step}'" if step else ""),
             [f"It was using the job memory limit ({ctx.memory or 'default'}). Give it more memory, or lower the "
-             f"memory/threads options of '{step or 'the step'}' (e.g. samtools sort -m, STAR --limitBAMsortRAM)."],
+             f"memory/threads options of '{step}' (e.g. samtools sort -m, STAR --limitBAMsortRAM)." if step else
+             f"It was using the job memory limit ({ctx.memory or 'default'}) before its first step, i.e. in the set-up "
+             "lines (free_form) or the job's start: give it more memory, or check those lines."],
             [f"mitopiper rerun --memory {new}"],
             {"memory": new}))
     if sched in ("TIMEOUT", "DEADLINE") or _find(r"due to time limit|time limit|TERM_RUNLIMIT|h_rt", text):

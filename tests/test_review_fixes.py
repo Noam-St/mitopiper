@@ -354,8 +354,13 @@ def test_lsf_reasons_cancelled_and_never_started(tmp_path):
     assert diagnose(pending)[0].cause.startswith("The job ended before it started")
 
 
-def test_lsf_memory_per_slot():
+def test_lsf_memory_per_slot(monkeypatch):
+    from mitopiper import schedulers
     from mitopiper.schedulers import JobResources, header
+
+    # auto (memory_per_slot None) asks the site, as bparams would answer on a per-slot site
+    monkeypatch.setattr(schedulers, "lsf_reserves_per_slot", lambda: True)
+    assert "rusage[mem=1G]" in header("lsf", "j", "/e", JobResources(threads=2, memory="2G"))
 
     res = JobResources(threads=8, memory="32G", memory_per_slot=True)
     assert '#BSUB -R "rusage[mem=4G] span[hosts=1]"' in header("lsf", "j", "/e", res)     # 8 x 4G = 32G in all

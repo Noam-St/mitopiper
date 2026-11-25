@@ -31,3 +31,12 @@ def registered(workspace):
     reg.add("Danio_rerio", ReferenceSet(refpath="/refs/dr/chrM.fa", gtfpath="/refs/dr/chrM.gff3"))
     reg.add("Homo_sapiens", ReferenceSet(refpath="/refs/hs/chrM.fa", gtfpath="/refs/hs/chrM.gff3"))
     return workspace
+
+
+@pytest.fixture(autouse=True)
+def no_site_lsf_settings(monkeypatch):
+    """The tests must not depend on the machine: on an LSF cluster that reserves memory per slot, bparams made the LSF
+    headers differ (test_headers failed there). Tests of the per-slot memory set memory_per_slot themselves."""
+    from mitopiper import schedulers
+
+    monkeypatch.setattr(schedulers, "lsf_reserves_per_slot", lambda: False)

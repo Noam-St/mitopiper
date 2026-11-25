@@ -112,3 +112,25 @@ def test_sge_submit_fails_loudly_when_no_id(tmp_path, monkeypatch):
     out = subprocess.run(["bash", "-euo", "pipefail", "-c", _SUBMIT_FUNCTIONS["sge"] + "\njid=$(submit /x/s.sh); echo got"],
                          capture_output=True, text=True)
     assert out.returncode != 0 and "got" not in out.stdout and "Unable to run job: denied" in out.stderr
+
+
+def test_lsf_submit_fails_loudly_when_bsub_refuses_the_job(tmp_path, monkeypatch):
+    """LSF test of 2026-11-25: a walltime above the queue's RUNLIMIT was refused, and master.sh still reported the job
+    as submitted (with an empty id)."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "bsub").write_text("#!/bin/sh\necho \"RUNLIMIT: Cannot exceed queue's hard limit(s). Job not submitted.\" >&2\n"
+                                  "exit 255\n")
+    (bin_dir / "bsub").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    script = tmp_path / "s.sh"                                       # bsub reads the script on stdin
+    script.write_text("#!/bin/bash\n")
+    from mitopiper.schedulers import _SUBMIT_FUNCTIONS
+    out = subprocess.run(["bash", "-euo", "pipefail", "-c", _SUBMIT_FUNCTIONS["lsf"] + f"\njid=$(submit {script}); echo got"],
+                         capture_output=True, text=True)
+    assert out.returncode != 0 and "got" not in out.stdout
+    assert f"bsub did not submit {script}: RUNLIMIT: Cannot exceed queue's hard limit(s)" in out.stderr
+    (bin_dir / "bsub").write_text("#!/bin/sh\necho 'Job <123> is submitted to queue <short>.'\n")
+    out = subprocess.run(["bash", "-euo", "pipefail", "-c", _SUBMIT_FUNCTIONS["lsf"] + f"\nsubmit {script}"],
+                         capture_output=True, text=True)
+    assert out.stdout.strip() == "123"

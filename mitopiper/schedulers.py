@@ -195,16 +195,23 @@ _SUBMIT_FUNCTIONS = {
         sbatch --parsable "$script"
     fi | cut -d';' -f1
 }""",
+    # A job bsub refuses (e.g. "RUNLIMIT: Cannot exceed queue's hard limit(s). Job not submitted.") has no id: stop
+    # master.sh there, as for SGE, instead of recording an empty id and reporting the job as submitted.
     "lsf": r"""submit() {
     local script=$1; shift
-    local out cond=""
+    local out id cond=""
     if [ $# -gt 0 ]; then
         for j in "$@"; do cond="${cond:+$cond && }done($j)"; done
-        out=$(bsub -w "$cond" < "$script")
+        out=$(bsub -w "$cond" < "$script" 2>&1) || true
     else
-        out=$(bsub < "$script")
+        out=$(bsub < "$script" 2>&1) || true
     fi
-    echo "$out" | sed -nE 's/^Job <([0-9]+)>.*/\1/p'
+    id=$(printf '%s\n' "$out" | sed -nE 's/^Job <([0-9]+)>.*/\1/p' | head -n1)
+    if [ -z "$id" ]; then
+        echo "[mitopiper] bsub did not submit $script: $out" >&2
+        return 1
+    fi
+    echo "$id"
 }""",
     "local": r"""submit() {
     local script=$1; shift

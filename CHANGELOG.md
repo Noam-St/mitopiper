@@ -3,6 +3,9 @@
 ## 2.0.1 (unreleased)
 
 ### Fixed
+- **LSF: a job `bsub` refused was reported as submitted** (e.g. a walltime above the queue's run limit: `RUNLIMIT: Cannot exceed queue's hard limit(s). Job not submitted.`). `master.sh` recorded an empty job id and printed "Submitted"; the monitor then showed the jobs as `UNKNOWN`. Now `master.sh` stops with bsub's message, as it does for Grid Engine, and the monitor shows the jobs it did not submit as never submitted. Found in the second LSF test.
+- The unit tests no longer depend on the machine: on an LSF cluster that reserves memory per slot, `bparams` changed the LSF headers and `test_headers` failed.
+- The out-of-memory advice for a job that ran out of memory before its first step points to the set-up lines instead of "the step".
 - **A job ended by a signal was recorded as `DONE`** (exit code 0): LSF's run limit (USR2), SLURM's (TERM) and other signals made the shell exit while the status file still recorded the last finished command's status. The monitor showed DONE, `rerun` found nothing to rerun, and the jobs after it waited forever. Job scripts now exit with 128 + the signal's number, which is recorded as `FAILED`, and the monitor no longer believes `DONE` when the scheduler reports the job failed. Found in the first LSF test (IBM Spectrum LSF 10.1).
 - LSF: array tasks each show their own state while the array runs. `bjobs` gives every task the array's id, so all tasks showed the state of the last one (a pending task `DONE`, a running one `KILLED`); the monitor now asks for the task index too.
 - LSF: sites that reserve memory per slot (`RESOURCE_RESERVE_PER_TASK=Y`) multiplied the memory request by the threads (STAR, 8 × 32G: 256 GB). New general setting `lsf_memory_per_slot` (`auto`: read from `bparams` when the scripts are built; `yes`/`no`) writes the job's memory divided by its slots.
