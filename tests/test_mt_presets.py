@@ -293,6 +293,24 @@ def test_present_star_index_does_not_read_the_fasta(tmp_path, monkeypatch):
     monkeypatch.setattr(references, "validate_fasta", lambda path: 4)
     (command,) = prepare_commands(ReferenceSet(refpath=str(fasta)), "Homo_sapiens", str(ws.root), wf, csh=False)
     assert "genomeGenerate" in command and "--genomeSAindexNbases" in command
+    # the STAR step's threads (8), not a fixed 4, and the temporary folder next to the index (LSF test, GRCh38)
+    assert "--runThreadN 8 " in command and f'--outTmpDir "{tmp_path}/_STARtmp.$$"' in command
+
+
+def test_the_reference_job_gets_the_threads_and_memory_of_a_star_index(tmp_path, data_dir):
+    """LSF test: STAR indexed GRCh38 with 4 threads in a 1-slot, 30 GB job (CPU enforced: one core; 26 GB used)."""
+    from mitopiper.build import prep_resources
+    from mitopiper.schedulers import JobResources
+
+    ws = Workspace(tmp_path / "ws")
+    ws.initialise()
+    wf = ws.load_workflow("rnaseq-expression")
+    general = JobResources(threads=1, memory="30G")
+    star = ['if [ ! -s "/r/SA" ]; then STAR --runMode genomeGenerate --runThreadN 8 ...; fi']
+    res = prep_resources(wf, general, star)
+    assert (res.threads, res.memory) == (8, "40G")                              # STAR step: 8 threads, 32G + 8G
+    assert prep_resources(wf, general, ['bwa index "/r/g.fa"']) is general       # no STAR index: as before
+    assert prep_resources(wf, JobResources(threads=16, memory="64G"), star) == JobResources(threads=16, memory="64G")
 
 
 SLOW_BWA = r"""#!/bin/sh

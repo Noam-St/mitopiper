@@ -27,7 +27,7 @@ from typing import Optional
 from . import jobscript, toolcheck
 from .build import (
     BuildError, _write_script, download_mode, max_running, download_resources, find_experiment_metadata, job_resources, load_manifest,
-    MT_MAX_BYTES, pipeline_tools, split_downloads, uses_array, write_array,
+    MT_MAX_BYTES, pipeline_tools, prep_resources, split_downloads, uses_array, write_array,
 )
 from .builder import StepCommands, _join, build_experiment_steps, build_sample_job, output_paths, step_scope
 from .config import Workflow, Workspace, migrated
@@ -301,6 +301,8 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
                                                     commands)], exp, wf)
                 jobs.prepare = str(path)
             res = job_resources(wf, job_steps)
+            if item.kind == "prepare":                 # a STAR index needs the STAR step's threads and more memory
+                res = prep_resources(wf, res, commands)
             # Resources given explicitly for this rerun win over what the steps declare.
             fixed = {"memory": "memory", "walltime": "walltime", "threads": "threads", "queue": "queue"}
             res = replace(res, **{field: (int(item.overrides[key]) if key == "threads" else item.overrides[key])

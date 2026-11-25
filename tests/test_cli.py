@@ -158,3 +158,15 @@ def test_version_names_the_commit(monkeypatch, capsys):
     monkeypatch.setattr(_commit, "COMMIT", "$Format:%h$")          # not stamped and no git: says so
     monkeypatch.setattr("subprocess.run", lambda *a, **k: (_ for _ in ()).throw(OSError("no git")))
     assert mitopiper.build_info().startswith("commit unknown")
+
+
+def test_refs_add_stores_absolute_paths(tmp_path, monkeypatch):
+    """A relative path only worked when master.sh was run from the folder refs add was run in."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "ref").mkdir()
+    (tmp_path / "ref" / "mt.fa").write_text(">c\nACGT\n")
+    ws = Workspace(tmp_path / "ws")
+    assert run(ws, "refs", "add", "Homo sapiens", "--fasta", "ref/mt.fa", "--gtf", "ref/mt.gff3") == 0
+    from mitopiper.references import ReferenceRegistry
+    ref = ReferenceRegistry(ws).get("Homo_sapiens")
+    assert ref.refpath == str(tmp_path / "ref" / "mt.fa") and ref.gtfpath == str(tmp_path / "ref" / "mt.gff3")

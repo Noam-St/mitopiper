@@ -130,11 +130,15 @@ _UNITS = ["K", "M", "G", "T"]
 
 
 def double_memory(memory: str, minimum: str = "8G") -> str:
-    """``30G`` -> ``60G``; ``1500M`` -> ``3G``; unknown formats fall back to ``minimum``."""
+    """``30G`` -> ``60G``; ``1500M`` -> ``3G``; unknown formats fall back to ``minimum``. Never less than 1G: a job
+    killed at a small limit (100M) usually needs far more than twice that (LSF test: 600 MB), so 200M would fail
+    again."""
     match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([KMGT]?)B?\s*", str(memory or ""), re.IGNORECASE)
     if not match:
         return minimum
     value, unit = float(match.group(1)) * 2, (match.group(2) or "M").upper()
+    if value * {"K": 1 / 1024, "M": 1, "G": 1024, "T": 1024 * 1024}[unit] < 1024:
+        return "1G"
     while value >= 1024 and unit != "T":
         value, unit = value / 1024, _UNITS[_UNITS.index(unit) + 1]
     return f"{int(value) if value == int(value) else round(value, 1)}{unit}"

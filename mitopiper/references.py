@@ -591,11 +591,16 @@ def _fasta_index_commands(fasta: str, workflow, csh: bool, star: bool, skip_pres
         # .sa is the last file bwa index writes: a job killed while indexing leaves .bwt without it
         wanted.append((f"{fasta}.sa", lambda: f'{bwa} index "{fasta}"'))
     if star and star_steps:
+        from .builder import step_threads          # builder imports this module
+
         step = pipeline[star_steps[0]]
         star_bin = step.get("path") or step.get("key", "STAR")
         fasta_dir = str(Path(fasta).parent)
+        # As many threads as the STAR step (the reference job asks for them: prep_resources); the temporary folder
+        # next to the index, not in the folder master.sh was run from ($$: STAR refuses an existing one).
         wanted.append((f"{fasta_dir}/SA", lambda: (
-            f'{star_bin} --runMode genomeGenerate --genomeDir "{fasta_dir}" --runThreadN 4 '
+            f'{star_bin} --runMode genomeGenerate --genomeDir "{fasta_dir}" '
+            f'--runThreadN {step_threads(workflow, star_steps[0])} --outTmpDir "{fasta_dir}/_STARtmp.$$" '
             f'--genomeFastaFiles "{fasta}" --genomeSAindexNbases {_sa_index_nbases(fasta)}')))
     return [_unless_exists(path, command(), csh) for path, command in wanted
             if not (skip_present and _present(path))]

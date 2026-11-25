@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.2 (unreleased)
+
+### Fixed
+- **The reference job built a STAR index with 4 threads in a 1-slot job** (`rnaseq-expression`, GRCh38 on an LSF cluster that enforces CPU: one core for 4 threads, still sorting after 77 minutes; 26 of 30 GB used). STAR now indexes with the threads of the STAR step (8), and the reference job asks for those slots and at least the STAR step's memory plus 8 GB (40 GB by default; reruns too). STAR's temporary folder is next to the index instead of the folder `master.sh` was run from, where reference jobs of two organisms would have shared it.
+- `--auto-fix` after an out-of-memory kill asks for at least 1 GB: a job killed at 100 MB that needed 600 MB got 200 MB and failed again.
+- `refs add` stores absolute paths: a relative `--fasta`/`--gtf` only worked when `master.sh` was run from the same folder.
+
 ## 2.0.1 (2026-11-25)
 
 ### Fixed

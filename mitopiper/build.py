@@ -202,6 +202,28 @@ def job_resources(workflow: Workflow, steps: Optional[list] = None) -> JobResour
     )
 
 
+#: Memory a STAR index needs on top of what the STAR step asks for (human: ~32 GB for the step, 36-40 GB to index).
+STAR_INDEX_EXTRA_MB = 8 * 1024
+
+
+def prep_resources(workflow: Workflow, resources: JobResources, prep_lines: list) -> JobResources:
+    """Resources of the reference job: the general ones, or more when it builds a STAR index, which runs with the STAR
+    step's threads and needs more memory than aligning (BGU/LSF test: 4 STAR threads in a 1-slot job on a site that
+    enforces CPU, and 26 of 30 GB used while indexing GRCh38)."""
+    if not any("--runMode genomeGenerate" in line for line in prep_lines):
+        return resources
+    star_steps = [s for s in workflow.active_order() if "STAR" in str(workflow.pipeline.get(s, {}).get("key", ""))]
+    if not star_steps:
+        return resources
+    threads = max(resources.threads, step_threads(workflow, star_steps[0]))
+    star_mb = memory_mb(str(workflow.pipeline[star_steps[0]].get("memory", "") or "")) or 0
+    needed_mb = star_mb + STAR_INDEX_EXTRA_MB if star_mb else 0
+    memory = resources.memory
+    if needed_mb > (memory_mb(memory) or 0):
+        memory = f"{int(needed_mb // 1024)}G" if needed_mb % 1024 == 0 else f"{int(needed_mb)}M"
+    return replace(resources, threads=threads, memory=memory)
+
+
 def load_manifest(exp_dir: Path) -> dict:
     """The provenance manifest of a build (raises :class:`BuildError` when missing or unreadable)."""
     try:
@@ -346,7 +368,8 @@ def build_experiment(
         jobs.check = write(check_name, "check", toolcheck.check_job_body(tools, workflow, exp), check_resources(resources))
     if prep_name:
         steps_ = [StepCommands("prepare_references", "Index the automatically downloaded references", prep_lines)]
-        jobs.prepare = write(prep_name, "prepare", jobscript.body(steps_, exp_dir.name, workflow))
+        jobs.prepare = write(prep_name, "prepare", jobscript.body(steps_, exp_dir.name, workflow),
+                             prep_resources(workflow, resources, prep_lines))
     if dl_name:
         jobs.download = write(dl_name, "download", jobscript.body(downloads, exp_dir.name, workflow),
                               download_resources(workflow, resources))

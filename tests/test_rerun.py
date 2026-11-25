@@ -83,6 +83,7 @@ def test_diagnosis_rules(kwargs, cause, rerun_opts):
 def test_resource_doubling():
     assert double_memory("30G") == "60G"
     assert double_memory("600M") == "1.2G"
+    assert double_memory("100M") == "1G"            # LSF test: killed at 100M, needed 600 MB; 200M would fail again
     assert double_memory("") == "8G"
     assert double_walltime("1-20:00:00") == "3-16:00:00"
     assert double_walltime("04:00:00") == "08:00:00"

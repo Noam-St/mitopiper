@@ -386,8 +386,12 @@ def cmd_refs(ws: Workspace, args) -> int:
         print(table(rows, ["Organism", "Name", "Active", "FASTA", "GTF/GFF", "Nuclear FASTA", "NUMT FASTA", "Source",
                            "Accession"]) if rows else "No references registered.")
     elif args.action == "add":
-        ref = ReferenceSet(refpath=args.fasta, gtfpath=args.gtf, nuc_refpath=args.nuc_fasta,
-                           numt_refpath=args.numt_fasta, chrominfopath=args.chrominfo)
+        def absolute(path):
+            # Jobs run in the folder master.sh is started from: a relative path would only work from this one
+            return str(Path(path).expanduser().absolute()) if path and not str(path).startswith("/") else path
+
+        ref = ReferenceSet(refpath=absolute(args.fasta), gtfpath=absolute(args.gtf), nuc_refpath=absolute(args.nuc_fasta),
+                           numt_refpath=absolute(args.numt_fasta), chrominfopath=absolute(args.chrominfo))
         if not Path(args.fasta).exists():
             log.warning("%s does not exist on this machine (fine if it exists on the cluster)", args.fasta)
         registry.add(args.organism.replace(" ", "_"), ref, args.name, activate=not args.no_activate)
