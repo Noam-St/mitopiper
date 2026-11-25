@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.1 (unreleased)
+## 2.0.1 (2026-11-25)
 
 ### Fixed
 - **LSF: a job `bsub` refused was reported as submitted** (e.g. a walltime above the queue's run limit: `RUNLIMIT: Cannot exceed queue's hard limit(s). Job not submitted.`). `master.sh` recorded an empty job id and printed "Submitted"; the monitor then showed the jobs as `UNKNOWN`. Now `master.sh` stops with bsub's message, as it does for Grid Engine, and the monitor shows the jobs it did not submit as never submitted. Found in the second LSF test.
