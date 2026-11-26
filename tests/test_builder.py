@@ -50,7 +50,7 @@ def test_single_end_default_pipeline():
     ]
     assert got["index"] == ["samtools index /data/output/EXP/alignment/SRR1_3_HS.sorted.bam"]
     assert got["mpileup"] == [
-        "samtools mpileup -Q 30 -d 0 -f /refs/chrM.fa /data/output/EXP/alignment/SRR1_3_HS.sorted.bam > /data/output/EXP/pileup/SRR1_3_HS.pileup"
+        "samtools mpileup -Q 30 -d 0 --reverse-del -f /refs/chrM.fa /data/output/EXP/alignment/SRR1_3_HS.sorted.bam > /data/output/EXP/pileup/SRR1_3_HS.pileup"
     ]
 
 

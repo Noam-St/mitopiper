@@ -202,6 +202,7 @@ DEFAULT_SETTINGS = {
     "mpileup": {
         "quality": _setting("Minimum base quality for a base to be considered", "-Q", 30),
         "no depth limit": _setting("Do not cap the depth (samtools' default caps it at 8000)", "-d", 0),
+        "reverse deletions": _setting("Mark deletions on the reverse strand with '#'", "--reverse-del", ""),
         "reference": _setting("Fasta type ref file", "-f", "_fasta"),
     },
     "fastqc": {
@@ -340,6 +341,10 @@ _PILEUP = (
     ("all positions", "Report every position, also those without coverage", "-a", ""),
     ("no depth limit", "Do not cap the depth (mtDNA coverage is very high)", "-d", 0),
     ("quality", "Minimum base quality for a base to be considered", "-Q", 30),
+    # FIX [AUDIT-2026-11-26-H3]: without it samtools writes '*' for deletions on both strands, so a deletion never had
+    # reverse-strand support and no deletion heteroplasmy passed the both-strands rule
+    ("reverse deletions", "Mark deletions on the reverse strand with '#' (per-strand deletion counts)", "--reverse-del",
+     ""),
 )
 
 

@@ -187,7 +187,7 @@ def sa_index_nbases(genome_length: int) -> int:
     """``--genomeSAindexNbases`` recommended by the STAR manual."""
     if genome_length <= 0:
         return 14
-    return int(round(min(14, math.log2(genome_length) / 2 - 1)))
+    return int(math.floor(min(14, math.log2(genome_length) / 2 - 1)))   # FIX [AUDIT-2026-11-26-M7]: floor, as STAR says
 
 
 def validate_fasta(path) -> int:

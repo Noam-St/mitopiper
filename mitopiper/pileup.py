@@ -281,8 +281,16 @@ def annotate_pileup(pileup, output, annotation=None, sample: str = "", flip_stra
     and positions whose major allele is not the reference."""
     sample = sample or Path(pileup).name.split(".")[0]
     rows_by_contig = {}
+    forward_del = reverse_del = False
     for chrom, position, ref, depth, bases in read_pileup(pileup):
         rows_by_contig.setdefault(chrom, {})[position] = (ref, depth, parse_bases(ref, bases))
+        forward_del = forward_del or "*" in bases
+        reverse_del = reverse_del or "#" in bases
+    if forward_del and not reverse_del:
+        # FIX [AUDIT-2026-11-26-H3]: a pileup made without --reverse-del counts every deletion as forward
+        print(f"[mitopiper] warning: {pileup} has deletions only on the forward strand ('*', never '#'): it was "
+              "probably made without samtools mpileup --reverse-del, so deletions cannot pass the both-strands "
+              "rule (mitopiper presets reset PRESET adds it)", file=sys.stderr)
     genes = read_annotation(annotation) if annotation else []
     seqid_of = annotation_contigs(genes, rows_by_contig)
     numt = read_numt_alleles(numt_alleles) if numt_alleles else None

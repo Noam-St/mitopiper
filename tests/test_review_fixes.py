@@ -506,7 +506,7 @@ def test_refs_add_refuses_a_gzipped_fasta(tmp_path):
 def test_star_index_of_a_genome_not_downloaded_yet_is_sized_from_ncbi():
     from mitopiper.references import _sa_index_nbases
 
-    assert _sa_index_nbases("/not/yet/yeast_genomic.fna", 12_157_105) == 11      # STAR: min(14, log2(L)/2 - 1)
+    assert _sa_index_nbases("/not/yet/yeast_genomic.fna", 12_157_105) == 10      # STAR: floor(min(14, log2(L)/2 - 1))
     assert _sa_index_nbases("/not/yet/genomic.fna") == 14
 
 
@@ -525,3 +525,42 @@ def test_the_rotated_alignment_of_the_numt_presets_pairs_the_mates():
         (line,) = next(s for s in job.steps if s.step == "align-rotated").lines
         assert line.startswith("samtools collate -u -O /w/output/E/alignment/S_0_HS.mt.bam | samtools fastq - | bwa mem")
         assert " -p " in line
+
+
+# --- audit 2026-11-26 -----------------------------------------------------------------------------------------------
+def test_every_mt_pileup_marks_reverse_strand_deletions():
+    """AUDIT-2026-11-26-H3: without --reverse-del a deletion never had reverse-strand support."""
+    from mitopiper.builder import build_sample_job
+    from mitopiper.config import Workflow
+    from mitopiper.defaults import bundled_presets
+    from mitopiper.metadata import Run, Sample
+
+    sample = Sample(index=0, accession="S", organism="Homo_sapiens", runs=[Run("R", ["/f_1.fq.gz", "/f_2.fq.gz"])])
+    for preset in ("mt-variants", "mt-variants-numt", "mt-variants-numtparser"):
+        job = build_sample_job(sample, Workflow(**bundled_presets()[preset]), "/w/output/E",
+                               ReferenceSet(refpath="/r/mt.fa", nuc_refpath="/r/g.fa"))
+        pileups = [line for s in job.steps if s.step in ("mpileup", "mpileup-rotated") for line in s.lines]
+        assert len(pileups) == 2 and all("--reverse-del" in line for line in pileups), preset
+
+
+def test_annotate_warns_about_a_pileup_without_reverse_strand_deletions(tmp_path, capsys):
+    from mitopiper import pileup
+
+    (tmp_path / "s.pileup").write_text("chrM\t1\tA\t6\t..,,**\tIIIIII\n")
+    pileup.annotate_pileup(tmp_path / "s.pileup", tmp_path / "s.tsv")
+    assert "--reverse-del" in capsys.readouterr().err
+    (tmp_path / "t.pileup").write_text("chrM\t1\tA\t6\t..,,*#\tIIIIII\n")
+    pileup.annotate_pileup(tmp_path / "t.pileup", tmp_path / "t.tsv")
+    assert "--reverse-del" not in capsys.readouterr().err
+
+
+def test_featurecounts_missing_attribute_is_diagnosed():
+    from mitopiper.diagnose import diagnose
+
+    line = ("ERROR: failed to find the gene identifier attribute in the 9th column of the provided GTF file. "
+            "The specified gene identifier attribute is 'gene_id'")
+    job = mon.JobStatus("E", "s_a_0", state=mon.FAILED, exit_code=255, step="featureCounts",
+                        errors=[mon.ErrorLine(1, line)])
+    (sug, *_) = diagnose(job)
+    assert sug.cause.startswith("featureCounts: the annotation has no such gene attribute")
+    assert "mitopiper presets reset rnaseq-expression" in sug.commands

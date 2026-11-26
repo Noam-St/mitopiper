@@ -456,11 +456,21 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
         add(Suggestion(f"'{step or tool}' crashed (segmentation fault)",
                        ["Usually caused by too little memory or a damaged input file."],
                        [f"mitopiper rerun --memory {double_memory(ctx.memory)}"], {"memory": double_memory(ctx.memory)}))
+    # FIX [AUDIT-2026-11-26-H9]: the advice was '-t gene -i ID', which counts intronic reads; count exons by the
+    # attribute the annotation has (the presets' placeholders read it from the file)
     if step.startswith("htseq") and _find(r"error|attribute|feature", text):
         add(Suggestion("htseq-count could not use the annotation",
-                       ["The feature type (-t) and id attribute (-i) must exist in the GTF/GFF3. NCBI GFF3 files "
-                        "use '-t gene -i ID' or '-i Name'; Ensembl GTFs use '-t exon -i gene_id'."],
+                       ["The feature type (-t) and id attribute (-i) must exist on the annotation's lines. Count "
+                        "exons: '-t exon -i gene_id' for a GTF, '-t exon -i gene' for an NCBI GFF3 (counting '-t gene' "
+                        "also counts reads in introns). The placeholder _gene_attr reads it from the annotation."],
                        ["mitopiper -> configuration -> change pipeline step settings -> htseq-count"], {}))
+    if _find(r"failed to find the gene identifier attribute", text):
+        add(Suggestion("featureCounts: the annotation has no such gene attribute on the counted lines",
+                       ["NCBI GFF3 names genes with 'gene' (-g gene, and -t exon,CDS for the mtDNA protein-coding "
+                        "genes), a GTF with 'gene_id'. The presets' placeholders _exon_gene_attr and _count_features "
+                        "read them from the annotation; workspaces made before 2.0.2 get them with presets reset."],
+                       ["mitopiper presets reset rnaseq-expression", "mitopiper rerun --from featureCounts -p "
+                        "rnaseq-expression --submit"], {}))
 
     if not found and job.state in (FAILED, KILLED, UNKNOWN):
         add(Suggestion(f"Unrecognised failure in step '{step or '?'}'" + (f" (exit code {rc})" if rc not in (None, 0) else ""),
