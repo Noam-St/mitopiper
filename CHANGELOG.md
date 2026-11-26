@@ -1,6 +1,12 @@
 # Changelog
 
-## 2.0.2 (unreleased)
+## 2.0.2 (2026-11-26)
+
+Fixes of a full audit on an HPC cluster (9 high and 19 medium findings). **Upgrading:** run
+`mitopiper presets reset` in every workspace (the mt presets now count deletions on both strands, `mpileup -d 0`,
+pair the rotated realignment, and count `exon,CDS` for NCBI GFF3). Derived references are named anew, so the
+next reference job builds them once more (about an hour for the human nuclear + mtDNA index).
+`heteroplasmy_matrix.tsv` has a new `alt` column.
 
 ### Added
 - One-line summaries of the presets, shown where a workflow is chosen (interactive menu) and by `presets list`; the two NUMT-aware presets now say how they remove NUMT reads (mapping quality vs Numt Parser). Your own presets take one with `presets save NAME --description "..."` or at the interactive save prompt (general setting `preset_summary`).
