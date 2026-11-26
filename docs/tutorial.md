@@ -51,7 +51,7 @@ python tutorial/simulate.py tutorial_data
 ```
 
 ```
-Wrote tutorial_data: mtDNA of 16000 bp, 25440 read pairs per sample (1440 from a NUMT with 90 differences), samples patient, control
+Wrote tutorial_data: mtDNA of 16000 bp, 25440 read pairs per sample (1440 from a NUMT with 90 differences), samples patient, control, edge
 ```
 
 This writes `tutorial_data/reference/{mt.fa,mt.gff3,nuclear.fa}`,
@@ -87,9 +87,9 @@ mitopiper -w tutorial_ws monitor tutorial
 1. **`check_tutorial`** checks that every tool the jobs call can be found.
 2. **`prep_tutorial`** indexes the mtDNA, and builds and indexes its rotated copy under
    `tutorial_ws/references/derived/`.
-3. **`s_control_0`** and **`s_patient_1`** each run: trimming → alignment to the mtDNA and to the rotated
+3. **`s_control_0`**, **`s_edge_1`** and **`s_patient_2`** each run: trimming → alignment to the mtDNA and to the rotated
    mtDNA → the two pileups → the circular pileup → the annotated table.
-4. **`e_tutorial`** collects the heteroplasmic sites of both samples, then runs MultiQC.
+4. **`e_tutorial`** collects the heteroplasmic sites of the samples, then runs MultiQC.
 
 The monitor should show every job `DONE`. If one fails, `mitopiper -w tutorial_ws monitor -e`
 shows the failed step, its error lines and a suggested fix, and
@@ -163,6 +163,14 @@ the reference* loses them too (depth 0): a read with the samples' allele is clos
 reference, so it is labelled NUMT. That is why the preset compares the reads with the sample's own mtDNA instead.
 On human data the same happens at positions where the rCRS has a rare allele and NUMTs the common one (4769, 8860):
 with the reference, those variants were lost in every sample of an RNA-seq project.
+
+The third sample, `edge`, checks the positions next to the origin, which the circular pileup takes from the
+rotated alignment: it has a 25% heteroplasmy at 15,950 and a 30% one-base deletion at 15,855. Every preset finds
+both, with the planted allele (`del` for the deletion) and a frequency error below 0.03. A deletion is counted on
+reads of both strands (samtools `mpileup --reverse-del`); without it, the deletion would read about 15%.
+`tutorial/check_results.py` also checks that every call names the planted allele, in the annotated table and in
+the VCF (`allele_errors`, `vcf_errors` in `accuracy.tsv`), and that no preset calls a false heteroplasmy outside
+the NUMT differences.
 
 `origin_coverage.tsv` shows the effect of circularity. It gives the depth of the 400 positions on each side of the
 origin, relative to the rest of the mtDNA:

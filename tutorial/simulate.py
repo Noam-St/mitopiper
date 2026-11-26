@@ -19,6 +19,11 @@ It writes, into OUTDIR:
   position where the NUMT differs from the mtDNA (where NUMT reads fake
   heteroplasmy).
 
+A third sample, ``edge``, has a heteroplasmy and a heteroplasmic one-base deletion
+next to the end of the mtDNA, where the circular pileup takes the rotated alignment
+(``mt_junction_window``). It is made with its own random generator, after the other
+samples, so that adding it changed none of their reads.
+
 Everything comes from ``--seed``, so the dataset is the same on every machine.
 It needs Python 3 only, and takes a few seconds::
 
@@ -44,6 +49,10 @@ SAMPLES = {
 #: to this NUMT than to the reference. It is made with its own random generator, so that adding it changed
 #: none of the simulated reads.
 RECENT = {"start": 9500, "end": 10500, "divergence": 0.004, "shared": 10000, "chr3_at": 50_000}
+#: The edge sample (audit 2026-11-26, M18): a transition and a one-base deletion ("del") in the last 400 bases,
+#: each at this allele frequency. The deletion is moved to the first base that differs from both neighbours,
+#: so that the aligner cannot place it elsewhere in a run of equal bases.
+EDGE = {"heteroplasmy": (15950, 0.25), "deletion": (15850, 0.30), "seed_offset": 2}
 TRANSITION = {"A": "G", "G": "A", "C": "T", "T": "C"}
 GENES = [("RNR1", 700, 1600, "+"), ("ND1", 2800, 3800, "+"), ("ATP8", 8400, 8600, "+"), ("ATP6", 8560, 9240, "+"),
          ("ND6", 11500, 12000, "-"), ("CYTB", 13000, 14100, "+")]
@@ -156,10 +165,33 @@ def main(argv=None) -> None:
                     n += 1
                     r1.write(f"@{sample}.{n}/1\n{a}\n+\n{quality}\n")
                     r2.write(f"@{sample}.{n}/2\n{b}\n+\n{quality}\n")
+    # the edge sample: its own generator, so the reads of the samples above stay as they were
+    edge_rng = random.Random(args.seed + EDGE["seed_offset"])
+    het_at, het_af = EDGE["heteroplasmy"]
+    del_at, del_af = EDGE["deletion"]
+    while not (mt[del_at - 2] != mt[del_at - 1] != mt[del_at]):
+        del_at += 1
+    het_alt = TRANSITION[mt[het_at - 1]]
+    truth.append(("edge", del_at, mt[del_at - 1], "del", del_af, "heteroplasmy"))
+    truth.append(("edge", het_at, mt[het_at - 1], het_alt, het_af, "heteroplasmy"))
+    truth += [("edge", numt_start + i + 1, mt[numt_start + i], numt[i], "", "numt") for i in numt_diffs]
+    with_het = mt[:het_at - 1] + het_alt + mt[het_at:]
+    haplotypes = []
+    for weight_del, deleted in ((del_af, True), (1 - del_af, False)):
+        for weight_het, seq in ((het_af, with_het), (1 - het_af, mt)):
+            haplotypes.append((weight_del * weight_het, seq[:del_at - 1] + seq[del_at:] if deleted else seq))
+    with gzip_text(out / "fastq" / "edge_1.fastq.gz") as r1, gzip_text(out / "fastq" / "edge_2.fastq.gz") as r2:
+        n, quality = 0, "I" * args.read_length
+        sources = [(seq, True, round(pairs * w)) for w, seq in haplotypes] + [(numt, False, numt_pairs)]
+        for template, circular, count in sources:
+            for a, b in reads(edge_rng, template, circular, count, args.read_length, 300, args.error):
+                n += 1
+                r1.write(f"@edge.{n}/1\n{a}\n+\n{quality}\n")
+                r2.write(f"@edge.{n}/2\n{b}\n+\n{quality}\n")
     with open(out / "truth.tsv", "w") as handle:
         handle.writelines("\t".join(map(str, row)) + "\n" for row in truth)
     print(f"Wrote {out}: mtDNA of {args.mt_length} bp, {pairs + numt_pairs} read pairs per sample "
-          f"({numt_pairs} from a NUMT with {len(numt_diffs)} differences), samples {', '.join(SAMPLES)}")
+          f"({numt_pairs} from a NUMT with {len(numt_diffs)} differences), samples {', '.join(SAMPLES)}, edge")
 
 
 if __name__ == "__main__":

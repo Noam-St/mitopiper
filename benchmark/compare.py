@@ -24,7 +24,10 @@ It writes these tables to the output folder:
 ``accuracy.tsv`` (with ``--truth``, e.g. the simulated tutorial data)
     True and false positives and false negatives of heteroplasmy calls, precision,
     recall, the mean absolute error of the frequency, false calls at positions where
-    the NUMT differs from the mtDNA, and whether homoplasmic variants were found.
+    the NUMT differs from the mtDNA and elsewhere, and whether homoplasmic variants were
+    found. ``allele_errors`` counts true calls of the wrong allele (the planted ``alt``
+    of the truth table, ``del`` for a deletion); ``vcf_errors`` true calls whose VCF
+    record has another REF, ALT or GT (deletions are not in the VCF).
 
 With matplotlib installed it also draws ``origin_coverage.png``, ``calls.png``
 and, with ``--truth``, ``af_truth.png``. Only the standard library is needed otherwise.
@@ -36,6 +39,7 @@ import math
 import re
 import sys
 from pathlib import Path
+from typing import Optional
 
 
 def read_table(path):
@@ -84,7 +88,8 @@ def write(path: Path, rows: list, columns: list) -> None:
 
 
 #: the columns of the annotated tables that are used (a table has ~40 columns per mtDNA position)
-USED = ("sample", "position", "coverage", "allele_depth", "minor_af", "heteroplasmic", "alt_major")
+USED = ("sample", "position", "ref", "coverage", "allele_depth", "major", "minor", "minor_af", "heteroplasmic",
+        "alt_major")
 
 
 class Experiment:
@@ -103,6 +108,20 @@ class Experiment:
         return {int(r["position"]): float(r["minor_af"]) for r in self.tables.get(sample, [])
                 if r["heteroplasmic"] == "yes"}
 
+    def vcf(self, sample: str) -> Optional[dict]:
+        """Position -> (REF, [ALT], GT) of the sample's VCF; None without one."""
+        path = self.dir / "vcf" / f"{sample}.vcf"
+        if not path.exists():
+            return None
+        records = {}
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("#"):
+                    continue
+                f = line.rstrip("\n").split("\t")
+                records[int(f[1])] = (f[3], f[4].split(","), f[9].split(":")[0])
+        return records
+
     def depths(self, sample: str, kind: str):
         """Position -> depth of the linear pileup, or of the circular one (which the annotated table holds)."""
         if kind == "circular":
@@ -116,7 +135,7 @@ DEPTH_COLUMNS = ["experiment", "sample", "mean_depth", "heteroplasmic_calls", "a
 CONCORDANCE_COLUMNS = ["experiment_a", "experiment_b", "sample", "shared", "only_a", "only_b", "jaccard", "af_correlation"]
 ACCURACY_COLUMNS = ["experiment", "sample", "true_positives", "false_positives", "false_negatives", "precision",
                     "recall", "af_mean_abs_error", "false_calls_at_numt_differences", "variants_found",
-                    "variants_expected", "missed"]
+                    "variants_expected", "missed", "false_positives_outside_numt", "allele_errors", "vcf_errors"]
 
 
 def origin_coverage(experiments, window: int) -> list:
@@ -167,10 +186,17 @@ def match_sample(truth_sample: str, samples) -> list:
     return [s for s in samples if pattern.fullmatch(s)]
 
 
+def called_alt(row: dict) -> str:
+    """The non-reference allele a heteroplasmy or variant call names: the minor allele when the major one is the
+    reference, else the major one."""
+    return row["minor"] if row["major"] == row["ref"].upper() else row["major"]
+
+
 def accuracy(experiments, truth_rows) -> tuple:
-    truth = {}                               # sample -> type -> {position: allele frequency}
+    truth, alts = {}, {}                     # sample -> type -> {position: allele frequency}; (sample, position) -> alt
     for t in truth_rows:
         truth.setdefault(t["sample"], {}).setdefault(t["type"], {})[int(t["position"])] = float(t["af"] or "nan")
+        alts[t["sample"], int(t["position"])] = (t.get("ref", ""), t.get("alt", ""))
     rows, points = [], []
     for exp in experiments:
         for truth_sample, kinds in sorted(truth.items()):
@@ -182,6 +208,20 @@ def accuracy(experiments, truth_rows) -> tuple:
                 fp = sorted(calls.keys() - het.keys())
                 fn = sorted(het.keys() - calls.keys())
                 points += [(exp.label, het[p], calls[p]) for p in tp]
+                # FIX [AUDIT-2026-11-26-M18]: positions only: a wrong base, or a strand mix-up, at the right position
+                # passed. The planted allele is checked in the table and in the VCF.
+                found = [p for p in variants if table.get(p, {}).get("alt_major") == "yes"]
+                wrong = [p for p in tp + found if called_alt(table[p]) != alts[truth_sample, p][1]]
+                vcf = exp.vcf(sample)
+                vcf_wrong = []
+                if vcf is not None:
+                    for p in tp + found:
+                        ref, alt = alts[truth_sample, p]
+                        if alt == "del":
+                            continue                    # deletions are left out of the VCF
+                        expected_gt = "0/1" if p in tp else "1"
+                        if p not in vcf or vcf[p][0] != ref or alt not in vcf[p][1] or vcf[p][2] != expected_gt:
+                            vcf_wrong.append(p)
                 rows.append({
                     "experiment": exp.label, "sample": sample, "true_positives": len(tp), "false_positives": len(fp),
                     "false_negatives": len(fn),
@@ -189,9 +229,12 @@ def accuracy(experiments, truth_rows) -> tuple:
                     "recall": len(tp) / len(het) if het else float("nan"),
                     "af_mean_abs_error": mean(abs(calls[p] - het[p]) for p in tp) if tp else float("nan"),
                     "false_calls_at_numt_differences": len(numt.keys() & set(fp)),
-                    "variants_found": sum(table.get(p, {}).get("alt_major") == "yes" for p in variants),
+                    "variants_found": sum(called_alt(table[p]) == alts[truth_sample, p][1] for p in found),
                     "variants_expected": len(variants),
                     "missed": ",".join(map(str, fn)),
+                    "false_positives_outside_numt": len(set(fp) - numt.keys()),
+                    "allele_errors": len(wrong),
+                    "vcf_errors": len(vcf_wrong) if vcf is not None else float("nan"),
                 })
     return rows, points
 

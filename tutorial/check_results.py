@@ -42,6 +42,8 @@ def main(argv=None) -> int:
               f"{preset}: no false heteroplasmy (patient {patient['false_positives']}, control {control['false_positives']})")
         check(float(patient["af_mean_abs_error"]) < 0.02, f"{preset}: frequency error {patient['af_mean_abs_error']} < 0.02")
     for (preset, sample), r in sorted(accuracy.items()):
+        if sample == "edge":
+            continue                                  # no homoplasmic variant planted
         found, expected = int(r["variants_found"]), int(r["variants_expected"])
         if preset == "mapq":
             # 10000 is shared with a nearly identical NUMT: its reads get a low mapping quality and are dropped
@@ -52,6 +54,25 @@ def main(argv=None) -> int:
     plain = accuracy[("plain", "patient")]
     check(int(plain["false_calls_at_numt_differences"]) >= 20,
           f"plain: NUMT reads fake heteroplasmy ({plain['false_calls_at_numt_differences']} calls), as the simulation intends")
+    # FIX [AUDIT-2026-11-26-M19]: the default preset had no accuracy check, only the NUMT artefacts above
+    check(int(plain["true_positives"]) == 4 and int(plain["false_negatives"]) == 0,
+          f"plain: all 4 true heteroplasmies found (missed: {plain['missed'] or 'none'})")
+    check(float(plain["af_mean_abs_error"]) < 0.04,
+          f"plain: frequency error {plain['af_mean_abs_error']} < 0.04 (NUMT reads dilute the call inside the NUMT)")
+    for (preset, sample), r in sorted(accuracy.items()):
+        check(int(r["false_positives_outside_numt"]) == 0,
+              f"{preset}/{sample}: no false heteroplasmy outside the NUMT differences ({r['false_positives_outside_numt']})")
+        # FIX [AUDIT-2026-11-26-M18]: the allele, not only the position (and the VCF's REF, ALT and GT)
+        check(int(r["allele_errors"]) == 0 and r["vcf_errors"] == "0",
+              f"{preset}/{sample}: every call names the planted allele, in the table and the VCF "
+              f"({r['allele_errors']} and {r['vcf_errors']} wrong)")
+    # next to the end of the mtDNA, where the circular pileup takes the rotated alignment: a transition and a
+    # deletion (deletions of reads on both strands are counted: audit H3)
+    for preset in ("plain", "mapq", "numtparser"):
+        edge = accuracy[(preset, "edge")]
+        check(int(edge["true_positives"]) == 2 and int(edge["false_negatives"]) == 0,
+              f"{preset}/edge: heteroplasmy and deletion by the origin found (missed: {edge['missed'] or 'none'})")
+        check(float(edge["af_mean_abs_error"]) < 0.05, f"{preset}/edge: frequency error {edge['af_mean_abs_error']} < 0.05")
 
     origin = {(r["experiment"], r["sample"], r["pileup"]): float(r["origin_vs_other"]) for r in rows(bench / "origin_coverage.tsv")}
     for (preset, sample, kind), ratio in sorted(origin.items()):

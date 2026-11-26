@@ -34,6 +34,10 @@ def test_simulated_dataset_is_consistent(tmp_path):
     assert len(mt) == 16000 and nuclear["chrM"] == mt and len(nuclear["chr2"]) == 153000
     truth = rows(tmp_path / "d" / "truth.tsv")
     assert all(t["ref"] == mt[int(t["position"]) - 1] != t["alt"] for t in truth)
+    # the edge sample (audit M18): a transition and a deletion in the last 400 bases, the deletion between unequal bases
+    edge = {t["alt"]: int(t["position"]) for t in truth if t["sample"] == "edge" and t["type"] == "heteroplasmy"}
+    assert sorted(edge) == ["G", "del"] and all(p > 15600 for p in edge.values())
+    assert mt[edge["del"] - 2] != mt[edge["del"] - 1] != mt[edge["del"]]
     numt = [t for t in truth if t["sample"] == "patient" and t["type"] == "numt"]
     assert len(numt) == 90 and all(2000 < int(t["position"]) <= 5000 for t in numt)
     assert nuclear["chr2"][60000:63000] != mt[2000:5000]                  # the diverged NUMT copy
@@ -79,6 +83,24 @@ def test_compare_reports_origin_concordance_and_accuracy(tmp_path):
     acc = {r["experiment"]: r for r in rows(tmp_path / "out" / "accuracy.tsv")}
     assert (acc["plain"]["false_positives"], acc["plain"]["false_calls_at_numt_differences"]) == ("1", "1")
     assert (acc["mapq"]["precision"], acc["mapq"]["recall"], acc["mapq"]["af_mean_abs_error"]) == ("1", "1", "0")
+    assert (acc["plain"]["false_positives_outside_numt"], acc["mapq"]["allele_errors"]) == ("0", "0")
+
+
+def test_compare_checks_the_called_allele_and_the_vcf(tmp_path):
+    """AUDIT-2026-11-26-M18: a wrong base at the right position passed; the VCF was not looked at."""
+    a = experiment(tmp_path, "plain", {10: 0.2, 500: 0.1})
+    exp = tmp_path / "plain"
+    (exp / "vcf").mkdir()
+    pileup.write_vcf(exp / "annotated" / "s_0_HS.annotated.tsv", exp / "vcf" / "s_0_HS.vcf")
+    truth = "sample\tposition\tref\talt\taf\ttype\ns\t10\tA\tG\t0.2\theteroplasmy\ns\t500\tA\t{alt}\t0.1\theteroplasmy\n"
+    (tmp_path / "truth.tsv").write_text(truth.format(alt="G"))
+    assert compare.main([a, "-o", str(tmp_path / "out"), "--truth", str(tmp_path / "truth.tsv")]) == 0
+    (row,) = rows(tmp_path / "out" / "accuracy.tsv")
+    assert (row["true_positives"], row["allele_errors"], row["vcf_errors"]) == ("2", "0", "0")
+    (tmp_path / "truth.tsv").write_text(truth.format(alt="C"))          # the planted allele was C, G was called
+    assert compare.main([a, "-o", str(tmp_path / "out"), "--truth", str(tmp_path / "truth.tsv")]) == 0
+    (row,) = rows(tmp_path / "out" / "accuracy.tsv")
+    assert (row["true_positives"], row["allele_errors"], row["vcf_errors"]) == ("2", "1", "1")
 
 
 def test_run_presets_usage():
