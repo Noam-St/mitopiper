@@ -33,6 +33,7 @@
 - `mt heteroplasmy` fails when a sample's table is missing (listed in `heteroplasmy/left_out.txt`; the others are still collected): it only warned, and the cohort matrix silently lacked the sample.
 - **An array rerun rewrote the task list (`a_<exp>.list`) that queued tasks of the original array still read**: they ran another sample's script, or nothing. Each rerun now has its own list and wrapper (`a_<exp>.rerun_<time>.list/.array`). Queued array tasks are cancelled too (`scancel 20_3`, `bkill '20[3]'`, `qdel -t 3 20`): with `--include-pending` a sample ran twice at once. The wrapper fails loudly when its task has no line in the list.
 - The wrapper of an array rerun asks for the rerun's resources (`--memory`, `--walltime`, automatic fixes, the largest of its samples'): it asked for the build's, while the sample scripts it runs asked for more.
+- **`heteroplasmy_matrix.tsv` gave each sample's own minor allele frequency, folded and with no allele**: 100% reference and 100% alternative both read 0 (the tutorial's homoplasmic G>A at 7000 read `0, 0`), and 30% and 70% of one allele both read 0.3, so the samples could not be compared. It now has an `alt` column (one row per position and called non-reference allele, the most often called first) and each cell is that allele's count over the sample's allele depth. `heteroplasmy_sites.tsv` is unchanged. Scripts reading the matrix need the new column.
 
 ## 2.0.1 (2026-11-25)
 

@@ -397,10 +397,25 @@ def _read_tables(tables: list):
             yield from csv.DictReader(handle, delimiter="\t")
 
 
+def called_alts(row: dict) -> list:
+    """The non-reference alleles (``A`` ... ``T``, ``del``) a table row calls: the major allele of a variant, the
+    alleles other than the reference of a heteroplasmy."""
+    ref = row["ref"].upper()
+    alts = [row["major"]] if row["alt_major"] == "yes" else []
+    if row["heteroplasmic"] == "yes":
+        alts += [a for a in (row["major"], row["minor"]) if a and a != ref and a not in alts]
+    return [a for a in alts if a in ALLELES]
+
+
+def _fraction(row: dict, allele: str) -> str:
+    depth = int(row.get("allele_depth") or 0)
+    return f"{int(row.get(allele) or 0) / depth:.6g}" if depth else ""
+
+
 def collect_heteroplasmy(tables: list, outdir) -> dict:
     """Gather the heteroplasmic and alternative-major positions of annotated tables into
-    ``outdir/heteroplasmy_sites.tsv``, and the minor allele frequency of every such position in
-    every sample into ``outdir/heteroplasmy_matrix.tsv``. Returns the number of sites per sample.
+    ``outdir/heteroplasmy_sites.tsv``, and the frequency of each called non-reference allele in every sample into
+    ``outdir/heteroplasmy_matrix.tsv`` (one row per position and allele). Returns the number of sites per sample.
 
     The tables are read twice (calls, then the frequencies at the called positions), so memory
     does not grow with positions x samples."""
@@ -411,12 +426,21 @@ def collect_heteroplasmy(tables: list, outdir) -> dict:
             if row[col] == "yes":
                 sites.append({**{c: row.get(c, "") for c in SITE_COLUMNS}, "type": kind})
                 per_sample[row["sample"]] += 1
-                called.setdefault((row["chrom"], int(row["position"])), (row["ref"], row["gene"]))
+        alts = called_alts(row)
+        if alts:
+            site = called.setdefault((row["chrom"], int(row["position"])), {"ref": row["ref"], "gene": row["gene"],
+                                                                            "alts": {}})
+            for alt in alts:
+                site["alts"][alt] = site["alts"].get(alt, 0) + 1      # samples calling it
+    # FIX [AUDIT-2026-11-26-H4]: each cell was that sample's own minor allele frequency, folded and with no allele:
+    # 100% reference and 100% alternative both read 0, and 30% and 70% of one allele both 0.3. Now each row names a
+    # non-reference allele (the most often called first) and each cell is that allele's share of the sample's reads.
     af = {}
     for row in _read_tables(tables):
         key = (row["chrom"], int(row["position"]))
         if key in called:
-            af[key, row["sample"]] = row["minor_af"]
+            for alt in called[key]["alts"]:
+                af[key, alt, row["sample"]] = _fraction(row, alt)
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     with open(outdir / "heteroplasmy_sites.tsv", "w", encoding="utf-8", newline="") as out:
@@ -426,9 +450,11 @@ def collect_heteroplasmy(tables: list, outdir) -> dict:
     samples = list(per_sample)
     with open(outdir / "heteroplasmy_matrix.tsv", "w", encoding="utf-8", newline="") as out:
         writer = csv.writer(out, delimiter="\t", lineterminator="\n")
-        writer.writerow(["chrom", "position", "ref", "gene"] + samples)
+        writer.writerow(["chrom", "position", "ref", "alt", "gene"] + samples)
         for key in sorted(called):
-            writer.writerow([*key, *called[key]] + [af.get((key, s), "") for s in samples])
+            site = called[key]
+            for alt in sorted(site["alts"], key=lambda a: (-site["alts"][a], ALLELES.index(a))):
+                writer.writerow([*key, site["ref"], alt, site["gene"]] + [af.get((key, alt, s), "") for s in samples])
     return per_sample
 
 

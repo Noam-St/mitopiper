@@ -99,7 +99,9 @@ def test_heteroplasmy_collects_sites_and_matrix(tmp_path, capsys):
     assert [(s["sample"], s["position"], s["type"]) for s in sites] == [
         ("S1", "1", "heteroplasmy"), ("S1", "2", "variant"), ("S2", "2", "variant")]
     matrix = rows(tmp_path / "out" / "heteroplasmy_matrix.tsv")
-    assert [(m["position"], m["S1"], m["S2"]) for m in matrix] == [("1", "0.1", "0"), ("2", "0", "0")]
+    # AUDIT-2026-11-26-H4: the share of the named allele; the homoplasmic T at 2 read 0 in both samples
+    assert [(m["position"], m["ref"], m["alt"], m["S1"], m["S2"]) for m in matrix] == [
+        ("1", "A", "G", "0.1", "0"), ("2", "C", "T", "1", "1")]
     assert main(["mt", "heteroplasmy", *tables, "-o", str(tmp_path / "out")]) == 0
     assert not (tmp_path / "out" / "left_out.txt").exists()          # all there now: the old list goes
 
@@ -191,3 +193,22 @@ def test_vcf_of_a_homoplasmic_variant_names_its_genes(tmp_path):
     assert records == [
         ["MT", "7", ".", "A", "G", ".", "PASS", "TYPE=variant;GENE=COX1,16S_rRNA", "GT:DP:AD:AF", "1:100:0,100:1"],
         ["MT", "8", ".", "N", "A,G", ".", "PASS", "TYPE=heteroplasmy", "GT:DP:AD:AF", "1/2:100:0,60,40:0.6,0.4"]]
+
+
+
+def test_the_heteroplasmy_matrix_is_not_folded_and_names_each_allele(tmp_path):
+    """AUDIT-2026-11-26-H4: 30% and 70% of the same allele both read 0.3, and the cell named no allele."""
+    tables = []
+    for name, pos1, pos2 in (
+            ("low", "." * 35 + "," * 35 + "G" * 15 + "g" * 15, "." * 80 + "T" * 5 + "t" * 5 + "." * 10),
+            ("high", "." * 15 + "," * 15 + "G" * 35 + "g" * 35, "." * 80 + "C" * 5 + "c" * 5 + "G" * 10),
+            ("ref", "." * 50 + "," * 50, "." * 100)):
+        write_pileup(tmp_path / f"{name}.pileup", [(1, "A", 100, pos1), (2, "A", 100, pos2)])
+        pileup.annotate_pileup(tmp_path / f"{name}.pileup", tmp_path / f"{name}.tsv", sample=name)
+        tables.append(tmp_path / f"{name}.tsv")
+    pileup.collect_heteroplasmy(tables, tmp_path / "out")
+    matrix = [(m["position"], m["alt"], m["low"], m["high"], m["ref"])
+              for m in rows(tmp_path / "out" / "heteroplasmy_matrix.tsv")]
+    assert matrix == [("1", "G", "0.3", "0.7", "0"),
+                      # two alleles called at 2 (T in one sample, C in the other): one row each
+                      ("2", "C", "0", "0.1", "0"), ("2", "T", "0.1", "0", "0")]

@@ -104,7 +104,7 @@ What was produced, in `tutorial_ws/output/tutorial/`:
 | `annotated/<sample>.annotated.tsv` | one row per position: coverage per strand, read starts/ends, z-scores, allele counts, minor allele frequency, `heteroplasmic`, `alt_major`, gene; with the NUMT-aware presets also `numt_bases` and `numt_minor` (the minor allele is a non-reference base a NUMT carries) |
 | `vcf/<sample>.vcf` | the sample's heteroplasmies and variants as VCF (`FILTER` `numt` for a minor allele a NUMT carries) |
 | `heteroplasmy/heteroplasmy_sites.tsv` | the heteroplasmies and variants of all samples |
-| `heteroplasmy/heteroplasmy_matrix.tsv` | minor allele frequency of every called position in every sample |
+| `heteroplasmy/heteroplasmy_matrix.tsv` | frequency of each called non-reference allele (`alt`) in every sample, one row per position and allele |
 | `tool_versions.tsv`, `mitopiper_manifest.json` | the tools, versions and settings that were used |
 
 Now look at the calls:
