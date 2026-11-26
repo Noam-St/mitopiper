@@ -367,3 +367,74 @@ def test_lsf_memory_per_slot(monkeypatch):
     odd = JobResources(threads=3, memory="2G", memory_per_slot=True)
     assert "rusage[mem=683M]" in header("lsf", "j", "/e", odd)
     assert "rusage[mem=32G]" in header("lsf", "j", "/e", JobResources(threads=8, memory="32G", memory_per_slot=False))
+
+
+# --- LSF test of 2026-11-26 (rnaseq-expression on GRCh38) ------------------------------------------------
+NCBI_GFF3 = ("##gff-version 3\nNC_000001.11\tRefSeq\tregion\t1\t248956422\t.\t+\t.\tID=NC_000001.11:1..248956422\n"
+             "NC_000001.11\tBestRefSeq\tgene\t11874\t14409\t.\t+\t.\tID=gene-DDX11L1;Dbxref=GeneID:100287102;"
+             "Name=DDX11L1;gene=DDX11L1\n"
+             "NC_000001.11\tBestRefSeq\texon\t11874\t12227\t.\t+\t.\tID=exon-NR_046018.2-1;Parent=rna-NR_046018.2;"
+             "gene=DDX11L1\n")
+ENSEMBL_GTF = ('1\thavana\tgene\t11869\t14409\t.\t+\t.\tgene_id "ENSG00000223972"; gene_name "DDX11L1";\n'
+               '1\thavana\texon\t11869\t12227\t.\t+\t.\tgene_id "ENSG00000223972"; transcript_id "ENST00000456328";\n')
+
+
+def test_the_gene_attribute_comes_from_the_annotation(tmp_path):
+    import gzip
+
+    from mitopiper.references import gene_attribute
+
+    gff, gtf = tmp_path / "g.gff", tmp_path / "g.gtf"
+    gff.write_text(NCBI_GFF3)
+    gtf.write_text(ENSEMBL_GTF)
+    with gzip.open(tmp_path / "g.gff.gz", "wt") as handle:
+        handle.write(NCBI_GFF3)
+    assert gene_attribute(str(gff), "exon") == "gene" and gene_attribute(str(gff), "gene") == "ID"
+    assert gene_attribute(str(gtf), "exon") == "gene_id" == gene_attribute(str(gtf), "gene")
+    assert gene_attribute(str(tmp_path / "g.gff.gz"), "exon") == "gene"
+    # not downloaded yet (the reference job fetches NCBI's annotation): from its name
+    assert gene_attribute("/refs/GCF_000001405.40_GRCh38.p14_genomic.gff", "exon") == "gene"
+    assert gene_attribute("/refs/Homo_sapiens.GRCh38.112.gtf", "exon") == "gene_id"
+
+
+def test_featurecounts_counts_by_the_attribute_of_each_annotation(tmp_path):
+    from mitopiper.builder import build_sample_job
+    from mitopiper.config import Workflow
+    from mitopiper.defaults import bundled_presets
+    from mitopiper.metadata import Run, Sample
+
+    gff = tmp_path / "GCF_genomic.gff"
+    gff.write_text(NCBI_GFF3)
+    wf = Workflow(**bundled_presets()["rnaseq-expression"])
+    sample = Sample(index=0, accession="S", organism="Homo_sapiens", runs=[Run("R", ["/f_1.fq.gz", "/f_2.fq.gz"])])
+    job = build_sample_job(sample, wf, "/w/output/E", ReferenceSet(refpath="/r/g.fa", gtfpath=str(gff)))
+    (line,) = next(s for s in job.steps if s.step == "featureCounts").lines
+    assert "-t exon -g gene " in line
+
+
+def test_build_stops_a_counting_step_whose_attribute_the_annotation_lacks(tmp_path):
+    from mitopiper.build import gene_attribute_problems
+    from mitopiper.config import Workflow
+    from mitopiper.defaults import bundled_presets
+
+    gff = tmp_path / "GCF_genomic.gff"
+    gff.write_text(NCBI_GFF3)
+    wf = Workflow(**bundled_presets()["rnaseq-expression"])
+    refs = {"Homo_sapiens": ReferenceSet(refpath="/r/g.fa", gtfpath=str(gff))}
+    assert gene_attribute_problems(wf, ["featureCounts"], refs) == []                 # the placeholder: fine
+    wf.settings["featureCounts"]["attribute"]["value"] = "gene_id"                    # a workspace made before 2.0.2
+    (problem,) = gene_attribute_problems(wf, ["featureCounts"], refs)
+    assert "'gene_id', which the annotation of Homo_sapiens" in problem and "Use 'gene'" in problem
+
+
+def test_a_403_before_a_later_failure_is_not_the_diagnosis():
+    from mitopiper.diagnose import diagnose
+
+    log = ["2026-11-25 09:00:01 ERROR 403: Forbidden.", "[mitopiper] download 2/10: ftp://ftp.sra.ebi.ac.uk/x.gz",
+           "ERROR: failed to find the gene identifier attribute in the 9th column of the provided GTF file."]
+    late = mon.JobStatus("E", "s_a_0", state=mon.FAILED, exit_code=255, step="featureCounts",
+                         errors=[mon.ErrorLine(i, t) for i, t in enumerate(log, 1)])
+    assert not any("403" in s.cause for s in diagnose(late))
+    early = mon.JobStatus("E", "s_a_0", state=mon.FAILED, exit_code=8, step="wget",
+                          errors=[mon.ErrorLine(1, "ERROR 403: Forbidden.")])
+    assert "403" in diagnose(early)[0].cause

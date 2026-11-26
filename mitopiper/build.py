@@ -86,6 +86,56 @@ def find_experiment_metadata(exp_dir: Path) -> Optional[Path]:
 MT_WARN_BYTES, MT_MAX_BYTES = 1_000_000, 50_000_000
 
 
+#: Counting tools: (setting naming the gene attribute, setting giving the feature type, default feature type)
+_COUNTERS = {"featureCounts": ("-g", "-t", "exon"), "htseq-count": ("-i", "-t", "exon")}
+
+
+def gene_attribute_problems(workflow: Workflow, steps: list, refs: dict) -> list:
+    """Counting steps whose gene attribute (featureCounts -g, htseq-count -i) is not in the annotation's lines of the
+    counted feature: the jobs would fail at the last step, after hours (LSF test: featureCounts -g gene_id on NCBI's
+    GFF3, which has gene= on exons). Checked only for annotations on this machine and attributes given literally."""
+    from .references import _gene_attribute_in_file
+
+    problems = []
+    for step in steps:
+        tool = str(workflow.pipeline.get(step, {}).get("key", "")).split(" ")[0].rsplit("/", 1)[-1]
+        if tool not in _COUNTERS:
+            continue
+        attr_key, feature_key, default_feature = _COUNTERS[tool]
+        params = {p.get("key"): str(p.get("value", "")) for p in workflow.settings.get(step, {}).values()
+                  if isinstance(p, dict) and p.get("switch", True)}
+        attribute, feature = params.get(attr_key, ""), params.get(feature_key, default_feature) or default_feature
+        if not attribute or attribute.startswith("_"):
+            continue                                   # a placeholder: resolved from each annotation
+        for organism, ref in refs.items():
+            try:
+                stat = Path(ref.gtfpath).stat()
+            except (OSError, TypeError):
+                continue
+            found = _gene_attribute_in_file(ref.gtfpath, feature, stat.st_size, stat.st_mtime)
+            if found != attribute and not _has_attribute(ref.gtfpath, feature, attribute):
+                problems.append(
+                    f"Step '{step}' counts {feature} lines by the attribute '{attribute}', which the annotation of "
+                    f"{organism} ({ref.gtfpath}) does not have on them ('{found}' names the gene there): the jobs would "
+                    f"fail at '{step}'. Use '{found}', or the placeholder {'_exon_gene_attr' if tool == 'featureCounts' else '_gene_attr'} "
+                    f"(read from each annotation): mitopiper presets reset PRESET, or change the setting in the menus.")
+    return problems
+
+
+def _has_attribute(path: str, feature: str, attribute: str) -> bool:
+    import gzip
+
+    opener = gzip.open if path.endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8", errors="replace") as handle:
+        for i, line in enumerate(handle):
+            fields = line.split("\t")
+            if len(fields) >= 9 and fields[2] == feature:
+                return f"{attribute}=" in fields[8] or f"{attribute} " in fields[8]
+            if i > 200_000:
+                break
+    return True                                        # no such lines seen: nothing to say
+
+
 def mt_reference_size_ok(organism: str, ref) -> bool:
     """False (with an error) when the mtDNA reference of an mt workflow is far too large to be an mtDNA, e.g.
     a whole genome registered as ``--fasta`` (seen on BGU: hg38 rotated and indexed for 1.6 h); a warning
@@ -303,6 +353,8 @@ def build_experiment(
                 skipped.append(organism)
                 del refs[organism]
     samples = [s for s in samples if s.organism in refs]
+    for problem in gene_attribute_problems(workflow, steps, refs):
+        log.error(problem)
     if not workflow.flag("keep_reads", True) and not deletes_reads(workflow):
         log.warning("keep_reads is false, but the reads are kept: they are deleted only by jobs that stop at the first "
                     "failing command (fail_fast on, environment bash, zsh or ksh)")

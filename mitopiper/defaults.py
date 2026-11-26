@@ -216,7 +216,8 @@ DEFAULT_SETTINGS = {
         "output": _setting("Sorted BAM output file", "-o", "output_sort"),
     },
     "htseq-count": {
-        "ID": _setting("ID attribute to use", "-i", "ID"),
+        "ID": _setting("ID attribute to use (_gene_attr: read from the annotation; GTF: gene_id, NCBI GFF3: ID)", "-i",
+                       "_gene_attr"),
         "Additional attribute": _setting("Additional attribute to use", "--additional-attr", "gene"),
         "Feature column name": _setting("Feature column name to use", "-t", "gene"),
         "stranded": _setting("Whether the reads are stranded", "-s", "no"),
@@ -494,8 +495,9 @@ def _rnaseq_expression() -> dict:
     settings["featureCounts"] = _params(
         ("threads", "Threads", "-T", "_threads"),
         ("annotation", "GTF/GFF annotation", "-a", "_gtf"),
-        ("feature type", "Feature type to count (Ensembl GTF: exon; NCBI GFF3: gene)", "-t", "exon"),
-        ("attribute", "Attribute naming the gene (Ensembl GTF: gene_id; NCBI GFF3: ID)", "-g", "gene_id"),
+        ("feature type", "Feature type to count: exon (gene expression from exons, any annotation)", "-t", "exon"),
+        ("attribute", "Attribute naming the gene on exon lines (_exon_gene_attr: read from the annotation; Ensembl "
+                      "GTF: gene_id, NCBI GFF3: gene)", "-g", "_exon_gene_attr"),
         ("pairs", "Count read pairs of paired-end samples", "-p --countReadPairs", "_if_PE"),
     )
     active = ["wget", "fastqc_pre", "trim", "fastqc", "STAR-alignment", "featureCounts", "multiqc"]

@@ -36,11 +36,11 @@ from typing import Optional
 from .config import Workflow
 from .config import truthy as _truthy
 from .metadata import Sample
-from .references import ReferenceSet, derived_paths, mt_shift
+from .references import ReferenceSet, derived_paths, gene_attribute, mt_shift
 
 #: Names usable as ``_name`` in setting values (and in structures).
 PLACEHOLDERS = (
-    "fasta", "fasta_dir", "fasta_nuc", "fasta_nuc_dir", "gtf", "chrominfo",
+    "fasta", "fasta_dir", "fasta_nuc", "fasta_nuc_dir", "gtf", "exon_gene_attr", "gene_attr", "chrominfo",
     "command_input", "command_output", "command_output_dir_path", "command_input_dir_path",
     "fastq", "fastq_pre", "fastq1", "fastq2", "fastq_dir", "fastq_pre_dir", "fastq_sample_path_no_ext",
     "sample", "org_name", "bam", "sam", "STAR_out", "STAR_final_log", "tsv_dir", "threads",
@@ -184,6 +184,9 @@ def sample_variables(sample: Sample, workflow: Workflow, exp_dir: str, ref: Refe
         "fasta_nuc": fasta_nuc,
         "fasta_nuc_dir": posixpath.dirname(fasta_nuc) if fasta_nuc else "",
         "gtf": ref.gtfpath,
+        # the attribute naming the gene on exon / gene lines of this reference's annotation (GTF vs NCBI GFF3)
+        "exon_gene_attr": gene_attribute(ref.gtfpath, "exon"),
+        "gene_attr": gene_attribute(ref.gtfpath, "gene"),
         "chrominfo": ref.chrominfopath,
         "fastq": fastq,
         "fastq1": fastq1,

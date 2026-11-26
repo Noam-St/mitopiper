@@ -606,6 +606,45 @@ def _fasta_index_commands(fasta: str, workflow, csh: bool, star: bool, skip_pres
             if not (skip_present and _present(path))]
 
 
+# ------------------------------------------------------- annotation attributes
+_GFF3_SUFFIXES = (".gff", ".gff3", ".gff.gz", ".gff3.gz")
+
+
+def gene_attribute(path: str, feature: str = "exon") -> str:
+    """The attribute that names the gene on ``feature`` lines of an annotation, for featureCounts ``-g`` and
+    htseq-count ``-i``: Ensembl/GENCODE GTF ``gene_id``; NCBI RefSeq GFF3 (what refs fetch-genome downloads) ``gene``
+    on exons and ``ID`` on genes. Read from the file when it is on this machine, else guessed from its name (NCBI's
+    annotation is downloaded by the reference job, after the build)."""
+    path = str(path or "")
+    if not path:
+        return "gene_id"
+    try:
+        stat = Path(path).stat()
+        return _gene_attribute_in_file(path, feature, stat.st_size, stat.st_mtime)
+    except OSError:
+        gff3 = path.lower().endswith(_GFF3_SUFFIXES)
+        return ("ID" if feature == "gene" else "gene") if gff3 else "gene_id"
+
+
+@lru_cache(maxsize=32)
+def _gene_attribute_in_file(path: str, feature: str, size: int, mtime: float) -> str:
+    import gzip
+
+    opener = gzip.open if path.endswith(".gz") else open
+    keys: set = set()
+    with opener(path, "rt", encoding="utf-8", errors="replace") as handle:
+        for i, line in enumerate(handle):
+            if i > 200_000:
+                break
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) >= 9 and fields[2] == feature:
+                keys = {part.strip().split("=" if "=" in part else " ", 1)[0] for part in fields[8].split(";")
+                        if part.strip()}
+                break
+    preferred = ("gene_id", "ID", "gene") if feature == "gene" else ("gene_id", "gene", "gene_name")
+    return next((key for key in preferred if key in keys), "gene_id")
+
+
 # ------------------------------------------------------- derived references
 def uses_placeholder(workflow, name: str, steps: Optional[list] = None) -> bool:
     """Whether one of ``steps`` (default: the active run order) uses ``_<name>`` / ``<name>`` /

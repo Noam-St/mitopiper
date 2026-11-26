@@ -747,6 +747,12 @@ on login or transfer nodes, so the general setting `download_mode` can move the 
 Either way the downloads are a stage of their own (`dl_<exp>`), with a status and a log. Every
 sample waits for it and skips itself if a download failed. `rerun` downloads again what is missing.
 
+A sample job asks for the resources of its largest step for its whole run: with `rnaseq-expression`, STAR's 8 cores
+and 32 GB are reserved while the FASTQ files download, which can take hours with one core (an LSF test of a public
+human project: 5 of a sample job's 6.4 hours were spent downloading, at 4.5% CPU efficiency). For large public data,
+`download_mode` `queue` (or `login`) downloads in a small job of its own first, so the sample jobs only reserve their
+cores and memory while they compute.
+
 ### When downloads fail
 Each FASTQ file is fetched by `mitopiper download`, which keeps trying before the job gives up:
 

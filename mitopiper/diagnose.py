@@ -419,12 +419,16 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
                        + ["Rerun later: files already downloaded are kept. More attempts: the general setting "
                           "download_tries."],
                        ["mitopiper rerun --from wget"], {}))
-    if _find(r"ERROR 404|No such file .*ftp|550 .*no such file", text):
+    # Only when the job failed while downloading: a download that hit a 403 and then succeeded over another
+    # protocol leaves the 403 in the log of a job that failed much later (LSF test: at featureCounts)
+    downloading = step in ("", "wget", "prepare_references") or job.kind == "download"
+    dl_text = text if downloading else ""
+    if _find(r"ERROR 404|No such file .*ftp|550 .*no such file", dl_text):
         add(Suggestion("The FASTQ file is not available at the download URL (404)",
                        ["For SRA runs the ENA mirror may not have the files; download ENA's own run table instead "
                         "(mitopiper build PRJ... fetches it), or check the run on the ENA browser."],
                        ["mitopiper fetch-metadata PROJECT_ACCESSION"], {}))
-    elif _find(r"ERROR 403|403 Forbidden", text):
+    elif _find(r"ERROR 403|403 Forbidden", dl_text):
         add(Suggestion("The archive refused the download (HTTP 403 Forbidden)",
                        ["The URL is in the job's stderr, just above the error (mitopiper monitor --job NAME). Test it "
                         "from the login node: wget -S --spider URL.",
@@ -438,7 +442,7 @@ def diagnose(job: JobStatus, context: Optional[Context] = None, tail_lines: int 
                         "Files already downloaded are kept: wget -c skips complete files."],
                        ["mitopiper rerun --from wget   # later"], {}))
     elif _find(r"unable to resolve host|name or service not known|temporary failure in name resolution|"
-               r"network is unreachable|connection timed out|connection refused|unable to establish", text):
+               r"network is unreachable|connection timed out|connection refused|unable to establish", dl_text):
         add(Suggestion("The download failed: no network access from the compute node, or ENA was unreachable",
                        ["Many clusters have no internet on compute nodes. Set the general setting download_mode to "
                         "'login' (master.sh downloads on the login node before submitting the samples) or 'queue' "
