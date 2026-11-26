@@ -409,7 +409,7 @@ def test_featurecounts_counts_by_the_attribute_of_each_annotation(tmp_path):
     sample = Sample(index=0, accession="S", organism="Homo_sapiens", runs=[Run("R", ["/f_1.fq.gz", "/f_2.fq.gz"])])
     job = build_sample_job(sample, wf, "/w/output/E", ReferenceSet(refpath="/r/g.fa", gtfpath=str(gff)))
     (line,) = next(s for s in job.steps if s.step == "featureCounts").lines
-    assert "-t exon -g gene " in line
+    assert "-t exon,CDS -g gene " in line                    # NCBI: mtDNA protein-coding genes have only CDS lines
 
 
 def test_build_stops_a_counting_step_whose_attribute_the_annotation_lacks(tmp_path):
@@ -457,3 +457,54 @@ def test_build_with_a_wrong_counting_attribute_stops(tmp_path):
     assert main(["-w", str(ws.root), "build", "--no-check", str(tmp_path / "s.tsv"), "-p", "rnaseq-expression",
                  "-s", "local"]) != 0
     assert not (ws.root / "master.sh").exists()
+
+
+ENSEMBL_GFF3 = ("##gff-version 3\n1\thavana\tgene\t11869\t14409\t.\t+\t.\tID=gene:ENSG00000223972;gene_id=ENSG00000223972\n"
+                "1\thavana\texon\t11869\t12227\t.\t+\t.\tParent=transcript:ENST00000456328;exon_id=ENSE00002234944\n")
+
+
+def test_ensembl_gff3_is_stopped_at_build_time(tmp_path):
+    from mitopiper.build import gene_attribute_problems
+    from mitopiper.config import Workflow
+    from mitopiper.defaults import bundled_presets
+
+    gff = tmp_path / "Homo_sapiens.GRCh38.112.gff3"
+    gff.write_text(ENSEMBL_GFF3)
+    wf = Workflow(**bundled_presets()["rnaseq-expression"])
+    (problem,) = gene_attribute_problems(wf, ["featureCounts"], {"Homo_sapiens": ReferenceSet(gtfpath=str(gff))})
+    assert "names no gene on them" in problem and "GTF version" in problem
+
+
+def test_featurecounts_feature_types_follow_the_annotation(tmp_path):
+    from mitopiper.references import count_features
+
+    (tmp_path / "a.gtf").write_text(ENSEMBL_GTF)
+    (tmp_path / "a.gff").write_text(NCBI_GFF3)
+    assert count_features(str(tmp_path / "a.gtf")) == "exon"
+    assert count_features(str(tmp_path / "a.gff")) == "exon,CDS"
+    assert count_features("/not/yet/GCF_genomic.gff") == "exon,CDS"
+
+
+def test_mt_annotate_reads_a_gzipped_annotation(tmp_path):
+    import gzip
+
+    from mitopiper import pileup
+
+    path = tmp_path / "mt.gff3.gz"
+    with gzip.open(path, "wt") as handle:
+        handle.write("NC_012920.1\tRefSeq\tgene\t3307\t4262\t.\t+\t.\tID=gene-ND1;gene=ND1\n")
+    genes = pileup.read_annotation(path)
+    assert genes and "ND1" in str(genes[0])
+
+
+def test_refs_add_refuses_a_gzipped_fasta(tmp_path):
+    ws = Workspace(tmp_path / "ws")
+    assert main(["-w", str(ws.root), "refs", "add", "Homo sapiens", "--fasta", "/x/mt.fa",
+                 "--nuc-fasta", "/x/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz"]) != 0
+
+
+def test_star_index_of_a_genome_not_downloaded_yet_is_sized_from_ncbi():
+    from mitopiper.references import _sa_index_nbases
+
+    assert _sa_index_nbases("/not/yet/yeast_genomic.fna", 12_157_105) == 11      # STAR: min(14, log2(L)/2 - 1)
+    assert _sa_index_nbases("/not/yet/genomic.fna") == 14

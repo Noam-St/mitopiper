@@ -105,14 +105,25 @@ def gene_attribute_problems(workflow: Workflow, steps: list, refs: dict) -> list
         params = {p.get("key"): str(p.get("value", "")) for p in workflow.settings.get(step, {}).values()
                   if isinstance(p, dict) and p.get("switch", True)}
         attribute, feature = params.get(attr_key, ""), params.get(feature_key, default_feature) or default_feature
-        if not attribute or attribute.startswith("_"):
-            continue                                   # a placeholder: resolved from each annotation
+        if not attribute:
+            continue
         for organism, ref in refs.items():
             try:
                 stat = Path(ref.gtfpath).stat()
             except (OSError, TypeError):
                 continue
-            found = _gene_attribute_in_file(ref.gtfpath, feature, stat.st_size, stat.st_mtime)
+            kind = (default_feature if feature.startswith("_") else feature).split(",")[0]
+            found = _gene_attribute_in_file(ref.gtfpath, kind, stat.st_size, stat.st_mtime)
+            if attribute.startswith("_"):
+                # a placeholder is resolved from the annotation, but some name no gene on these lines at all
+                # (Ensembl GFF3: exons carry only Parent=transcript:...)
+                if not _has_attribute(ref.gtfpath, kind, found):
+                    problems.append(
+                        f"Step '{step}' counts {kind} lines per gene, but the annotation of {organism} ({ref.gtfpath}) "
+                        f"names no gene on them (gene_id, gene or gene_name): the jobs would fail at '{step}'. Register "
+                        f"the GTF version of this annotation (refs add {organism} ... --gtf FILE.gtf).")
+                continue
+            feature = kind
             if found != attribute and not _has_attribute(ref.gtfpath, feature, attribute):
                 problems.append(
                     f"Step '{step}' counts {feature} lines by the attribute '{attribute}', which the annotation of "
@@ -252,8 +263,8 @@ def job_resources(workflow: Workflow, steps: Optional[list] = None) -> JobResour
     )
 
 
-#: Memory a STAR index needs on top of what the STAR step asks for (human: ~32 GB for the step, 36-40 GB to index).
-STAR_INDEX_EXTRA_MB = 8 * 1024
+#: Memory a STAR index needs on top of what the STAR step asks for (the step's 40G covers a human index, 32-38 GB).
+STAR_INDEX_EXTRA_MB = 0
 
 
 def prep_resources(workflow: Workflow, resources: JobResources, prep_lines: list) -> JobResources:

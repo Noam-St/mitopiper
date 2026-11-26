@@ -3,6 +3,13 @@
 ## 2.0.2 (unreleased)
 
 ### Fixed
+- A gzipped annotation (Ensembl ships `.gtf.gz`) crashed `mitopiper mt annotate` near the end of every mt sample job (`'utf-8' codec can't decode byte 0x8b`); annotations are now read gzipped or not.
+- `refs add` refuses a gzipped `--fasta`, `--nuc-fasta` or `--numt-fasta` (e.g. Ensembl's `*.dna.primary_assembly.fa.gz`): samtools faidx, STAR and the mtDNA tools need a plain FASTA, and the reference job failed.
+- `rnaseq-expression` counts `exon,CDS` features for a GFF3 annotation (placeholder `_count_features`): NCBI's annotation gives the 13 mtDNA protein-coding genes only `gene` and `CDS` lines, so `-t exon` left ND1 ... CYB out of the counts. A GTF is still counted by `exon`.
+- `build` stops when an annotation names no gene on the counted lines at all (Ensembl GFF3, whose exons carry only `Parent=transcript:...`), and says to register the GTF version.
+- STAR's index for a genome that `refs fetch-genome` downloads is sized from the genome's length at NCBI (`--genomeSAindexNbases`, e.g. 11 for yeast): it got STAR's default 14, which STAR warns may crash the mapping of small genomes.
+- STAR: `--limitBAMsortRAM` 8 GB (was 1.2 GB, which fails on deep samples after the whole mapping) and the STAR step asks for 40G (was 32G), which also covers a human index in the reference job.
+- Default preset: `samtools mpileup -d 0` (samtools caps the depth at 8000 otherwise; the mt presets already had it); `htseq-count` reads the sorted BAM with `-r pos`; the `index` step declares its real output (`.sorted.bam.bai`).
 - **`rnaseq-expression` counted with `featureCounts -g gene_id`, an attribute NCBI's GFF3 does not have** (it names genes with `gene=` on exon lines). With the human annotation mitopiper itself downloads (`refs fetch-genome`), every sample failed at the last step, after hours. The attribute is now the placeholder `_exon_gene_attr`, read from each reference's annotation (Ensembl/GENCODE GTF: `gene_id`; NCBI GFF3: `gene`), or guessed from its name when the reference job has not downloaded it yet. The default preset's `htseq-count -i` likewise uses `_gene_attr` (`gene_id` / `ID`). Workspaces made before keep their literal value: `build` now stops with an error when a counting step's attribute is not on the annotation's lines, with the fix. Found in an LSF test.
 - The download diagnoses (HTTP 403 and 404, no network) apply only when the job failed while downloading: a download that hit a 403 and then succeeded over another protocol made a job that failed hours later at featureCounts read "The archive refused the download".
 - README: a sample job reserves its largest step's resources for its whole run, downloads included; `download_mode queue` for large public data.

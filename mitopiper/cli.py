@@ -373,6 +373,16 @@ def _set_preset_values(ws: Workspace, presets: list, assignments: list) -> int:
     return 0
 
 
+def _gzipped(path: str) -> bool:
+    if str(path).endswith(".gz"):
+        return True
+    try:
+        with open(Path(path).expanduser(), "rb") as handle:
+            return handle.read(2) == b"\x1f\x8b"
+    except OSError:
+        return False
+
+
 def cmd_refs(ws: Workspace, args) -> int:
     ws.initialise()
     registry = ReferenceRegistry(ws)
@@ -390,6 +400,11 @@ def cmd_refs(ws: Workspace, args) -> int:
             # Jobs run in the folder master.sh is started from: a relative path would only work from this one
             return str(Path(path).expanduser().absolute()) if path and not str(path).startswith("/") else path
 
+        for option, path in (("--fasta", args.fasta), ("--nuc-fasta", args.nuc_fasta), ("--numt-fasta", args.numt_fasta)):
+            if path and _gzipped(path):
+                # samtools faidx (plain gzip), STAR and mitopiper's mtDNA tools read only a plain FASTA: the reference
+                # job would fail (an Ensembl *.dna.primary_assembly.fa.gz as --nuc-fasta is the usual case)
+                raise RefError(f"{path} ({option}) is gzipped: unpack it first (gunzip -k {path}) and register the .fa")
         ref = ReferenceSet(refpath=absolute(args.fasta), gtfpath=absolute(args.gtf), nuc_refpath=absolute(args.nuc_fasta),
                            numt_refpath=absolute(args.numt_fasta), chrominfopath=absolute(args.chrominfo))
         if not Path(args.fasta).exists():

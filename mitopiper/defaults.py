@@ -111,7 +111,7 @@ DEFAULT_PIPE = {
         "switch": True,
         "path": "",
         "outdir": "alignment",
-        "output_ext": ".bam.bai",
+        "output_ext": ".sorted.bam.bai",
         "inputdir": "alignment",
         "input_ext": ".sorted.bam",
         "structure": "",
@@ -149,7 +149,7 @@ DEFAULT_PIPE = {
         "outdir": "count",
         "output_ext": ".txt",
         "inputdir": "alignment",
-        "input_ext": ".bam",
+        "input_ext": ".sorted.bam",
         "structure": "key settings input gtf output_pipe",
         "scope": "sample",
     },
@@ -165,7 +165,7 @@ DEFAULT_PIPE = {
         "structure": "key settings",
         "scope": "sample",
         "threads": "8",
-        "memory": "32G",
+        "memory": "40G",
     },
     "multiqc": {
         "key": "multiqc",
@@ -201,6 +201,7 @@ DEFAULT_SETTINGS = {
     "index": {},
     "mpileup": {
         "quality": _setting("Minimum base quality for a base to be considered", "-Q", 30),
+        "no depth limit": _setting("Do not cap the depth (samtools' default caps it at 8000)", "-d", 0),
         "reference": _setting("Fasta type ref file", "-f", "_fasta"),
     },
     "fastqc": {
@@ -223,6 +224,7 @@ DEFAULT_SETTINGS = {
         "stranded": _setting("Whether the reads are stranded", "-s", "no"),
         "format": _setting("Format to read input in", "-f", "bam"),
         "ambiguous": _setting("How to handle ambiguous reads", "--nonunique", "all"),
+        "order": _setting("Order of the alignments (the sort step sorts by position; paired reads need it)", "-r", "pos"),
     },
     "STAR-alignment": {
         "genomeDir": _setting("Input ref", "--genomeDir", "_fasta_dir"),
@@ -231,7 +233,9 @@ DEFAULT_SETTINGS = {
         "readFilesCommand": _setting("Input format", "--readFilesCommand", "gunzip -c"),
         "runThreadN": _setting("The amount of threads to use", "--runThreadN", "_threads"),
         "outFileNamePrefix": _setting("Output prefix", "--outFileNamePrefix", "_STAR_out"),
-        "limit sort RAM": _setting("Maximum RAM for sorting BAM", "--limitBAMsortRAM", 1205130643),
+        # 1.2 GB failed on deep samples ("not enough memory for BAM sorting") after the whole mapping; 8 GB on top
+        # of a human index (~30 GB) fits the step's 40G
+        "limit sort RAM": _setting("Maximum RAM for sorting BAM (bytes)", "--limitBAMsortRAM", 8000000000),
     },
     "multiqc": {},
 }
@@ -495,7 +499,8 @@ def _rnaseq_expression() -> dict:
     settings["featureCounts"] = _params(
         ("threads", "Threads", "-T", "_threads"),
         ("annotation", "GTF/GFF annotation", "-a", "_gtf"),
-        ("feature type", "Feature type to count: exon (gene expression from exons, any annotation)", "-t", "exon"),
+        ("feature type", "Feature types counted per gene (_count_features: exon for a GTF, exon,CDS for a GFF3, whose "
+                         "mtDNA protein-coding genes have no exon lines)", "-t", "_count_features"),
         ("attribute", "Attribute naming the gene on exon lines (_exon_gene_attr: read from the annotation; Ensembl "
                       "GTF: gene_id, NCBI GFF3: gene)", "-g", "_exon_gene_attr"),
         ("pairs", "Count read pairs of paired-end samples", "-p --countReadPairs", "_if_PE"),

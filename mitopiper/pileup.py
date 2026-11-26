@@ -141,10 +141,22 @@ def _gene_name(attrs: dict) -> Optional[str]:
     return RRNA.get(suffix) or (tag or None)
 
 
+def open_text(path):
+    """An annotation as text, gzipped or not (Ensembl ships ``.gtf.gz``): a plain ``open`` crashed ``mt annotate``
+    with "'utf-8' codec can't decode byte 0x8b" near the end of every sample job."""
+    import gzip
+
+    with open(path, "rb") as handle:
+        gzipped = handle.read(2) == b"\x1f\x8b"
+    if gzipped:
+        return gzip.open(path, "rt", encoding="utf-8", errors="replace")
+    return open(path, encoding="utf-8", errors="replace")
+
+
 def read_gff(path) -> list:
     """``(contig, start, end, feature, gene, strand)`` of the gene features of a GFF3/GTF file (1-based, inclusive)."""
     genes = []
-    with open(path, encoding="utf-8") as handle:
+    with open_text(path) as handle:
         for line in handle:
             if line.startswith("##FASTA"):
                 break
@@ -167,7 +179,7 @@ def read_genbank(path) -> list:
             for start, end in current["parts"]:
                 genes.append((contig, start, end, "gene", name, current["strand"]))
 
-    with open(path, encoding="utf-8") as handle:
+    with open_text(path) as handle:
         for line in handle:
             if line.startswith("VERSION") or (line.startswith("LOCUS") and not contig):
                 contig = line.split()[1]
@@ -194,7 +206,7 @@ def read_genbank(path) -> list:
 
 
 def read_annotation(path) -> list:
-    with open(path, encoding="utf-8", errors="replace") as handle:
+    with open_text(path) as handle:
         genbank = handle.read(5) == "LOCUS"
     return read_genbank(path) if genbank else read_gff(path)
 
@@ -234,7 +246,7 @@ def htseq_total(path, include_unaligned: bool = False, extra: int = 0) -> int:
     """Total reads for RPM: the gene counts plus ``__no_feature`` of an htseq-count table
     (plus ``__not_aligned`` with ``include_unaligned``), plus ``extra``."""
     total = extra
-    with open(path, encoding="utf-8") as handle:
+    with open_text(path) as handle:
         for line in handle:
             fields = line.rstrip("\n").split("\t")
             if len(fields) < 2 or not fields[1].strip().isdigit():
@@ -326,7 +338,7 @@ def read_numt_alleles(path) -> dict:
 
     Tables of the first version listed every base run together (``AG``), the reference included; it is left out."""
     alleles = {}
-    with open(path, encoding="utf-8") as handle:
+    with open_text(path) as handle:
         for r in csv.DictReader(handle, delimiter="\t"):
             bases = tuple(b for b in r["numt_bases"].replace(",", "") if b != r["ref"].upper())
             if bases:
@@ -434,7 +446,7 @@ VCF_HEADER = [
 def fasta_lengths(path) -> dict:
     """``{name: length}`` of the sequences of a FASTA file."""
     from .mtdna import read_fasta              # mtdna imports this module
-    with open(path, encoding="utf-8") as handle:
+    with open_text(path) as handle:
         return {(header.split() or [""])[0]: len(sequence) for header, sequence in read_fasta(handle)}
 
 

@@ -493,7 +493,8 @@ def fetch_genome_reference(workspace: Workspace, organism: str, accession: Optio
     fasta = str(out_dir / f"{genome.ftp_name}_genomic.fna")
     gff = str(out_dir / f"{genome.ftp_name}_genomic.gff")
     ref = ReferenceSet(refpath=fasta, gtfpath=gff, source="ncbi_genome", accession=genome.accession,
-                       downloads={fasta: {"url": urls["fasta"], "md5_url": urls["md5"]},
+                       # the length (from NCBI) sizes STAR's index before the FASTA is downloaded
+                       downloads={fasta: {"url": urls["fasta"], "md5_url": urls["md5"], "length": genome.total_length},
                                   gff: {"url": urls["gff"], "md5_url": urls["md5"]}})
     return ref, genome
 
@@ -541,12 +542,15 @@ def _fasta_length(path: str, size: int, mtime: float) -> int:
     return validate_fasta(path)
 
 
-def _sa_index_nbases(fasta: str) -> int:
+def _sa_index_nbases(fasta: str, known_length: int = 0) -> int:
+    """STAR's --genomeSAindexNbases for ``fasta``: min(14, log2(length)/2 - 1). A genome the reference job downloads
+    is not here at build time: its length from NCBI is used (a 12 Mb yeast genome got 14, which STAR warns may
+    crash the mapping), else STAR's default."""
     try:
         stat = Path(fasta).stat()
         return sa_index_nbases(_fasta_length(fasta, stat.st_size, stat.st_mtime))
     except (OSError, RefError):
-        return 14  # not downloaded yet: STAR's default
+        return sa_index_nbases(known_length) if known_length else 14
 
 
 def _steps_running(workflow, program: str) -> list:
@@ -573,7 +577,8 @@ def _present(path: str) -> bool:
         return False
 
 
-def _fasta_index_commands(fasta: str, workflow, csh: bool, star: bool, skip_present: bool = False) -> list:
+def _fasta_index_commands(fasta: str, workflow, csh: bool, star: bool, skip_present: bool = False,
+                          known_length: int = 0) -> list:
     """Guarded commands building the indices of ``fasta`` that the active steps need.
 
     With ``skip_present``, indices that already exist on this machine are left out altogether.
@@ -601,7 +606,7 @@ def _fasta_index_commands(fasta: str, workflow, csh: bool, star: bool, skip_pres
         wanted.append((f"{fasta_dir}/SA", lambda: (
             f'{star_bin} --runMode genomeGenerate --genomeDir "{fasta_dir}" '
             f'--runThreadN {step_threads(workflow, star_steps[0])} --outTmpDir "{fasta_dir}/_STARtmp.$$" '
-            f'--genomeFastaFiles "{fasta}" --genomeSAindexNbases {_sa_index_nbases(fasta)}')))
+            f'--genomeFastaFiles "{fasta}" --genomeSAindexNbases {_sa_index_nbases(fasta, known_length)}')))
     return [_unless_exists(path, command(), csh) for path, command in wanted
             if not (skip_present and _present(path))]
 
@@ -624,6 +629,28 @@ def gene_attribute(path: str, feature: str = "exon") -> str:
     except OSError:
         gff3 = path.lower().endswith(_GFF3_SUFFIXES)
         return ("ID" if feature == "gene" else "gene") if gff3 else "gene_id"
+
+
+def count_features(path: str) -> str:
+    """Feature types featureCounts counts per gene: ``exon`` for a GTF; ``exon,CDS`` for a GFF3, where NCBI gives the
+    13 mtDNA protein-coding genes only ``gene`` and ``CDS`` lines (no exon), so ``-t exon`` missed ND1 ... CYB."""
+    path = str(path or "")
+    gff3 = path.lower().endswith(_GFF3_SUFFIXES)
+    try:
+        import gzip
+
+        opener = gzip.open if path.endswith(".gz") else open
+        with opener(path, "rt", encoding="utf-8", errors="replace") as handle:
+            for i, line in enumerate(handle):
+                fields = line.split("\t")
+                if len(fields) >= 9 and not line.startswith("#"):
+                    gff3 = "=" in fields[8].split(";")[0]       # GFF3: key=value; GTF: key "value"
+                    break
+                if i > 10_000:
+                    break
+    except OSError:
+        pass                                                    # not downloaded yet: from the name
+    return "exon,CDS" if gff3 else "exon"
 
 
 @lru_cache(maxsize=32)
@@ -814,4 +841,5 @@ def index_commands(ref: ReferenceSet, workflow, csh: Optional[bool] = None) -> l
     commands = download_commands(ref, workflow)
     if ref.nuc_refpath and ref.nuc_refpath in ref.downloads:
         commands += _fasta_index_commands(ref.nuc_refpath, workflow, csh, star=False)
-    return commands + _fasta_index_commands(ref.refpath, workflow, csh, star=True)
+    known_length = int((ref.downloads.get(ref.refpath) or {}).get("length") or 0)
+    return commands + _fasta_index_commands(ref.refpath, workflow, csh, star=True, known_length=known_length)

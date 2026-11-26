@@ -130,7 +130,7 @@ def test_step_resources_reach_the_job_header(registered, data_dir):
     ws.write_workflow(wf, "star")
     assert run(ws, "build", "--no-check", str(data_dir / "ena_runs.tsv"), "-s", "slurm", "-p", "star") == 0
     text = (ws.output_dir / "ena_runs" / "scripts" / "s_SAMEA1_0.sh").read_text()
-    assert "#SBATCH --mem=32G" in text and "#SBATCH --cpus-per-task=8" in text and "--runThreadN 8" in text
+    assert "#SBATCH --mem=40G" in text and "#SBATCH --cpus-per-task=8" in text and "--runThreadN 8" in text
 
 
 def test_presets_reset_restores_the_bundled_version(tmp_path, capsys):
