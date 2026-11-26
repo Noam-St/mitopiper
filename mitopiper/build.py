@@ -429,7 +429,8 @@ def build_experiment(
     # A build of experiment-level steps only (e.g. --steps multiqc) has no sample jobs to run.
     runnable = [job for job in sample_jobs if job.steps]
     dl_name = job_name("download", exp_dir.name) if downloads else None
-    waits = stage_dependencies(check_name, prep_name, tuple(j.job_name for j in runnable), dl_name)
+    waits = stage_dependencies(check_name, prep_name, tuple(j.job_name for j in runnable), dl_name,
+                               download_here=download_mode(workflow) == "login")
 
     def write(name: str, stage: str, body: str, res: JobResources = resources) -> str:
         path = scripts_dir / f"{name}.sh"

@@ -91,3 +91,25 @@ def test_failed_download_skips_its_samples_and_a_rerun_recovers(tmp_path):
 def test_invalid_download_mode(tmp_path):
     ws, _ = workspace(tmp_path, "sometimes")
     assert main(["-w", str(ws.root), "build", str(tmp_path / "exp.tsv"), "-p", "t"]) == 2
+
+
+def test_login_downloads_do_not_wait_for_jobs_master_sh_has_just_submitted(tmp_path, monkeypatch):
+    """AUDIT-2026-11-26-M13: on a cluster the login-node download checked the tool check job, still queued, and
+    skipped every download (and so every sample)."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "sbatch").write_text('#!/bin/sh\necho "$@" >> "$FAKE_CALLS"\necho $$\n')    # queues, runs nothing
+    (bin_dir / "sbatch").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_CALLS", str(tmp_path / "calls"))
+    ws, _ = workspace(tmp_path, "login")
+    wf = ws.load_workflow("t")
+    wf.set_general("tool_check", True)
+    ws.write_workflow(wf, "t")
+    assert main(["-w", str(ws.root), "build", "--no-check", str(tmp_path / "exp.tsv"), "-s", "slurm", "-p", "t"]) == 0
+    scripts = ws.output_dir / "exp" / "scripts"
+    assert "pm_dep" not in (scripts / "dl_exp.sh").read_text()
+    assert "for pm_dep in dl_exp check_exp" in (scripts / "s_a_0.sh").read_text()        # the samples check both
+    subprocess.run(["bash", str(ws.root / "master.sh")], check=True, capture_output=True)
+    assert (ws.output_dir / "exp" / "status" / "dl_exp.status").read_text().startswith("DONE")
+    assert (ws.output_dir / "exp" / "fastq" / "a_0_HS.fastq.gz").exists()

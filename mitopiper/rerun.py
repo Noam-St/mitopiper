@@ -266,7 +266,7 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
         present = {kind: job_name(kind, exp) if job_name(kind, exp) in rerun_names else None
                    for kind in ("check", "prepare", "download")}
         waits = stage_dependencies(present["check"], present["prepare"], tuple(n for n in by_job if n in rerun_names),
-                                   present["download"])
+                                   present["download"], download_here=download_mode(base) == "login")
         experiment_item = next((i for i in items if i.experiment == exp and i.kind == "experiment"), None)
         if experiment_item and experiment_item.active:   # audit H7: its check requires these DONE too
             rerun_samples = [n for n in by_job if n in rerun_names]

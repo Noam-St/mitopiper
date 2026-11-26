@@ -802,7 +802,8 @@ paths in the table) are only linked into the experiment, or copied there gzipped
 deleted, never the originals. A later rerun of a step that reads them must start at `wget`
 (`mitopiper rerun --from wget`), which fetches them again. Only jobs that stop at the first failing command delete
 reads (`fail_fast` on and `environment` bash, zsh or ksh): csh and sh do not see a failure inside a pipeline such as
-`bwa mem | samtools sort`, so there the reads are kept, with a warning at build time.
+`bwa mem | samtools sort`, so there the reads are kept, with a warning at build time. A build of some steps only
+(`--steps`, `--skip`) keeps every file that a step it leaves out reads, for the build that runs that step.
 
 ### Resources per step
 A step can declare what it needs with the optional fields `threads`, `memory` and `walltime` in
@@ -881,8 +882,10 @@ sample). Example: enable the bundled `multiqc` step.
   "fastqc": { "conda_env": "mitopiper-tools", ... }
   ```
 
-  Each command of the step runs as `sh -c '<command>'` inside that environment, and the workspace and
-  reference folders are bind-mounted. The tool check then looks for the container runtime instead of
+  Each command of the step runs inside that environment, with `bash -o pipefail` when the environment has
+  bash (else `sh`, with pipefail where it supports it), and the workspace and reference folders are
+  bind-mounted. Where a pipeline had to run without pipefail (an environment with dash only), the job keeps
+  its temporary files and reads instead of deleting them. The tool check then looks for the container runtime instead of
   the tools inside the image. Versions of containerised tools are defined by the image, which is
   recorded in the manifest.
 

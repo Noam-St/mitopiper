@@ -1,5 +1,6 @@
 import io
 import subprocess
+import time
 
 import pytest
 
@@ -163,7 +164,7 @@ def test_auto_fix_applies_per_job_suggestions_and_cancels_stuck_jobs(tmp_path):
     rows = (exp / "jobs.tsv").read_text().replace("s_a_0\ts_a_0", "11\ts_a_0").replace("s_b_1\ts_b_1", "12\ts_b_1") \
         .replace("e_demo\te_demo", "13\te_demo")
     (exp / "jobs.tsv").write_text(rows)
-    (exp / "status" / "s_a_0.status").write_text("RUNNING count 1 2 -\n")
+    (exp / "status" / "s_a_0.status").write_text(f"RUNNING count {int(time.time())} {int(time.time())} -\n")
     (exp / "status" / "e_demo.status").unlink()
     manifest = (exp / "mitopiper_manifest.json").read_text().replace('"scheduler": "local"', '"scheduler": "slurm"')
     (exp / "mitopiper_manifest.json").write_text(manifest)
@@ -349,8 +350,8 @@ def array_run(tmp_path, scheduler):
     rows = (exp / "jobs.tsv").read_text().replace("s_a_0\ts_a_0", "20_1\ts_a_0").replace("s_b_1\ts_b_1", "20_2\ts_b_1") \
         .replace("e_demo\te_demo", "21\te_demo")
     (exp / "jobs.tsv").write_text(rows)
-    (exp / "status" / "s_a_0.status").write_text("RUNNING count 1 2 -\n")
-    (exp / "status" / "s_b_1.status").write_text("RUNNING count 1 2 -\n")
+    (exp / "status" / "s_a_0.status").write_text(f"RUNNING count {int(time.time())} {int(time.time())} -\n")
+    (exp / "status" / "s_b_1.status").write_text(f"RUNNING count {int(time.time())} {int(time.time())} -\n")
     (exp / "status" / "e_demo.status").unlink()
     manifest = json.loads((exp / "mitopiper_manifest.json").read_text())
     manifest["scheduler"] = scheduler

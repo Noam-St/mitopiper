@@ -199,7 +199,8 @@ def test_steps_run_in_their_container_or_conda_env(tmp_path, monkeypatch):
     wf = Workflow.default()
     conf = {"container": "/images/star.sif"}
     (line,) = in_environment(conf, ["STAR --genomeDir /r | samtools sort -o /o/x.bam -"], wf, ["/w", "/r", "/w"])
-    assert line == "apptainer exec --bind /r,/w /images/star.sif sh -c 'STAR --genomeDir /r | samtools sort -o /o/x.bam -'"
+    assert line.startswith("apptainer exec --bind /r,/w /images/star.sif sh -c 'if command -v bash")
+    assert line.endswith(" mitopiper 'STAR --genomeDir /r | samtools sort -o /o/x.bam -' ''")
     assert in_environment({"conda_env": "rnaseq"}, ["fastqc x"], wf, [])[0].startswith("conda run --no-capture-output -n rnaseq sh -c")
     assert in_environment({"conda_env": "/envs/r"}, ["fastqc x"], wf, [])[0].startswith("conda run --no-capture-output -p /envs/r")
     assert in_environment({}, ["fastqc x"], wf, []) == ["fastqc x"]

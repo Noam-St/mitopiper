@@ -283,10 +283,17 @@ def kind_of(name: str) -> str:
 
 
 def stage_dependencies(check: Optional[str] = None, prepare: Optional[str] = None, samples: tuple = (),
-                       download: Optional[str] = None) -> dict:
-    """Jobs each stage waits for, given the jobs that exist: ``{stage: [job names]}``."""
+                       download: Optional[str] = None, download_here: bool = False) -> dict:
+    """Jobs each stage waits for, given the jobs that exist: ``{stage: [job names]}``. ``download_here``: the
+    downloads run on the login node (download_mode login) while master.sh submits the rest."""
     before_download = [prepare or check] if (prepare or check) else []
     before_samples = [download] if download else before_download
+    if download and download_here:
+        # FIX [AUDIT-2026-11-26-M13]: the login-node download checked the tool check and reference jobs that
+        # master.sh had only just submitted, found them not DONE and skipped every download, and so every sample.
+        # It waits for nothing; the samples check both.
+        return {"check": [], "prepare": [check] if check else [], "download": [],
+                "sample": [download] + before_download, "experiment": list(samples) or [download] + before_download}
     return {"check": [], "prepare": [check] if check else [], "download": before_download,
             "sample": before_samples, "experiment": list(samples) or before_samples}
 

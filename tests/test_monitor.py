@@ -298,3 +298,50 @@ def test_a_log_that_shrinks_while_it_is_counted_does_not_hang(tmp_path, monkeypa
     monkeypatch.undo()
     log.write_text("ERROR y\n")
     assert scanner.scan(log)[0] == 1              # and the next scan starts over
+
+
+# ------------------------------------------------------------------ AUDIT-2026-11-26 M10, M11, M12
+def test_bjobs_answers_are_kept_when_some_jobs_are_past_the_clean_period(tmp_path, monkeypatch):
+    """M10: bjobs exits 255 when one id of the list is forgotten, printing the others; all states were lost."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "bjobs").write_text("#!/bin/sh\necho '769636|0|RUN'\necho 'Job <73185> is not found' >&2\nexit 255\n")
+    (bin_dir / "bjobs").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:/usr/bin:/bin")
+    assert mon.query_scheduler("lsf", ["769636", "73185"]) == {"769636": (mon.RUNNING, "RUN")}
+    (bin_dir / "bjobs").write_text("#!/bin/sh\necho 'Job <73185> is not found' >&2\nexit 255\n")
+    assert mon.query_scheduler("lsf", ["73185"]) == {}                    # all forgotten: known to be gone
+    (bin_dir / "bjobs").write_text("#!/bin/sh\necho 'LSF is down. Please wait ...' >&2\nexit 255\n")
+    assert mon.query_scheduler("lsf", ["73185"]) is None                  # not answered: nothing is known
+
+
+def test_an_array_task_s_errors_come_from_the_sample_s_own_stderr(tmp_path):
+    """M11: the empty LSF <id>_<task>.err was read instead of the sample's stderr: no errors, no diagnosis."""
+    err = tmp_path / "stderr"
+    err.mkdir()
+    (err / "755709_1.err").write_text("")
+    (err / "s_a_0.err").write_text("bwa: out of memory\n")
+    assert mon.find_log(tmp_path, "stderr", "s_a_0", "755709_1") == err / "s_a_0.err"
+    (tmp_path / "stdout").mkdir()
+    (tmp_path / "stdout" / "755709_1.out").write_text("TERM_MEMLIMIT: job killed\n")       # LSF's task report
+    (tmp_path / "stdout" / "s_a_0.out").write_text("")
+    assert mon.find_log(tmp_path, "stdout", "s_a_0", "755709_1") == tmp_path / "stdout" / "755709_1.out"
+    (tmp_path / "stdout" / "s_b_1.out").write_text("output\n")
+    (tmp_path / "stdout" / "42.out").write_text("")                      # an empty file is taken last
+    assert mon.find_log(tmp_path, "stdout", "s_b_1", "42") == tmp_path / "stdout" / "s_b_1.out"
+
+
+def test_a_status_file_of_an_earlier_run_is_not_trusted(tmp_path):
+    """M12: after a rebuild and resubmission, queued jobs showed the DONE or FAILED of the earlier run."""
+    import time
+
+    ws = Workspace(tmp_path / "ws")
+    exp = make_exp(ws)
+    now = int(time.time())
+    (exp / "jobs.tsv").write_text("job_id\tjob_name\tscript\tsubmitted\tkind\n"
+                                  f"11\ts_a_0\t/x/s_a_0.sh\t{now}\tsample\n12\ts_b_1\t/x/s_b_1.sh\t{now}\tsample\n")
+    (exp / "status" / "s_a_0.status").write_text(f"FAILED bwa {now - 86400} {now - 86000} 1\n")   # yesterday's run
+    (exp / "status" / "s_b_1.status").write_text(f"DONE - {now - 30} {now} 0\n")                 # this run
+    query = lambda s, ids: {"11": (mon.PENDING, "PENDING")}                                         # noqa: E731
+    got = {j.name: j.state for j in mon.collect(ws, ["E"], mon.ErrorScanner(), query)}
+    assert got["s_a_0"] == mon.PENDING and got["s_b_1"] == mon.DONE

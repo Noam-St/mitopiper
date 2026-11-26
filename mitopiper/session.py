@@ -289,6 +289,15 @@ class MonitorSession:
                     self.draw("The jobs could not be submitted: fix the problem above, then submit again "
                               f"with 'bash {self.ws.root / 'master.sh'}'.")
                     return 1
+                # FIX [AUDIT-2026-11-26-M16]: jobs that never ran (master.sh not run, or stopped before them) and an
+                # experiment with no jobs at all (a typo) read "All jobs finished successfully." (exit 0)
+                not_run = [s for s in self.statuses if s.state == NOT_SUBMITTED]
+                if not self.statuses or (not_run and not problems):
+                    what = (f"{len(not_run)} job(s) were never submitted ({', '.join(s.name for s in not_run[:5])}"
+                            f"{', ...' if len(not_run) > 5 else ''})" if self.statuses
+                            else f"No jobs found for {', '.join(self.experiments)}")
+                    self.draw(f"{what}. Submit them with: bash {self.ws.root / 'master.sh'}")
+                    return 1
                 if not problems:
                     self.draw("All jobs finished successfully.")
                     if not self.stay_when_done:

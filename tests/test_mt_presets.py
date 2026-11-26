@@ -6,6 +6,7 @@ for the normal and 2 for the rotated reference, so the merged pileup shows where
 came from. `mitopiper mt ...` runs for real.
 """
 import os
+import re
 import shutil
 import time
 import subprocess
@@ -389,6 +390,12 @@ def test_a_stale_reference_lock_is_taken_over(tmp_path, monkeypatch):
     assert "taking over the stale lock" in out.stderr and not lock.exists()
 
 
+def cleanup_files(step) -> list:
+    """The files the cleanup step of a sample job deletes (kept when a pipeline ran without pipefail: audit M9)."""
+    (line,) = step.lines
+    return re.findall(r'"([^"]+)"', line.split("else rm -f", 1)[1])
+
+
 def test_temporary_outputs_are_removed_last_and_only_on_success():
     from mitopiper.builder import TEMPORARY_STEP, build_sample_job
     from mitopiper.metadata import Run, Sample
@@ -400,9 +407,11 @@ def test_temporary_outputs_are_removed_last_and_only_on_success():
     job = build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa"))
     last = job.steps[-1]
     assert last.step == TEMPORARY_STEP and [s.step for s in job.steps].index("annotate") < len(job.steps) - 1
-    assert last.lines == ['rm -f "/w/output/E/alignment/S_0_HS.sam"', 'rm -f "/w/output/E/alignment/S_0_HS.bam"']
+    assert cleanup_files(last) == ["/w/output/E/alignment/S_0_HS.sam", "/w/output/E/alignment/S_0_HS.bam"]
     # a rerun resumed late still removes what the first attempt left
-    late = build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa"), steps=["annotate"])
+    late = build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa"),
+                            steps=[s for s in preset.active_order() if preset.active_order().index(s)
+                                   >= preset.active_order().index("annotate")])
     assert late.steps[-1].lines == last.lines
     preset.set_general("fail_fast", False)               # the job goes on after errors: delete nothing
     assert build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa")).steps[-1].step == "vcf"
@@ -416,20 +425,20 @@ def test_keep_reads_false_deletes_the_downloaded_and_trimmed_reads_last():
 
     preset = Workflow(**bundled_presets()["mt-variants"])
     sample = Sample(index=0, accession="S", organism="Homo_sapiens", runs=[Run("R", ["/f_1.fq.gz", "/f_2.fq.gz"])])
-    kept = build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa")).steps[-1].lines
-    assert not any("fastq" in line or ".fq.gz" in line for line in kept)          # kept by default
+    kept = cleanup_files(build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa")).steps[-1])
+    assert not any("fastq" in path or ".fq.gz" in path for path in kept)          # kept by default
     preset.set_general("keep_reads", False)
     job = build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa"))
-    assert job.steps[-1].lines == kept + [
-        'rm -f "/w/output/E/fastq/S_0_HS_1.fastq.gz"', 'rm -f "/w/output/E/fastq/S_0_HS_2.fastq.gz"',
-        'rm -f "/w/output/E/post_trim/S_0_HS_1_val_1.fq.gz"', 'rm -f "/w/output/E/post_trim/S_0_HS_2_val_2.fq.gz"']
+    assert cleanup_files(job.steps[-1]) == kept + [
+        "/w/output/E/fastq/S_0_HS_1.fastq.gz", "/w/output/E/fastq/S_0_HS_2.fastq.gz",
+        "/w/output/E/post_trim/S_0_HS_1_val_1.fq.gz", "/w/output/E/post_trim/S_0_HS_2_val_2.fq.gz"]
     # the local files themselves are only linked from fastq/: the links go, never the files
     wget = next(s for s in job.steps if s.step == "wget")
     assert any(line.startswith('ln -sf "/f_1.fq.gz"') for line in wget.lines)
     assert not any("/f_1.fq.gz" in line for line in job.steps[-1].lines)
     # csh and sh do not stop at a failure inside a pipeline: the reads are kept there
     preset.set_general("environment", "tcsh")
-    assert build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa")).steps[-1].lines == kept
+    assert cleanup_files(build_sample_job(sample, preset, "/w/output/E", ReferenceSet(refpath="/r/mt.fa")).steps[-1]) == kept
 
 
 def test_existing_numt_reference_is_reused_without_the_genome_index(tmp_path):
@@ -467,3 +476,70 @@ def test_a_whole_genome_as_the_mtdna_reference_is_refused(cluster, caplog):
     with caplog.at_level(logging.WARNING):
         assert run_preset(ws, tmp_path, "mt-variants", ["wget"]) == 0
     assert "larger than most mitochondrial genomes" in caplog.text
+
+
+def test_a_staged_build_keeps_the_reads_its_later_stages_need():
+    """AUDIT-2026-11-26-M8: --steps wget,trim,fastqc with keep_reads false deleted the reads before the alignment."""
+    from mitopiper.builder import TEMPORARY_STEP, build_sample_job
+    from mitopiper.config import Workflow
+    from mitopiper.defaults import bundled_presets
+    from mitopiper.metadata import Run, Sample
+
+    preset = Workflow(**bundled_presets()["mt-variants"])
+    preset.set_general("keep_reads", False)
+    sample = Sample(index=0, accession="S", organism="Homo_sapiens", runs=[Run("R", ["/f_1.fq.gz", "/f_2.fq.gz"])])
+    ref = ReferenceSet(refpath="/r/mt.fa")
+    staged = build_sample_job(sample, preset, "/w/output/E", ref, steps=["wget", "fastqc_pre", "trim", "fastqc"])
+    assert staged.steps[-1].step != TEMPORARY_STEP                       # nothing to delete yet: all of it is needed
+    whole = build_sample_job(sample, preset, "/w/output/E", ref)
+    assert "/w/output/E/post_trim/S_0_HS_1_val_1.fq.gz" in cleanup_files(whole.steps[-1])
+    # the next stage (everything after fastqc) deletes them at its end
+    rest = [s for s in preset.active_order() if preset.active_order().index(s) > preset.active_order().index("fastqc")]
+    assert cleanup_files(build_sample_job(sample, preset, "/w/output/E", ref, steps=rest).steps[-1]) == \
+        cleanup_files(whole.steps[-1])
+    # a left-out step that does not read a file does not keep it (vcf reads neither the SAM nor the reads)
+    no_vcf = [s for s in preset.active_order() if s != "vcf"]
+    assert cleanup_files(build_sample_job(sample, preset, "/w/output/E", ref, steps=no_vcf).steps[-1]) == \
+        cleanup_files(whole.steps[-1])
+
+
+def test_a_pipeline_in_a_container_fails_like_one_outside(tmp_path):
+    """AUDIT-2026-11-26-M9: in 'sh -c' a failed bwa in 'bwa | samtools sort' went unnoticed, and the reads were
+    deleted; where the environment cannot do pipefail (dash, no bash), the cleanup keeps the files."""
+    from mitopiper.builder import in_environment
+    from mitopiper.config import Workflow
+
+    marker = tmp_path / "s_a_0.nopipefail"
+    (line,) = in_environment({"conda_env": "x"}, ["false | cat"], Workflow.default(), [], str(marker))
+    inside = line.split(" -n x ", 1)[1]                    # what conda run would run in the environment
+    assert subprocess.run(["sh", "-c", inside]).returncode == 1          # bash is here: pipefail
+    # an environment with dash only: no pipefail, so the marker is left
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for tool in ("false", "cat", "touch"):
+        (bin_dir / tool).symlink_to(shutil.which(tool))
+    dash = shutil.which("dash")
+    if dash:
+        result = subprocess.run([dash, "-c", inside.replace("sh -c", f"{dash} -c", 1)], env={"PATH": str(bin_dir)})
+        assert result.returncode == 0 and marker.exists()
+
+
+def test_the_cleanup_keeps_the_files_after_a_pipeline_without_pipefail(tmp_path):
+    from mitopiper.builder import build_sample_job, no_pipefail_marker
+    from mitopiper.config import Workflow
+    from mitopiper.defaults import bundled_presets
+    from mitopiper.metadata import Run, Sample
+
+    preset = Workflow(**bundled_presets()["mt-variants"])
+    sample = Sample(index=0, accession="S", organism="Homo_sapiens", runs=[Run("R", ["/f_1.fq.gz", "/f_2.fq.gz"])])
+    exp = tmp_path / "E"
+    job = build_sample_job(sample, preset, str(exp), ReferenceSet(refpath="/r/mt.fa"))
+    files = [Path(p) for p in cleanup_files(job.steps[-1])]
+    marker = Path(no_pipefail_marker(str(exp), job.job_name))
+    for path in files + [marker]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x")
+    run = subprocess.run(["bash", "-c", job.steps[-1].lines[0]], capture_output=True, text=True)
+    assert all(p.exists() for p in files) and not marker.exists() and "without pipefail" in run.stderr
+    subprocess.run(["bash", "-c", job.steps[-1].lines[0]], check=True)    # a later run without the marker deletes
+    assert not any(p.exists() for p in files)

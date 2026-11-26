@@ -27,6 +27,7 @@ lookup.
 
 from __future__ import annotations
 
+import logging
 import posixpath
 import re
 import shlex
@@ -37,6 +38,8 @@ from .config import Workflow
 from .config import truthy as _truthy
 from .metadata import Sample
 from .references import ReferenceSet, count_features, derived_paths, gene_attribute, mt_shift
+
+log = logging.getLogger(__name__)
 
 #: Names usable as ``_name`` in setting values (and in structures).
 PLACEHOLDERS = (
@@ -231,14 +234,26 @@ TEMPORARY_STEP = "remove-temporary"
 
 def temporary_outputs(workflow: Workflow, exp_dir: str, sample_name: str) -> list:
     """Outputs of the active sample steps marked ``"temporary": true`` (e.g. a SAM file that only the next
-    step reads), deleted at the end of the sample job. All active steps count, not only those of a
-    resumed job, so a rerun also removes what the first attempt left."""
-    paths = []
+    step reads), deleted at the end of the sample job, as ``(step, [paths])``. All active steps count, not only
+    those of a resumed job, so a rerun also removes what the first attempt left."""
+    found = []
     for step in workflow.active_order():
         conf = workflow.pipeline.get(step, {})
         if step_scope(workflow, step) == "sample" and _truthy(conf.get("temporary", False)):
-            paths += list(output_paths(conf, exp_dir, sample_name).values())
-    return paths
+            found.append((step, list(output_paths(conf, exp_dir, sample_name).values())))
+    return found
+
+
+def left_out(workflow: Workflow, built: list) -> list:
+    """Active sample steps after the first of ``built`` (this build's steps) that it leaves out: a staged build
+    (``--steps``/``--skip``) runs them later. Steps before the first built one have run already (a rerun resumes
+    after them)."""
+    active = [s for s in workflow.active_order() if step_scope(workflow, s) == "sample"]
+    built = [s for s in built if s in active]
+    if not built:
+        return []
+    first = active.index(built[0])
+    return [s for s in active[first + 1:] if s not in built]
 
 
 def deletes_reads(workflow: Workflow) -> bool:
@@ -400,8 +415,10 @@ def build_sample_job(
     exp_dir: str,
     ref: ReferenceSet,
     steps: Optional[list] = None,
+    cleanup: bool = True,
 ) -> SampleJob:
-    """Build the commands of every sample-scoped step for one sample."""
+    """Build the commands of every sample-scoped step for one sample (``cleanup``: with the deletion of the
+    temporary files and reads at the end)."""
     exp_dir = str(exp_dir)
     order = [s for s in (steps if steps is not None else workflow.active_order()) if step_scope(workflow, s) == "sample"]
     base = sample_variables(sample, workflow, exp_dir, ref)
@@ -455,17 +472,39 @@ def build_sample_job(
             structure = conf.get("structure", "") or "key settings input"
             lines = [render_structure(structure, variables, lookups)]
         binds = [workspace_of(exp_dir)] + [posixpath.dirname(p) for p in (ref.refpath, ref.nuc_refpath, ref.numt_refpath, ref.gtfpath) if p]
-        job.steps.append(StepCommands(step, conf.get("description", ""), in_environment(conf, lines, workflow, binds)))
-    temporary = temporary_outputs(workflow, exp_dir, sample.name)
+        job.steps.append(StepCommands(step, conf.get("description", ""), in_environment(
+            conf, lines, workflow, binds, no_pipefail_marker(exp_dir, job.job_name))))
+    if not cleanup:
+        return job
+    candidates = temporary_outputs(workflow, exp_dir, sample.name)
     if deletes_reads(workflow):
         # The reads take most of the disk of an experiment (BGU: 32 GB for two RNA-seq samples). Local FASTQ files
         # (an imported folder) are linked into the experiment, or gzipped copies made: only those go.
-        temporary += read_files(workflow, base, name, paired)
+        candidates.append(("reads", read_files(workflow, base, name, paired)))
+    # FIX [AUDIT-2026-11-26-M8]: a staged build (--steps wget,trim,fastqc with keep_reads false) deleted the reads
+    # that the alignment of its next stage needed. A file a left-out step reads is kept.
+    later = left_out(workflow, order) if candidates else []
+    texts = {}
+    if later:
+        full = build_sample_job(sample, workflow, exp_dir, ref, later, cleanup=False)
+        texts = {s.step: "\n".join(s.lines) for s in full.steps}
+    temporary = []
+    for producer, paths in candidates:
+        readers = [s for s in later if any(p in texts.get(s, "") for p in paths)]
+        if readers:
+            log.info("%s: keeping the %s output, which %s (not in this build) reads", name, producer, ", ".join(readers))
+        else:
+            temporary += paths
     if temporary and job.steps and workflow.flag("fail_fast", True):
         # Reached only when every step before succeeded (fail_fast stops the job at the first error), so a
-        # failed job keeps what a rerun needs. Without fail_fast nothing is deleted.
+        # failed job keeps what a rerun needs. Without fail_fast nothing is deleted. A step in a container or
+        # conda environment without pipefail (audit M9) leaves a marker: then nothing is deleted either.
+        marker = no_pipefail_marker(exp_dir, job.job_name)
+        files = " ".join(f'"{path}"' for path in temporary)
+        guarded = (f'if [ -e "{marker}" ]; then echo "[mitopiper] kept the intermediate files: a pipeline ran without '
+                   f'pipefail (see above)" >&2; rm -f "{marker}"; else rm -f {files}; fi')
         job.steps.append(StepCommands(TEMPORARY_STEP, "Delete intermediate files (steps marked temporary; the reads "
-                                      "with keep_reads false)", [f'rm -f "{path}"' for path in temporary]))
+                                      "with keep_reads false)", [f"sh -c {shlex.quote(guarded)}"]))
     return job
 
 
@@ -517,11 +556,28 @@ def workspace_of(exp_dir: str) -> str:
     return posixpath.dirname(posixpath.dirname(str(exp_dir).rstrip("/")))
 
 
-def in_environment(conf: dict, lines: list, workflow: Workflow, binds: list) -> list:
+def no_pipefail_marker(exp_dir: str, job_name: str) -> str:
+    """File a step leaves when it ran a pipeline without pipefail (see :func:`in_environment`)."""
+    return _join(exp_dir, "status", f"{job_name}.nopipefail")
+
+
+#: Runs the line ($1) with pipefail inside a container or conda environment: in bash if there is one, else in sh
+#: where it knows pipefail; else (dash) as it is, leaving the marker ($2) when the line has a pipe.
+_IN_ENV = ('if command -v bash >/dev/null 2>&1; then exec bash -o pipefail -c "$1"; fi; '
+           'if (set -o pipefail) 2>/dev/null; then set -o pipefail; '
+           'elif [ -n "$2" ]; then case "$1" in *"|"*) touch "$2" 2>/dev/null || true;; esac; fi; eval "$1"')
+
+
+def in_environment(conf: dict, lines: list, workflow: Workflow, binds: list, marker: str = "") -> list:
     """Run a step's commands in its ``container`` (Apptainer/Singularity image) or ``conda_env``.
 
-    Each command line runs as ``sh -c '<line>'`` inside the environment, so pipes and
-    redirections happen there too. The workspace and reference folders are bind-mounted.
+    Each command line runs in a shell inside the environment, so pipes and redirections happen there too. The
+    workspace and reference folders are bind-mounted.
+
+    FIX [AUDIT-2026-11-26-M9]: the line ran as ``sh -c '<line>'``, without pipefail: a failed bwa in
+    ``bwa mem | samtools sort`` gave a valid, partial BAM, the job went on and deleted the reads. Now
+    ``bash -o pipefail`` when the environment has bash, else sh with pipefail where it knows it; where neither
+    can (dash), the job's cleanup keeps the intermediate files and the reads (``marker``).
     """
     image = str(conf.get("container", "") or "").strip()
     env = str(conf.get("conda_env", "") or "").strip()
@@ -533,7 +589,8 @@ def in_environment(conf: dict, lines: list, workflow: Workflow, binds: list) -> 
         prefix = f"{runtime} exec" + (f" --bind {folders}" if folders else "") + f" {image}"
     else:
         prefix = f"conda run --no-capture-output {'-p' if '/' in env else '-n'} {env}"
-    return [f"{prefix} sh -c {shlex.quote(line)}" if line.strip() else line for line in lines]
+    return [f"{prefix} sh -c {shlex.quote(_IN_ENV)} mitopiper {shlex.quote(line)} {shlex.quote(marker)}"
+            if line.strip() else line for line in lines]
 
 
 def render_steps(steps: list, label: str, track: bool = False) -> str:

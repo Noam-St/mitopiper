@@ -93,7 +93,7 @@ def test_session_commands_while_jobs_run(tmp_path):
     exp = ws.experiment_dir("E")
     (exp / "status").mkdir(parents=True)
     (exp / "jobs.tsv").write_text("job_id\tjob_name\tscript\tsubmitted\tkind\n11\ts_a_0\t/s/a.sh\t1\tsample\n")
-    (exp / "status" / "s_a_0.status").write_text("RUNNING count 1 2 -\n")
+    (exp / "status" / "s_a_0.status").write_text(f"RUNNING count {int(time.time())} {int(time.time())} -\n")
     commands = iter(["h", "i 5", "j s_a_0", "bogus", "q"])
     out = io.StringIO()
     session = MonitorSession(ws, ["E"], poll=lambda t: next(commands), ask=lambda p="": "", stream=out,
@@ -192,3 +192,25 @@ def test_start_menu_can_monitor_earlier_experiments(tmp_path, capsys):
     assert "monitor / rerun other experiments (2 launched in this workspace)" in out and "Last launched" in out
     import re
     assert re.search(r"new_exp\s*\|[^|]*\|\s*1\s*\|", out)                    # 2 submissions of one job: 1 job
+
+
+def test_jobs_that_never_ran_are_not_a_success(tmp_path):
+    """AUDIT-2026-11-26-M16: never-submitted jobs and a mistyped experiment read "All jobs finished successfully."."""
+    from mitopiper.cli import main
+
+    ws = setup_ws(tmp_path)
+    exp = ws.experiment_dir("E")
+    (exp / "status").mkdir(parents=True)
+    (exp / "scripts").mkdir()
+    (exp / "scripts" / "s_a_0.sh").write_text("")
+    (exp / "scripts" / "s_b_1.sh").write_text("")
+    out = io.StringIO()
+    session = MonitorSession(ws, ["E"], ask=lambda prompt="": "q", stream=out, color=False, query=lambda s, i: None)
+    assert session.run() == 1
+    text = out.getvalue()
+    assert "2 job(s) were never submitted (s_a_0, s_b_1)" in text and "finished successfully" not in text
+    out = io.StringIO()
+    assert MonitorSession(ws, ["F"], ask=lambda prompt="": "q", stream=out, color=False,
+                          query=lambda s, i: None).run() == 1
+    assert "No jobs found for F" in out.getvalue()
+    assert main(["-w", str(ws.root), "monitor", "-i", "Typo", "--no-color"]) == 1

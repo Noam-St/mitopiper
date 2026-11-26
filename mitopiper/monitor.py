@@ -174,11 +174,19 @@ def find_log(exp_dir: Path, kind: str, name: str, job_id: str) -> Optional[Path]
     candidates = []
     if job_id:
         candidates += [f"{name}_{job_id}{suffix}", f"{name}.{sge}{job_id}", f"{job_id}{suffix}"]
-    candidates.append(f"{name}{suffix}")
-    for candidate in candidates:
-        path = directory / candidate
-        if path.is_file():
+    # FIX [AUDIT-2026-11-26-M11]: an array task's own stderr is <name>.err (the array wrapper redirects the sample
+    # script there); the scheduler's file of the task (LSF <id>_<task>.err) is empty, and was read instead: no
+    # error lines, no diagnosis. An empty file is taken only when there is nothing else.
+    if "_" in job_id and kind == "stderr":
+        candidates.insert(0, f"{name}{suffix}")
+    else:
+        candidates.append(f"{name}{suffix}")
+    found = [directory / c for c in candidates if (directory / c).is_file()]
+    for path in found:
+        if path.stat().st_size:
             return path
+    if found:
+        return found[0]
     matches = sorted(directory.glob(f"{name}[._]*"), key=lambda p: p.stat().st_mtime)
     return matches[-1] if matches else None
 
@@ -191,6 +199,11 @@ def _run(cmd: list, timeout: int = 30) -> Optional[str]:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
     except (OSError, subprocess.SubprocessError):
         return None
+    if result.returncode != 0 and cmd[0] == "bjobs" and (result.stdout.strip() or "not found" in result.stderr):
+        # FIX [AUDIT-2026-11-26-M10]: bjobs exits 255 when any job of the list is past LSF's CLEAN_PERIOD (1 h on
+        # WEXAC), printing the others: dropping the whole answer lost every state (killed jobs RUNNING for ever).
+        # The forgotten jobs are simply missing from the answer, as the callers expect.
+        return result.stdout
     return result.stdout if result.returncode == 0 else None
 
 
@@ -535,6 +548,8 @@ def collect(workspace: Workspace, experiments: list, scanner: ErrorScanner,
             elif submitted:
                 job.scheduler_state = NEVER_SUBMITTED
             status = read_status_file(exp_dir, name)
+            if status and stale_status(status, job, scheduler):
+                status = None
             sched = task_state(scheduler_info, job.job_id) if scheduler_info else None
             if sched:
                 job.scheduler_state = sched[1]
@@ -579,6 +594,22 @@ def collect(workspace: Workspace, experiments: list, scanner: ErrorScanner,
             statuses.append(job)
         _mark_blocked([j for j in statuses if j.experiment == exp])
     return statuses
+
+
+#: Clocks of the login and compute nodes may differ by this much
+CLOCK_SLACK = 120
+
+
+def stale_status(status: dict, job: "JobStatus", scheduler: str) -> bool:
+    """Whether a status file was written by an earlier run of the job: last written before this submission.
+
+    FIX [AUDIT-2026-11-26-M12]: after a rebuild and resubmission, the queued jobs showed the DONE or FAILED of the
+    earlier run (and a rerun resubmitted a "FAILED" job still queued). Not for the local scheduler and login-node
+    downloads, which record the job once it has run."""
+    if scheduler == "local" or not job.submitted or not re.fullmatch(r"\d+(_\d+)?", job.job_id or ""):
+        return False
+    written = max(t for t in (status.get("started"), status.get("updated"), 0) if t is not None)
+    return 0 < written < job.submitted - CLOCK_SLACK
 
 
 BLOCKED = "waits for a failed job: starts only after a rerun"

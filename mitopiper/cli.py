@@ -539,6 +539,10 @@ def cmd_monitor(ws: Workspace, args) -> int:
         if not experiments:
             print("No submitted experiments found. Build and run master.sh first.")
             return 1
+        missing = [e for e in experiments if not ws.experiment_dir(e).is_dir()]   # audit M16, as without -i
+        if missing:
+            print(f"Unknown experiment(s): {', '.join(missing)}")
+            return 1
         return MonitorSession(ws, experiments, interval=args.watch or 15.0, color=False if args.no_color else None,
                               stay_when_done=sys.stdin.isatty()).run()
     if args.rerun:

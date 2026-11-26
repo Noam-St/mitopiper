@@ -97,6 +97,15 @@ def executables(line: str) -> list:
     wrapped = re.match(r"^\s*(?:\S*/)?(?:ba)?sh -c '(.*)'\s*$", line)
     if wrapped:  # e.g. the reference downloads: sh -c 'set -e; wget ...; md5sum -c -'
         return executables(wrapped.group(1))
+    try:
+        words = shlex.split(line, posix=True)
+    except ValueError:
+        words = []
+    if len(words) > 3 and "sh" in words[1:-1] and words[words.index("sh", 1) + 1] == "-c" \
+            and os.path.basename(words[0]) not in ("sh", "bash"):
+        # a step in its container or conda environment (builder.in_environment): only the runtime runs here,
+        # what it runs is inside the environment
+        return [words[0]]
     found = []
     for segment in re.split(r"\|\||&&|\||;", line):
         try:
