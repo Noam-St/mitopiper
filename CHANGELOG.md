@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Interactive mode shows the workflow presets (with their descriptions) and a preset's run order (with each step's scope and description) as tables; long descriptions are wrapped.
+
 ## 2.0.2 (2026-11-26)
 
 Fixes of a full audit on an HPC cluster (9 high and 19 medium findings). **Upgrading:** run

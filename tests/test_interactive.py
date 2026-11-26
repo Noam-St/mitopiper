@@ -103,3 +103,16 @@ def test_the_preset_menu_shows_what_each_preset_is_for(tmp_path, data_dir, capsy
     menu = out[out.index("Choose a workflow preset:"):]
     assert "mt-variants-numt" in menu and "NUMT reads removed by mapping quality" in menu
     assert "NUMT reads removed with Numt Parser" in menu
+    # a table (tabulate), long descriptions wrapped onto more lines of the same row
+    assert "| Preset" in menu and "| Description" in menu and "|   2 | mt-variants-numt " in menu
+    assert all(len(line) <= 110 for line in menu.split("Choose a workflow preset:\n", 1)[1].splitlines()[:16])
+
+
+def test_choose_shows_a_table_and_returns_the_chosen_row(capsys):
+    from mitopiper.ui import choose
+
+    answers = iter(["7", "1"])
+    assert choose("Pick:", ["a", "b"], input_fn=lambda p="": next(answers), columns=["Name", "What"],
+                  rows=[["a", "first"], ["b", "x " * 60]]) == 1
+    out = capsys.readouterr().out
+    assert "| Name" in out and "|   1 | b" in out and "'7' is not one of the listed options" in out

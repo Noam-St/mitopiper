@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import textwrap
 from typing import Callable, Optional, Sequence
 
 from tabulate import tabulate
@@ -16,7 +17,10 @@ def banner(text: str) -> None:
     print(f"{'#' * width}\n{text}\n{'#' * width}\n")
 
 
-def table(rows, headers="keys") -> str:
+def table(rows, headers="keys", wrap: int = 0) -> str:
+    """A psql-style table; ``wrap``: text cells longer than this many characters are wrapped onto more lines."""
+    if wrap:
+        rows = [[textwrap.fill(c, wrap) if isinstance(c, str) and len(c) > wrap else c for c in row] for row in rows]
     return tabulate(rows, headers=headers, tablefmt="psql")
 
 
@@ -40,16 +44,22 @@ def choose(
     allow_exit: bool = True,
     input_fn: Callable = input,
     descriptions: Optional[Sequence[str]] = None,
+    columns: Optional[Sequence[str]] = None,
+    rows: Optional[Sequence[Sequence]] = None,
 ) -> Optional[int]:
-    """Show a numbered list and return the chosen index (``None`` on exit)."""
+    """Show a numbered list and return the chosen index (``None`` on exit). With ``columns`` and ``rows`` (one row
+    per option), the options are shown as a table with those column headers."""
     if not options:
         print("Nothing to choose from.\n")
         return None
     while True:
         print(prompt)
-        for i, option in enumerate(options):
-            desc = f"\t{descriptions[i]}" if descriptions else ""
-            print(f"  {i}\t{option}{desc}")
+        if columns and rows:
+            print(table([[i, *row] for i, row in enumerate(rows)], ["#", *columns], wrap=70))
+        else:
+            for i, option in enumerate(options):
+                desc = f"\t{descriptions[i]}" if descriptions else ""
+                print(f"  {i}\t{option}{desc}")
         if allow_exit:
             print("  (type 'exit' to go back)")
         answer = input_fn("> ").strip()

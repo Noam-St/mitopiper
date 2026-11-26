@@ -148,7 +148,10 @@ class Menus:
     # -------------------------------------------------------- run order
     def modify_pipeline(self) -> None:
         while True:
-            print("Current run order:\n" + "\n".join(f"  {s}" for s in self.wf.active_order()) + "\n")
+            print("Current run order:")
+            print(table([[i, s, self.wf.pipeline[s].get("scope", "sample"), self.wf.pipeline[s].get("description", "")]
+                         for i, s in enumerate(self.wf.active_order())], ["#", "Step", "Scope", "Description"], wrap=70))
+            print()
             idx = choose("", ["activate/deactivate steps", "reorder the run order"], input_fn=self.input)
             if idx is None:
                 return
@@ -616,9 +619,8 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input, session_fa
             summaries.append(preset_summary(workspace.load_workflow(name), name))
         except Exception:                         # an unreadable preset: listed without a summary
             summaries.append("")
-    width = max(len(p) for p in presets) + 2 if presets else 0
-    pidx = choose("Choose a workflow preset:", [p.ljust(width) + s for p, s in zip(presets, summaries)],
-                  allow_exit=False, input_fn=input_fn)
+    pidx = choose("Choose a workflow preset:", presets, allow_exit=False, input_fn=input_fn,
+                  columns=["Preset", "Description"], rows=list(zip(presets, summaries)))
     workspace.activate(presets[pidx])
 
     preset = presets[pidx]
