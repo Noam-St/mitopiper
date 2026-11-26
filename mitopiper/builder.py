@@ -188,7 +188,7 @@ def sample_variables(sample: Sample, workflow: Workflow, exp_dir: str, ref: Refe
         "fasta_nuc_dir": posixpath.dirname(fasta_nuc) if fasta_nuc else "",
         "gtf": ref.gtfpath,
         # the attribute naming the gene on exon / gene lines of this reference's annotation (GTF vs NCBI GFF3)
-        "exon_gene_attr": gene_attribute(ref.gtfpath, "exon"),
+        "exon_gene_attr": gene_attribute(ref.gtfpath, count_features(ref.gtfpath)),   # every counted type (exon,CDS)
         "gene_attr": gene_attribute(ref.gtfpath, "gene"),
         "count_features": count_features(ref.gtfpath),
         "chrominfo": ref.chrominfopath,
@@ -370,7 +370,7 @@ def _fetch_lines(source: str, dest: str, md5: str, run: str, mate: int, options:
         source = source[len("file://"):] if source.startswith("file://") else source
         if source.endswith(".gz"):
             return [f'ln -sf "{source}" "{dest}"']
-        return [f'gzip -c "{source}" > "{dest}"']
+        return [f'gzip -c "{source}" > "{dest}.part" && mv "{dest}.part" "{dest}"']   # complete or absent
     sra = (f"--run {run} --mate {mate} --threads {options['threads']}" if run else "") if options["sra"] else "--no-sra"
     words = ["mitopiper download", f"--md5 {md5}" if md5 else "", options["retries"], sra,
              f'"{source}" "{dest}" --', options["downloader"]]
@@ -401,10 +401,10 @@ def download_lines(sample: Sample, key: str, settings: str, outdir: str, workflo
             parts.append(part)
         if many:
             quoted = " ".join(f'"{p}"' for p in parts)
-            # FIX [AUDIT-2026-11-26-M4]: concatenated next to the final file, which appears only when complete
-            lines.append(f'cat {quoted} > "{dest}.part"')
-            lines.append(f'mv "{dest}.part" "{dest}"')
-            lines.append(f"rm -f {quoted}")
+            # FIX [AUDIT-2026-11-26-M4]: concatenated next to the final file, which appears only when complete.
+            # One line (review): without fail_fast (or in csh) a run that failed to download did not stop the job, and
+            # cat of the parts there made the sample's file from the first run only
+            lines.append(f'cat {quoted} > "{dest}.part" && mv "{dest}.part" "{dest}" && rm -f {quoted}')
     return lines
 
 

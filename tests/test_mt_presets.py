@@ -543,3 +543,30 @@ def test_the_cleanup_keeps_the_files_after_a_pipeline_without_pipefail(tmp_path)
     assert all(p.exists() for p in files) and not marker.exists() and "without pipefail" in run.stderr
     subprocess.run(["bash", "-c", job.steps[-1].lines[0]], check=True)    # a later run without the marker deletes
     assert not any(p.exists() for p in files)
+
+
+def test_a_rerun_of_an_experiment_built_before_the_derived_names_rebuilds_them(cluster):
+    """AUDIT-2026-11-26-H6 (review): derived references are named by their sources since 2.0.2. A rerun of an older
+    experiment wrote sample scripts with the new names, but rerun only the failed sample: the reference job that
+    makes them did not run, and the sample failed at the rotated alignment."""
+    import io
+
+    from mitopiper.rerun import RerunOptions, plan, rerun
+
+    ws, tmp_path = cluster
+    ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath=str(tmp_path / "mt.fa")))
+    steps = ["wget", "bwa-align", "view", "sort", "index", "mpileup"] + CIRCULAR
+    assert run_preset(ws, tmp_path, "mt-variants", steps) == 0
+    derived = ws.references_dir / "derived" / "Homo_sapiens"
+    for path in list(derived.glob("mt.*.rotated5.fa*")):                 # as an older version named them
+        path.rename(derived / path.name.replace(path.name.split(".")[1] + ".", "", 1))
+    assert (derived / "mt.rotated5.fa").exists() and not list(derived.glob("mt.*.rotated5.fa"))
+    exp = ws.output_dir / "exp"
+    (exp / "status" / "s_a_0.status").write_text("FAILED align-rotated 1 2 1\n")
+    items = plan(ws, ["exp"], query=lambda s, i: None)
+    assert {i.name for i in items} == {"prep_exp", "s_a_0"}
+    out = io.StringIO()
+    assert rerun(ws, ["exp"], RerunOptions(), submit=True, stream=out) == 0
+    states = {j.name: j.state for j in mon.collect(ws, ["exp"], mon.ErrorScanner(), lambda s, i: None)}
+    assert all(s == mon.DONE for s in states.values()) and "prep_exp" in states, (states, out.getvalue())
+    assert derived_file(ws, "mt.*.rotated5.fa").exists()

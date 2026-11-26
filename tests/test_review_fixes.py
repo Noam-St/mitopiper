@@ -424,7 +424,50 @@ def test_build_stops_a_counting_step_whose_attribute_the_annotation_lacks(tmp_pa
     assert gene_attribute_problems(wf, ["featureCounts"], refs) == []                 # the placeholder: fine
     wf.settings["featureCounts"]["attribute"]["value"] = "gene_id"                    # a workspace made before 2.0.2
     (problem,) = gene_attribute_problems(wf, ["featureCounts"], refs)
-    assert "'gene_id', which the annotation of Homo_sapiens" in problem and "Use 'gene'" in problem
+    assert "'gene_id', which none of the 1 such lines of the annotation of Homo_sapiens" in problem
+    assert "Use 'gene'" in problem
+
+
+def test_build_stops_when_some_counted_lines_lack_the_gene_attribute(tmp_path):
+    """AUDIT-2026-11-26-H9 (review): only the first counted line was read. NCBI's Bemisia tabaci annotation has 24
+    exon/CDS lines without gene=, and featureCounts stops at the first of them, hours into the run."""
+    import subprocess
+
+    from mitopiper.build import gene_attribute_problems
+    from mitopiper.config import Workflow
+    from mitopiper.defaults import bundled_presets
+
+    gff = tmp_path / "GCF_genomic.gff"
+    gff.write_text(NCBI_GFF3 + "NC_000001.11\tGnomon\tCDS\t20000\t20300\t.\t+\t0\tID=cds-XP_1;Parent=rna-XM_1\n"
+                   + "NC_000001.11\tGnomon\texon\t30000\t30300\t.\t+\t.\tID=exon-XM_2-1;Parent=rna-XM_2\n")
+    wf = Workflow(**bundled_presets()["rnaseq-expression"])
+    refs = {"Bemisia_tabaci": ReferenceSet(refpath="/r/g.fa", gtfpath=str(gff))}
+    (problem,) = gene_attribute_problems(wf, ["featureCounts"], refs)
+    assert "2 of the 3 such lines" in problem and "line 5 (CDS, cds-XP_1)" in problem and "line 6" in problem
+    # the suggested filter keeps the good lines and drops the two
+    command = problem.split("Register a copy without them: ", 1)[1].split(", then", 1)[0].replace(" > FIXED.gff", "")
+    kept = subprocess.run(["bash", "-c", command], capture_output=True, text=True, check=True).stdout
+    assert "gene=DDX11L1" in kept and "XP_1" not in kept and "XM_2" not in kept and "region" in kept
+    gff.write_text(kept)
+    assert gene_attribute_problems(wf, ["featureCounts"], refs) == []
+
+
+def test_htseq_count_counts_exons_by_the_gene_attribute(tmp_path):
+    """AUDIT-2026-11-26-H9 (review): the default preset's htseq-count counted '-t gene', reads of introns included."""
+    from mitopiper.builder import build_sample_job
+    from mitopiper.config import Workflow
+    from mitopiper.metadata import Run, Sample
+
+    wf = Workflow.default()
+    wf.pipeline["htseq-count"]["switch"] = True
+    (tmp_path / "a.gtf").write_text(ENSEMBL_GTF)
+    (tmp_path / "a.gff").write_text(NCBI_GFF3)
+    sample = Sample(index=0, accession="S", organism="Homo_sapiens", runs=[Run("R", ["/f.fq.gz"])])
+    for annotation, attribute in (("a.gtf", "gene_id"), ("a.gff", "gene")):
+        job = build_sample_job(sample, wf, "/w/output/E", ReferenceSet(refpath="/r/g.fa", gtfpath=str(tmp_path / annotation)),
+                               ["htseq-count"])
+        line = job.steps[0].lines[0]
+        assert " -t exon" in line and f" -i {attribute}" in line and "-t gene" not in line
 
 
 def test_a_403_before_a_later_failure_is_not_the_diagnosis():

@@ -57,8 +57,9 @@ def test_single_end_default_pipeline():
 def test_paired_end_multi_run_concatenates():
     job = build_sample_job(pe_sample(), Workflow.default(), EXP, REF)
     wget = lines(job)["wget"]
-    assert 'cat "/data/output/EXP/fastq/SAMN1_0_DR_1.part0.fastq.gz" "/data/output/EXP/fastq/SAMN1_0_DR_1.part1.fastq.gz" > "/data/output/EXP/fastq/SAMN1_0_DR_1.fastq.gz.part"' in wget
-    assert 'mv "/data/output/EXP/fastq/SAMN1_0_DR_1.fastq.gz.part" "/data/output/EXP/fastq/SAMN1_0_DR_1.fastq.gz"' in wget
+    parts = '"/data/output/EXP/fastq/SAMN1_0_DR_1.part0.fastq.gz" "/data/output/EXP/fastq/SAMN1_0_DR_1.part1.fastq.gz"'
+    final = "/data/output/EXP/fastq/SAMN1_0_DR_1.fastq.gz"
+    assert f'cat {parts} > "{final}.part" && mv "{final}.part" "{final}" && rm -f {parts}' in wget
     assert any('--run SRR2 --mate 2' in l and '"ftp/SRR2_2.fastq.gz"' in l for l in wget)
     assert not any("--md5" in l for l in wget)  # no md5 known
     trim = lines(job)["trim"][0]
@@ -72,7 +73,8 @@ def test_local_files_are_linked_or_gzipped():
     wget = lines(build_sample_job(sample, Workflow.default(), EXP, REF, steps=["wget"]))["wget"]
     assert wget == [
         'ln -sf "/in/a_R1.fastq.gz" "/data/output/EXP/fastq/S1_0_HS_1.fastq.gz"',
-        'gzip -c "/in/a_R2.fastq" > "/data/output/EXP/fastq/S1_0_HS_2.fastq.gz"',
+        'gzip -c "/in/a_R2.fastq" > "/data/output/EXP/fastq/S1_0_HS_2.fastq.gz.part" && '
+        'mv "/data/output/EXP/fastq/S1_0_HS_2.fastq.gz.part" "/data/output/EXP/fastq/S1_0_HS_2.fastq.gz"',
     ]
 
 
@@ -255,3 +257,29 @@ def test_jobs_unset_a_site_perl5lib(tmp_path, shell):
         out = subprocess.run([shell, str(script)], capture_output=True, text=True,
                              env=dict(os.environ, PERL5LIB="/site/perl", PERL5OPT="-Mx"))
         assert out.stdout.strip().splitlines()[-1] == expected, (shell, flag, out.stdout, out.stderr)
+
+
+
+def test_a_sample_is_never_left_with_its_first_run_only(tmp_path):
+    """AUDIT-2026-11-26-M4 (review): without fail_fast (or in csh) a second run that failed to download did not stop
+    the job; cat of the parts there made the sample's file from the first run alone."""
+    import subprocess
+
+    from mitopiper.builder import download_lines
+    from mitopiper.metadata import Run, Sample
+
+    sample = Sample(index=0, accession="S", organism="Homo_sapiens",
+                    runs=[Run("R1", [str(tmp_path / "a.fastq.gz")]), Run("R2", [str(tmp_path / "b.fastq.gz")])])
+    (tmp_path / "a.fastq.gz").write_text("first run\n")
+    wf = Workflow.default()
+    wf.set_general("download_delay", 0)
+    lines = download_lines(sample, "wget", "", str(tmp_path / "out"), wf)
+    (tmp_path / "out").mkdir()
+    for shell in ("sh", "tcsh"):
+        for line in lines:                                   # each line on its own, as without fail_fast
+            subprocess.run([shell, "-c", line], cwd=tmp_path, capture_output=True)
+        assert not (tmp_path / "out" / "S_0_HS.fastq.gz").exists(), shell
+    (tmp_path / "b.fastq.gz").write_text("second run\n")
+    for line in lines:
+        subprocess.run(["sh", "-c", line], cwd=tmp_path, check=True)
+    assert (tmp_path / "out" / "S_0_HS.fastq.gz").read_text() == "first run\nsecond run\n"

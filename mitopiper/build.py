@@ -91,10 +91,11 @@ _COUNTERS = {"featureCounts": ("-g", "-t", "exon"), "htseq-count": ("-i", "-t", 
 
 
 def gene_attribute_problems(workflow: Workflow, steps: list, refs: dict) -> list:
-    """Counting steps whose gene attribute (featureCounts -g, htseq-count -i) is not in the annotation's lines of the
-    counted feature: the jobs would fail at the last step, after hours (LSF test: featureCounts -g gene_id on NCBI's
-    GFF3, which has gene= on exons). Checked only for annotations on this machine and attributes given literally."""
-    from .references import _gene_attribute_in_file
+    """Counting steps whose gene attribute (featureCounts -g, htseq-count -i) is missing from lines of the counted
+    feature types: the jobs would fail at the last step, after hours (LSF test: featureCounts -g gene_id on NCBI's
+    GFF3, which has gene= on exons). Every counted line is checked (audit H9, review: 24 lines of NCBI's B. tabaci
+    annotation lack gene=). Checked only for annotations on this machine."""
+    from .references import _gene_attribute_in_file, attribute_gaps, count_features
 
     problems = []
     for step in steps:
@@ -112,39 +113,39 @@ def gene_attribute_problems(workflow: Workflow, steps: list, refs: dict) -> list
                 stat = Path(ref.gtfpath).stat()
             except (OSError, TypeError):
                 continue
-            kind = (default_feature if feature.startswith("_") else feature).split(",")[0]
-            found = _gene_attribute_in_file(ref.gtfpath, kind, stat.st_size, stat.st_mtime)
-            if attribute.startswith("_"):
-                # a placeholder is resolved from the annotation, but some name no gene on these lines at all
-                # (Ensembl GFF3: exons carry only Parent=transcript:...)
-                if not _has_attribute(ref.gtfpath, kind, found):
-                    problems.append(
-                        f"Step '{step}' counts {kind} lines per gene, but the annotation of {organism} ({ref.gtfpath}) "
-                        f"names no gene on them (gene_id, gene or gene_name): the jobs would fail at '{step}'. Register "
-                        f"the GTF version of this annotation (refs add {organism} ... --gtf FILE.gtf).")
+            features = count_features(ref.gtfpath) if feature.startswith("_") else feature
+            if tool == "htseq-count":
+                features = features.split(",")[0]           # htseq-count counts one feature type
+            name = _gene_attribute_in_file(ref.gtfpath, features, stat.st_size, stat.st_mtime) \
+                if attribute.startswith("_") else attribute
+            missing, lines, examples = attribute_gaps(ref.gtfpath, features, name)
+            if not missing:
                 continue
-            feature = kind
-            if found != attribute and not _has_attribute(ref.gtfpath, feature, attribute):
+            where = f"the annotation of {organism} ({ref.gtfpath})"
+            if missing == lines:
+                found = _gene_attribute_in_file(ref.gtfpath, features, stat.st_size, stat.st_mtime)
+                if attribute.startswith("_") or attribute_gaps(ref.gtfpath, features, found, 0)[0] == lines:
+                    # no usual gene attribute at all (Ensembl GFF3: exons carry only Parent=transcript:...)
+                    problems.append(
+                        f"Step '{step}' counts {features} lines per gene, but {where} names no gene on them (gene_id, "
+                        f"gene or gene_name): the jobs would fail at '{step}'. Register the GTF version of this "
+                        f"annotation (refs add {organism} ... --gtf FILE.gtf).")
+                else:
+                    problems.append(
+                        f"Step '{step}' counts {features} lines by the attribute '{attribute}', which none of the "
+                        f"{lines} such lines of {where} has ('{found}' names the gene there): the jobs would fail at "
+                        f"'{step}'. Use '{found}', or the placeholder "
+                        f"{'_exon_gene_attr' if tool == 'featureCounts' else '_gene_attr'} (read from each "
+                        f"annotation): mitopiper presets reset PRESET, or change the setting in the menus.")
+            else:
+                types = "|".join(features.split(","))
                 problems.append(
-                    f"Step '{step}' counts {feature} lines by the attribute '{attribute}', which the annotation of "
-                    f"{organism} ({ref.gtfpath}) does not have on them ('{found}' names the gene there): the jobs would "
-                    f"fail at '{step}'. Use '{found}', or the placeholder {'_exon_gene_attr' if tool == 'featureCounts' else '_gene_attr'} "
-                    f"(read from each annotation): mitopiper presets reset PRESET, or change the setting in the menus.")
+                    f"Step '{step}' counts {features} lines by '{name}', but {missing} of the {lines} such lines of "
+                    f"{where} lack it ({'; '.join(examples)}{', ...' if missing > len(examples) else ''}): {tool} stops "
+                    f"at the first one, so the jobs would fail at '{step}'. Register a copy without them: "
+                    f"awk -F'\\t' '$3 !~ /^({types})$/ || $9 ~ /(^|;| ){name}[= ]/' {ref.gtfpath} > FIXED.gff, then "
+                    f"mitopiper refs add {organism} ... --gtf FIXED.gff.")
     return problems
-
-
-def _has_attribute(path: str, feature: str, attribute: str) -> bool:
-    import gzip
-
-    opener = gzip.open if path.endswith(".gz") else open
-    with opener(path, "rt", encoding="utf-8", errors="replace") as handle:
-        for i, line in enumerate(handle):
-            fields = line.split("\t")
-            if len(fields) >= 9 and fields[2] == feature:
-                return f"{attribute}=" in fields[8] or f"{attribute} " in fields[8]
-            if i > 200_000:
-                break
-    return True                                        # no such lines seen: nothing to say
 
 
 def mt_reference_size_ok(organism: str, ref) -> bool:

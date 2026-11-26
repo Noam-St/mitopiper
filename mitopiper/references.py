@@ -688,23 +688,68 @@ def count_features(path: str) -> str:
     return "exon,CDS" if gff3 else "exon"
 
 
+def _attribute_keys(column: str) -> set:
+    """The attribute names of a GFF3 (``key=value;``) or GTF (``key "value";``) attribute column."""
+    return {part.strip().split("=" if "=" in part else " ", 1)[0] for part in column.split(";") if part.strip()}
+
+
 @lru_cache(maxsize=32)
-def _gene_attribute_in_file(path: str, feature: str, size: int, mtime: float) -> str:
+def _attribute_census(path: str, features: tuple, size: int, mtime: float) -> tuple:
+    """``(lines, {attribute: lines carrying it})`` over every line of ``features`` (e.g. ``("exon", "CDS")``).
+
+    FIX [AUDIT-2026-11-26-H9, review]: the attribute was read from the first such line only. featureCounts stops at
+    any counted line without it: NCBI's Bemisia tabaci annotation has 24 such lines, so the build passed and every
+    sample failed at the last step, hours later. The whole file is read (once per file version)."""
     import gzip
 
     opener = gzip.open if path.endswith(".gz") else open
-    keys: set = set()
+    lines, counts = 0, {}
     with opener(path, "rt", encoding="utf-8", errors="replace") as handle:
-        for i, line in enumerate(handle):
-            if i > 200_000:
-                break
+        for line in handle:
+            if line.startswith("#"):
+                continue
             fields = line.rstrip("\n").split("\t")
-            if len(fields) >= 9 and fields[2] == feature:
-                keys = {part.strip().split("=" if "=" in part else " ", 1)[0] for part in fields[8].split(";")
-                        if part.strip()}
-                break
+            if len(fields) >= 9 and fields[2] in features:
+                lines += 1
+                for key in _attribute_keys(fields[8]):
+                    counts[key] = counts.get(key, 0) + 1
+    return lines, counts
+
+
+def attribute_gaps(path: str, features: str, attribute: str, examples: int = 3) -> tuple:
+    """``(lines without attribute, lines of features, [examples])`` of an annotation on this machine; examples are
+    ``"line N (ID=...)"``."""
+    import gzip
+
+    stat = Path(path).stat()
+    wanted = tuple(f for f in features.split(",") if f)
+    lines, counts = _attribute_census(path, wanted, stat.st_size, stat.st_mtime)
+    missing = lines - counts.get(attribute, 0)
+    found = []
+    if missing and examples:
+        opener = gzip.open if path.endswith(".gz") else open
+        with opener(path, "rt", encoding="utf-8", errors="replace") as handle:
+            for number, line in enumerate(handle, 1):
+                fields = line.rstrip("\n").split("\t")
+                if len(fields) >= 9 and fields[2] in wanted and not line.startswith("#") \
+                        and attribute not in _attribute_keys(fields[8]):
+                    ident = re.search(r"\bID[= ]\"?([^;\"]+)", fields[8])
+                    found.append(f"line {number} ({fields[2]}{', ' + ident.group(1) if ident else ''})")
+                    if len(found) >= examples:
+                        break
+    return missing, lines, found
+
+
+def _gene_attribute_in_file(path: str, feature: str, size: int, mtime: float) -> str:
+    """The attribute naming the gene on ``feature`` lines (comma-separated types): of the usual names, one that every
+    such line has, else the one most lines have."""
+    lines, counts = _attribute_census(path, tuple(f for f in feature.split(",") if f), size, mtime)
     preferred = ("gene_id", "ID", "gene") if feature == "gene" else ("gene_id", "gene", "gene_name")
-    return next((key for key in preferred if key in keys), "gene_id")
+    complete = [key for key in preferred if lines and counts.get(key) == lines]
+    if complete:
+        return complete[0]
+    present = [key for key in preferred if counts.get(key)]
+    return max(present, key=lambda key: counts[key]) if present else "gene_id"
 
 
 # ------------------------------------------------------- derived references

@@ -36,6 +36,8 @@ jobs:
           git -C "$RUNNER_TEMP/NuMt_parser" checkout "$NUMT_PARSER_COMMIT"
           chmod +x "$RUNNER_TEMP/NuMt_parser/bin/numt_parser.py"
           echo "$RUNNER_TEMP/NuMt_parser/bin" >> "$GITHUB_PATH"
+      - name: Rerun's cancel of one queued array task (qdel)
+        run: .github/sge/cancel_task_test.sh
       - name: Tutorial through Grid Engine (three presets, checked against the truth)
         run: .github/sge/run_tutorial_sge.sh "$RUNNER_TEMP/sge_tutorial" all.q
       - name: Grid Engine and job logs

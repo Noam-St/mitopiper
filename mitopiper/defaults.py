@@ -218,10 +218,12 @@ DEFAULT_SETTINGS = {
         "output": _setting("Sorted BAM output file", "-o", "output_sort"),
     },
     "htseq-count": {
-        "ID": _setting("ID attribute to use (_gene_attr: read from the annotation; GTF: gene_id, NCBI GFF3: ID)", "-i",
-                       "_gene_attr"),
+        # FIX [AUDIT-2026-11-26-H9, review]: -t gene counted the reads of introns as the gene's; exons, by the
+        # attribute that names the gene on them, as featureCounts does
+        "ID": _setting("Attribute naming the gene on the exon lines (_exon_gene_attr: read from the annotation; GTF: "
+                       "gene_id, NCBI GFF3: gene)", "-i", "_exon_gene_attr"),
         "Additional attribute": _setting("Additional attribute to use", "--additional-attr", "gene"),
-        "Feature column name": _setting("Feature column name to use", "-t", "gene"),
+        "Feature column name": _setting("Feature type counted (exon: reads of introns are not counted)", "-t", "exon"),
         "stranded": _setting("Whether the reads are stranded", "-s", "no"),
         "format": _setting("Format to read input in", "-f", "bam"),
         "ambiguous": _setting("How to handle ambiguous reads", "--nonunique", "all"),

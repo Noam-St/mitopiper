@@ -36,7 +36,7 @@ from .metadata import load_samples
 from .monitor import (
     DONE, FAILED, KILLED, PENDING, RUNNING, SKIPPED, UNKNOWN, ErrorScanner, collect, default_experiments, stranded,
 )
-from .references import ReferenceSet, prepare_job_lines, uses_placeholder
+from .references import ReferenceSet, derived_paths, mt_shift, prepare_job_lines, uses_placeholder
 from .schedulers import (
     STAGES, ExperimentJobs, JobResources, check_resources, header, job_name, master_script, memory_mb, stage_dependencies,
     walltime_seconds,
@@ -156,6 +156,19 @@ def _refuse_whole_genome_mt(exp: str, manifest: dict) -> None:
                 f"fetch-mt {organism}'), then build the experiment again.")
 
 
+def missing_derived(workflow: Workflow, manifest: dict, workspace_dir: str) -> list:
+    """Derived references (rotated, nuclear + mtDNA, NUMT, NUMT alleles) that the steps of a build use but that are
+    not there: the reference job makes them."""
+    steps = list(manifest.get("steps", [])) or None
+    wanted = {"rotated": "fasta_rotated", "combined": "fasta_combined", "numt": "numt_fasta", "numt_alleles": "numt_alleles"}
+    missing = []
+    for organism, data in manifest.get("references", {}).items():
+        paths = derived_paths(ReferenceSet.from_dict(data), organism, workspace_dir, mt_shift(workflow))
+        missing += [paths[k] for k, placeholder in wanted.items()
+                    if paths[k] and uses_placeholder(workflow, placeholder, steps) and not Path(paths[k]).is_file()]
+    return missing
+
+
 def plan(workspace: Workspace, experiments: Optional[list] = None, options: Optional[RerunOptions] = None,
          query=None, scanner: Optional[ErrorScanner] = None) -> list:
     """Decide which jobs to rerun and from which step (nothing is written). ``scanner``: the monitor's, which has
@@ -220,6 +233,15 @@ def plan(workspace: Workspace, experiments: Optional[list] = None, options: Opti
                 if getattr(options, key) not in (None, ""):
                     item.overrides[key] = getattr(options, key)
             selected.append(item)
+        if any(i.experiment == exp and i.kind == "sample" for i in selected) and \
+                not any(i.experiment == exp and i.kind == "prepare" for i in selected):
+            base = workspace.load_workflow(options.preset) if options.preset else Workflow(**manifest["workflow"])
+            missing = missing_derived(base, manifest, str(workspace.root))
+            if missing:
+                # FIX [AUDIT-2026-11-26-H6, review]: derived references are named by their sources since 2.0.2; the
+                # rerun of an older experiment pointed its samples at files nothing built
+                log.info("%s: %s not built yet: the reference job runs again first", exp, ", ".join(missing))
+                selected.append(RerunJob(exp, job_name("prepare", exp), "prepare", "", ""))
         # Staged downloads: a sample resumed at the download step needs the download job again.
         staged = str(manifest.get("workflow", {}).get("general_settings", {}).get("download_mode", ["job"])[0]) != "job"
         redownload = [i for i in selected if i.experiment == exp and i.kind == "sample" and i.start_step == "wget"]
@@ -409,7 +431,9 @@ def cancel_command(scheduler: str, job_id: str) -> str:
     if scheduler == "lsf":
         return f"bkill '{head}[{task}]' || true" if task else f"bkill {head} || true"
     if scheduler == "sge":
-        return f"qdel -t {task} {head} || true" if task else f"qdel {head} || true"
+        # the task range follows its job (qdel usage: wc_job [-t task_id_range]); checked on a real Grid Engine in
+        # CI (.github/sge/cancel_task_test.sh). FIX [AUDIT-2026-11-26-H8, review]: it was written before the job
+        return f"qdel {head} -t {task} || true" if task else f"qdel {head} || true"
     return ""
 
 

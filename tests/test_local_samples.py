@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from mitopiper.local_samples import scan_fastq_folder
 
 
@@ -117,3 +119,68 @@ def test_the_table_of_an_imported_folder_keeps_lanes_and_samples(tmp_path):
     assert [(s.accession, len(s.runs), s.paired) for s in samples] == [("S1", 2, True), ("x_101", 1, True)]
     placed = tmp_path / "ws" / "fastq" / "lanes"
     assert all(f.startswith(str(placed)) for s in samples for r in s.runs for f in r.files)
+
+
+@pytest.mark.parametrize("names, expected", [
+    # AUDIT-2026-11-26-H1 (review): mates found by one pattern only
+    (["x_1_val_1.fq.gz", "x_2_val_2.fq.gz"], [("x", 2)]),                       # Trim Galore's output
+    (["x_R1_trimmed.fq.gz", "x_R2_trimmed.fq.gz"], [("x", 2)]),
+    (["y-R1.fastq", "y-R2.fastq"], [("y", 2)]),
+    (["donor_1.fq.gz", "donor_2.fq.gz", "donor_3.fq.gz"], [("donor_1", 1), ("donor_2", 1), ("donor_3", 1)]),
+    (["run_1_R1.fq", "run_1_R2.fq", "run_2_R1.fq", "run_2_R2.fq"], [("run_1", 2), ("run_2", 2)]),
+    (["a_1.fastq", "a_2.fastq", "b_1.fastq", "b_2.fastq"], [("a", 2), ("b", 2)]),
+    (["P_S1_L001_R1_001.fq.gz", "P_S1_L001_R2_001.fq.gz", "P_S1_L002_R1_001.fq.gz", "P_S1_L002_R2_001.fq.gz"],
+     [("P_S1", 2), ("P_S1", 2)]),
+    (["B_L001_R1_001.fq.gz", "B_L002_R1_001.fq.gz"], [("B", 1), ("B", 1)]),
+])
+def test_mates_and_samples_of_common_file_names(tmp_path, names, expected):
+    touch(tmp_path, *names)
+    assert [(s, len(f)) for _, s, f in scan_fastq_folder(tmp_path)] == expected
+
+
+def test_a_single_end_file_named_like_a_pair_is_not_dropped(tmp_path, caplog):
+    """AUDIT-2026-11-26-H1 (review): C.fq.gz next to C_R1/C_R2 had the run name of the pair and was lost."""
+    touch(tmp_path, "C_R1.fq.gz", "C_R2.fq.gz", "C.fq.gz")
+    runs = {s: [Path(p).name for p in f] for _, s, f in scan_fastq_folder(tmp_path)}
+    assert runs == {"C": ["C_R1.fq.gz", "C_R2.fq.gz"], "C_unpaired": ["C.fq.gz"]}
+    assert "becomes the sample C_unpaired" in caplog.text
+
+
+def test_an_interrupted_move_is_resumed_with_every_sample(tmp_path, monkeypatch):
+    """AUDIT-2026-11-26-M3 (review): a move cut short left part of the files in the workspace; importing the folder
+    again scanned only the files left, and the samples already moved were silently missing from the table."""
+    folder, ws = fastq_folder(tmp_path), tmp_path / "ws"
+    real, calls = local_samples._place, []
+
+    def dies_after_two(source, target, mode):
+        if len(calls) == 2:
+            raise KeyboardInterrupt
+        calls.append(source)
+        real(source, target, mode)
+
+    monkeypatch.setattr(local_samples, "_place", dies_after_two)
+    with pytest.raises(KeyboardInterrupt):
+        local_samples.import_fastq_folder(ws, folder, "Homo sapiens", "move")
+    assert sorted(p.name for p in folder.iterdir()) == ["hyp.fq.gz"]          # ctrl's mates moved, hyp not yet
+    monkeypatch.setattr(local_samples, "_place", real)
+    table = local_samples.import_fastq_folder(ws, folder, "Homo sapiens", "move")
+    samples = load_samples(table)
+    assert [(s.accession, s.paired) for s in samples] == [("ctrl", True), ("hyp", False)]
+    assert not (ws / "fastq" / "fastq_folder" / ".mitopiper_import.json").exists()
+    assert all(Path(f).exists() for s in samples for r in s.runs for f in r.files)
+
+
+def test_a_copy_appears_only_when_complete(tmp_path, monkeypatch):
+    import shutil
+
+    folder, ws = fastq_folder(tmp_path), tmp_path / "ws"
+
+    def cut_short(source, target, **kwargs):
+        Path(target).write_text("@partial")
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(shutil, "copy2", cut_short)
+    with pytest.raises(OSError):
+        local_samples.import_fastq_folder(ws, folder, "Homo sapiens", "copy")
+    placed = ws / "fastq" / "fastq_folder"
+    assert not [p.name for p in placed.iterdir() if p.name.endswith((".fastq.gz", ".fq.gz"))]

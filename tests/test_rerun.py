@@ -403,7 +403,7 @@ def test_queued_array_tasks_are_cancelled_in_each_schedulers_syntax():
     """H8: '20_3'.isdigit() is false, so queued array tasks were never cancelled."""
     assert cancel_command("slurm", "20_3") == "scancel 20_3 || true"
     assert cancel_command("lsf", "20_3") == "bkill '20[3]' || true"
-    assert cancel_command("sge", "20_3") == "qdel -t 3 20 || true"
+    assert cancel_command("sge", "20_3") == "qdel 20 -t 3 || true"
     assert cancel_command("sge", "20") == "qdel 20 || true"
     assert cancel_command("local", "20_3") == "" and cancel_command("slurm", "login") == ""
     assert [dependency_id(s, "20_3") for s in ("slurm", "lsf", "sge", "local")] == ["20_3", "20[3]", "20", ""]
