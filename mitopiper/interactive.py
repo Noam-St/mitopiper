@@ -625,7 +625,7 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input, session_fa
     results = []
     builds = []  # (metadata, selection, options, samples) to rebuild after a set-up change
     for metadata in metadata_files:
-        ignore_paired = bool(workflow.general("ignore_paired_end", False))
+        ignore_paired = workflow.flag("ignore_paired_end")   # FIX [AUDIT-2026-11-26-M17]: one parser
         try:
             samples = load_samples(metadata, ignore_paired=ignore_paired)
         except MetadataError as exc:

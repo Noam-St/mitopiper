@@ -238,7 +238,7 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
         steps = list(manifest.get("steps", []))
         refs = {org: ReferenceSet.from_dict(r) for org, r in manifest.get("references", {}).items()}
         metadata = find_experiment_metadata(exp_dir)
-        ignore_paired = str(base.general("ignore_paired_end", False)).lower() in ("true", "1", "yes")
+        ignore_paired = base.flag("ignore_paired_end")   # FIX [AUDIT-2026-11-26-M17]: one parser
         built = {s["name"] for s in manifest.get("samples", [])}
         samples = [s for s in load_samples(metadata, ignore_paired=ignore_paired) if s.name in built] if metadata else []
         by_job = {f"s_{s.accession}_{s.index}": s for s in samples}

@@ -181,3 +181,15 @@ def test_presets_list_and_save_show_one_line_summaries(tmp_path, capsys):
     capsys.readouterr()
     assert run(ws, "presets", "list") == 0
     assert any(line.startswith("mine") and "Our lab's mtDNA run" in line for line in capsys.readouterr().out.splitlines())
+
+
+
+def test_presets_set_reads_yes_and_no_as_booleans(tmp_path):
+    """AUDIT-2026-11-26-M17: ignore_paired_end=no was stored as the string 'no', which counted as true."""
+    ws = Workspace(tmp_path / "ws")
+    assert run(ws, "init") == 0
+    assert run(ws, "presets", "set", "mt-variants", "ignore_paired_end=yes") == 0
+    assert ws.load_workflow("mt-variants").general("ignore_paired_end") is True
+    assert run(ws, "presets", "set", "mt-variants", "ignore_paired_end=no") == 0
+    wf = ws.load_workflow("mt-variants")
+    assert wf.general("ignore_paired_end") is False and not wf.flag("ignore_paired_end")

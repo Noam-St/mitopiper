@@ -23,6 +23,12 @@
 - **The reference job built a STAR index with 4 threads in a 1-slot job** (`rnaseq-expression`, GRCh38 on an LSF cluster that enforces CPU: one core for 4 threads, still sorting after 77 minutes; 26 of 30 GB used). STAR now indexes with the threads of the STAR step (8), and the reference job asks for those slots and at least the STAR step's memory plus 8 GB (40 GB by default; reruns too). STAR's temporary folder is next to the index instead of the folder `master.sh` was run from, where reference jobs of two organisms would have shared it.
 - `--auto-fix` after an out-of-memory kill asks for at least 1 GB: a job killed at 100 MB that needed 600 MB got 200 MB and failed again.
 - `refs add` stores absolute paths: a relative `--fasta`/`--gtf` only worked when `master.sh` was run from the same folder.
+- **A FASTQ folder pooled numbered samples**: `x_101_R1/_R2`, `x_102_R1/_R2` and so on lost their `_101`, `_102` and became one sample `x`. Only a lane (`_L001`) is now taken off a name; `S1_L001_R1_001` and `S1_L002_R1_001` stay one sample `S1`. A sample of several runs is logged.
+- **Runs of different assays of one BioSample were pooled** (WGS and RNA-seq of the same donor, in one pileup under one strategy). Each assay is now a sample of its own, with a warning.
+- The table of an imported FASTQ folder is written from the runs found in the folder, not from a re-scan of the placed copies.
+- Downloads go to `<file>.part` and are renamed when complete and checked, so a job killed mid-download leaves nothing at the path the next steps read; a multi-run sample is concatenated the same way. A file already complete with the right checksum is not downloaded again.
+- A single-end request of a paired SRA run (the SRA fallback) takes mate 1: it took `<run>.fastq`, the few reads `fasterq-dump --split-3` leaves without a mate.
+- `presets set <preset> ignore_paired_end=no` (also `yes`, `on`, `off`) stores a boolean: `no` was stored as text, which counted as true.
 
 ## 2.0.1 (2026-11-25)
 

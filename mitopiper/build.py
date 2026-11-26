@@ -333,7 +333,7 @@ def build_experiment(
     """Generate every job script of one experiment."""
     options = options or BuildOptions()
     exp_dir, metadata = prepare_experiment_dir(workspace, metadata, name)
-    ignore_paired = str(workflow.general("ignore_paired_end", False)).lower() in ("true", "1", "yes")
+    ignore_paired = workflow.flag("ignore_paired_end")   # FIX [AUDIT-2026-11-26-M17]: one parser
     if samples is None:
         samples = load_samples(metadata, ignore_paired=ignore_paired)
     if selection is not None:

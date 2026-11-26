@@ -248,7 +248,7 @@ def cmd_build(ws: Workspace, args) -> int:
 
     results = []
     for metadata in items:
-        ignore_paired = str(workflow.general("ignore_paired_end", False)).lower() in ("true", "1", "yes")
+        ignore_paired = workflow.flag("ignore_paired_end")   # FIX [AUDIT-2026-11-26-M17]: one parser
         samples = load_samples(metadata, ignore_paired=ignore_paired)
         selection = parse_selection(args.samples, len(samples))
         result = build_experiment(ws, workflow, metadata, selection, options, resolver, name=args.name, samples=samples)
@@ -371,6 +371,9 @@ def _set_preset_values(ws: Workspace, presets: list, assignments: list) -> int:
             changes.append((name, wf, step if dot else None, field if dot else key, _setting_value(value)))
     for name, wf, step, field, value in changes:
         old = wf.pipeline[step].get(field, "") if step else wf.general(field)
+        if isinstance(old, bool) and isinstance(value, str) and value.lower() in ("yes", "no", "on", "off", "y", "n"):
+            # FIX [AUDIT-2026-11-26-M17]: ignore_paired_end=no was stored as the string 'no' (true for bool())
+            value = value.lower() in ("yes", "on", "y")
         if step:
             wf.pipeline[step][field] = str(value) if field in ("memory", "threads") else value
         else:

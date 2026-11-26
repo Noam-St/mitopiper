@@ -92,3 +92,28 @@ def test_no_file_browser_without_a_display(monkeypatch):
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
     with pytest.raises(RuntimeError, match="ssh -X"):
         local_samples.browse_for_folder()
+
+
+def test_numbered_sample_names_are_not_pooled(tmp_path):
+    """AUDIT-2026-11-26-H1: x_101 and x_102 lost their _NNN and became one sample 'x'."""
+    touch(tmp_path, "x_101_R1.fastq.gz", "x_101_R2.fastq.gz", "x_102_R1.fastq.gz", "x_102_R2.fastq.gz")
+    assert [(r, s, len(f)) for r, s, f in scan_fastq_folder(tmp_path)] == [("x_101", "x_101", 2), ("x_102", "x_102", 2)]
+
+
+def test_lanes_of_one_sample_stay_one_sample(tmp_path):
+    touch(tmp_path, "S1_L001_R1_001.fastq.gz", "S1_L002_R1_001.fastq.gz")
+    assert {s for _, s, _ in scan_fastq_folder(tmp_path)} == {"S1"}
+
+
+def test_the_table_of_an_imported_folder_keeps_lanes_and_samples(tmp_path):
+    """AUDIT-2026-11-26-M3: the table was written from a re-scan of the placed copies, not the runs found."""
+    folder = tmp_path / "lanes"
+    folder.mkdir()
+    for name in ("S1_L001_R1_001.fastq.gz", "S1_L001_R2_001.fastq.gz", "S1_L002_R1_001.fastq.gz",
+                 "S1_L002_R2_001.fastq.gz", "x_101_R1.fastq.gz", "x_101_R2.fastq.gz"):
+        (folder / name).write_text("@r\nA\n+\nI\n")
+    table = local_samples.import_fastq_folder(tmp_path / "ws", folder, "Homo sapiens", "copy")
+    samples = load_samples(table)
+    assert [(s.accession, len(s.runs), s.paired) for s in samples] == [("S1", 2, True), ("x_101", 1, True)]
+    placed = tmp_path / "ws" / "fastq" / "lanes"
+    assert all(f.startswith(str(placed)) for s in samples for r in s.runs for f in r.files)

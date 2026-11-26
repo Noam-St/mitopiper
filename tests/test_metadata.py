@@ -92,3 +92,17 @@ def test_parse_selection_errors(text):
 @pytest.mark.parametrize("name,initials", [("Homo_sapiens", "HS"), ("Homo sapiens", "HS"), ("Escherichia", "E")])
 def test_initials(name, initials):
     assert organism_initials(name) == initials
+
+
+def test_runs_of_different_assays_of_one_biosample_are_separate_samples(tmp_path, caplog):
+    """AUDIT-2026-11-26-H2: WGS and RNA-seq runs of one BioSample were pooled into one pileup."""
+    table = tmp_path / "t.tsv"
+    table.write_text("run_accession\tsample_accession\tscientific_name\tfastq_ftp\tlibrary_strategy\n"
+                     "SRR1\tSAMN1\tHomo sapiens\tftp/a/SRR1.fastq.gz\tWGS\n"
+                     "SRR2\tSAMN1\tHomo sapiens\tftp/a/SRR2.fastq.gz\tRNA-Seq\n"
+                     "SRR3\tSAMN1\tHomo sapiens\tftp/a/SRR3.fastq.gz\tWGS\n")
+    samples = load_samples(table)
+    assert [(s.accession, s.library_strategy, s.run_accessions) for s in samples] == [
+        ("SAMN1", "WGS", ["SRR1", "SRR3"]), ("SAMN1", "RNA-Seq", ["SRR2"])]
+    assert len({s.name for s in samples}) == 2
+    assert "several assays" in caplog.text

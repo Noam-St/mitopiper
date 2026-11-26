@@ -46,14 +46,19 @@ def scan_fastq_folder(folder, ignore_paired: bool = False, force_paired: bool = 
     if not files:
         raise FileNotFoundError(f"No FASTQ files found in {folder}")
     runs: "OrderedDict[str, dict]" = OrderedDict()
+    sample_of: dict = {}
     for path in files:
         stem = _strip_ext(path.name)
         match = MATE_RE.match(stem)
         if match and not ignore_paired:
             run_id = match.group("stem") + (match.group("tail") or "")
             runs.setdefault(run_id, {})[int(match.group("mate"))] = str(path)
+            # FIX [AUDIT-2026-11-26-H1]: the sample is the stem without a trailing lane (_L001); the _NNN removed
+            # before belonged to the name itself (patient_101, _102, _103 were pooled into one sample "patient")
+            sample_of[run_id] = re.sub(r"_L\d{3}$", "", match.group("stem"))
         else:
             runs.setdefault(stem, {})[1] = str(path)
+            sample_of.setdefault(stem, stem)
     if force_paired and all(len(v) == 1 for v in runs.values()):
         # Pair consecutive files when names carry no mate information.
         flat = [v[1] for v in runs.values()]
@@ -65,9 +70,13 @@ def scan_fastq_folder(folder, ignore_paired: bool = False, force_paired: bool = 
         if 2 in mates and 1 not in mates:
             log.warning("Run %s has only a second mate; treating it as single-end", run_id)
         ordered = [mates[k] for k in sorted(mates)]
-        sample_id = LANE_RE.sub("", run_id)
-        sample_id = re.sub(r"_\d{3}$", "", sample_id)
-        result.append((run_id, sample_id, ordered))
+        result.append((run_id, sample_of.get(run_id, run_id), ordered))
+    pooled = {}
+    for run_id, sample_id, _ in result:
+        pooled.setdefault(sample_id, []).append(run_id)
+    for sample_id, run_ids in pooled.items():
+        if len(run_ids) > 1:
+            log.info("Sample %s gets %d runs (lanes): %s", sample_id, len(run_ids), ", ".join(run_ids))
     return result
 
 
@@ -162,8 +171,10 @@ def import_fastq_folder(workspace_root, folder, organism: str, mode: str = "link
             _place(Path(file), target / Path(file).name, mode)
     log.info("%s %d run(s) of %s into %s", {"link": "Linked", "copy": "Copied", "move": "Moved"}[mode],
              len(runs), folder, target)
-    return make_tsv(target, organism, Path(workspace_root) / "metadata" / f"{name}.tsv", library_strategy,
-                    ignore_paired, force_paired)
+    # FIX [AUDIT-2026-11-26-M3]: the table lists the runs of this folder only: scanning the target added the samples
+    # of an earlier import under the same name (e.g. two folders called fastq/), with this import's organism
+    placed = [(run, sample, [str(target / Path(f).name) for f in files]) for run, sample, files in runs]
+    return write_table(placed, organism, Path(workspace_root) / "metadata" / f"{name}.tsv", library_strategy)
 
 
 def browse_for_folder(title: str = "Choose the folder with the FASTQ files", start: Optional[str] = None) -> str:

@@ -261,7 +261,9 @@ def load_samples(path, ignore_paired: bool = False) -> list:
         if not runs:
             continue
         sample_id = get(row, "sample_accession") or runs[0].accession
-        key = (sample_id, organism)
+        # FIX [AUDIT-2026-11-26-H2]: runs of different assays of one BioSample (WGS and RNA-seq) are different
+        # samples: pooled, a DNA pileup got RNA reads (RNA-DNA differences, modifications) under one strategy
+        key = (sample_id, organism, get(row, "library_strategy"))
         if key not in groups:
             groups[key] = {
                 "runs": [],
@@ -274,8 +276,15 @@ def load_samples(path, ignore_paired: bool = False) -> list:
     for run_id, reason in skipped:
         log.warning("Skipping run %s in %s: %s", run_id, Path(path).name, reason)
 
+    split = {}
+    for sample_id, organism, strategy in groups:
+        split.setdefault((sample_id, organism), []).append(strategy or "unknown")
+    for (sample_id, _), strategies in split.items():
+        if len(strategies) > 1:
+            log.warning("Sample %s has runs of several assays (%s): each is a sample of its own", sample_id,
+                        ", ".join(strategies))
     samples = []
-    for index, ((sample_id, organism), info) in enumerate(groups.items()):
+    for index, ((sample_id, organism, _), info) in enumerate(groups.items()):
         runs = info["runs"]
         layouts = {r.paired for r in runs}
         if len(layouts) > 1:

@@ -57,7 +57,8 @@ def test_single_end_default_pipeline():
 def test_paired_end_multi_run_concatenates():
     job = build_sample_job(pe_sample(), Workflow.default(), EXP, REF)
     wget = lines(job)["wget"]
-    assert 'cat "/data/output/EXP/fastq/SAMN1_0_DR_1.part0.fastq.gz" "/data/output/EXP/fastq/SAMN1_0_DR_1.part1.fastq.gz" > "/data/output/EXP/fastq/SAMN1_0_DR_1.fastq.gz"' in wget
+    assert 'cat "/data/output/EXP/fastq/SAMN1_0_DR_1.part0.fastq.gz" "/data/output/EXP/fastq/SAMN1_0_DR_1.part1.fastq.gz" > "/data/output/EXP/fastq/SAMN1_0_DR_1.fastq.gz.part"' in wget
+    assert 'mv "/data/output/EXP/fastq/SAMN1_0_DR_1.fastq.gz.part" "/data/output/EXP/fastq/SAMN1_0_DR_1.fastq.gz"' in wget
     assert any('--run SRR2 --mate 2' in l and '"ftp/SRR2_2.fastq.gz"' in l for l in wget)
     assert not any("--md5" in l for l in wget)  # no md5 known
     trim = lines(job)["trim"][0]
@@ -224,6 +225,7 @@ def test_a_corrupt_download_is_downloaded_once_more(tmp_path):
     wf.set_general("download_delay", 0)
     for shell in ["bash"] + [s for s in ("tcsh",) if shutil.which(s)]:
         (tmp_path / "once").unlink(missing_ok=True)
+        (tmp_path / "exp" / "fastq" / "SAMN1_0_DR.fastq.gz").unlink(missing_ok=True)   # each shell from scratch
         job = build_sample_job(sample, wf, str(tmp_path / "exp"), REF, steps=["wget"])
         (tmp_path / "exp" / "fastq").mkdir(parents=True, exist_ok=True)
         script = tmp_path / "dl.sh"

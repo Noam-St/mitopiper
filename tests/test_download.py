@@ -45,7 +45,8 @@ def test_wrong_checksums_and_failures_are_retried_with_growing_waits(tmp_path):
     assert how == "archive" and dest.read_bytes() == GOOD
     assert [c[-1] for c in calls] == ["ftp.sra.ebi.ac.uk/a.gz", "https://ftp.sra.ebi.ac.uk/a.gz",
                                       "ftp://ftp.sra.ebi.ac.uk/a.gz", "ftp.sra.ebi.ac.uk/a.gz"]
-    assert calls[0][:4] == ["wget", "-c", "-O", str(dest)]
+    assert calls[0][:4] == ["wget", "-c", "-O", f"{dest}.part"]          # renamed when complete (audit M4)
+    assert not (tmp_path / "x.fastq.gz.part").exists()
     assert waits == [30, 60, 120] and log.getvalue().count("checksum failed") == 2
 
 
@@ -148,3 +149,31 @@ def test_ftp_that_cannot_connect_is_dropped_and_no_empty_file_is_left(tmp_path):
                                      lambda s: None, io.StringIO())
     assert sum(c.startswith("ftp://") for c in calls) == 1 and len(calls) == 6
     assert not dest.exists()
+
+
+
+def test_a_failed_download_leaves_nothing_at_the_final_path(tmp_path):
+    """AUDIT-2026-11-26-M4: a partial file at the path the next steps read was used by them."""
+    dest = tmp_path / "x.fastq.gz"
+    with pytest.raises(dl.DownloadError):
+        dl.download("u", str(dest), md5=hashlib.md5(GOOD).hexdigest(), tries=2, wait=0,
+                    runner=fake_wget([b"truncat", b"truncat"], []), sleep=lambda s: None, log=io.StringIO())
+    assert not dest.exists()
+
+
+def test_a_complete_earlier_download_is_kept(tmp_path):
+    dest = tmp_path / "x.fastq.gz"
+    dest.write_bytes(GOOD)
+    calls = []
+    how = dl.download("u", str(dest), md5=hashlib.md5(GOOD).hexdigest(), runner=fake_wget([], calls), log=io.StringIO())
+    assert how == "archive" and calls == []
+
+
+def test_a_single_end_request_of_a_paired_sra_run_takes_mate_1(tmp_path, monkeypatch):
+    """AUDIT-2026-11-26-M2: mate 0 took run.fastq, the few reads --split-3 leaves without a mate."""
+    fake_fasterq_dump(tmp_path, monkeypatch, paired=True)
+    dest = tmp_path / "S.fastq.gz"
+    how = dl.download("u", str(dest), tries=1, run="SRR900009", mate=0, runner=lambda c, **k: (
+        subprocess.CompletedProcess(c, 8) if c[0] == "wget" else subprocess.run(c, **k)), log=io.StringIO())
+    assert how == "sra" and gzip.open(dest).read() == b"@a/1\nACGT\n+\nIIII\n"
+    assert not (tmp_path / ".sra" / "SRR900009").exists()                  # the unused mates are not left behind

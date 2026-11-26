@@ -386,7 +386,9 @@ def download_lines(sample: Sample, key: str, settings: str, outdir: str, workflo
             parts.append(part)
         if many:
             quoted = " ".join(f'"{p}"' for p in parts)
-            lines.append(f'cat {quoted} > "{dest}"')
+            # FIX [AUDIT-2026-11-26-M4]: concatenated next to the final file, which appears only when complete
+            lines.append(f'cat {quoted} > "{dest}.part"')
+            lines.append(f'mv "{dest}.part" "{dest}"')
             lines.append(f"rm -f {quoted}")
     return lines
 

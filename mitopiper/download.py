@@ -67,8 +67,13 @@ def url_variants(url: str) -> list:
 def fetch_with_retries(url: str, dest: str, md5: str, downloader: list, tries: int, wait: int,
                        runner: Callable = subprocess.run, sleep: Callable = time.sleep,
                        log: TextIO = sys.stderr) -> bool:
-    """Download ``url`` to ``dest`` with ``downloader + ["-O", dest, url]`` (checked against ``md5`` when
-    given). Returns whether it worked."""
+    """Download ``url`` to ``dest`` with ``downloader + ["-O", dest.part, url]`` (checked against ``md5`` when
+    given). Returns whether it worked.
+
+    FIX [AUDIT-2026-11-26-M4]: the file is written to ``<dest>.part`` (which the next attempt resumes) and renamed
+    to ``dest`` only when complete and correct, so a failed download never leaves a partial file at the path the
+    next steps read."""
+    final, dest = dest, dest + ".part"
     variants = url_variants(url)
     for attempt in range(1, tries + 1):
         source = variants[(attempt - 1) % len(variants)]
@@ -82,11 +87,13 @@ def fetch_with_retries(url: str, dest: str, md5: str, downloader: list, tries: i
                 variants.remove(source)
                 _say("ftp:// cannot connect from here: the next attempts use the other protocols", log)
         elif not md5:
+            Path(dest).replace(final)
             return True
         else:
             found = md5sum(dest)
             if found == md5.lower():
-                _say(f"{dest}: checksum OK", log)
+                Path(dest).replace(final)
+                _say(f"{final}: checksum OK", log)
                 return True
             _say(f"checksum failed for {dest} ({found}, expected {md5}): deleting it", log)
             Path(dest).unlink(missing_ok=True)
@@ -97,6 +104,19 @@ def fetch_with_retries(url: str, dest: str, md5: str, downloader: list, tries: i
     if Path(dest).is_file() and Path(dest).stat().st_size == 0:
         Path(dest).unlink()                     # wget -O leaves an empty file when nothing came
     return False
+
+
+def already_complete(dest: str, md5: str, log: TextIO) -> bool:
+    """A file an earlier attempt finished (rerun from the download step): kept when its checksum matches, or when
+    there is none to compare."""
+    if not Path(dest).is_file() or Path(dest).stat().st_size == 0:
+        return False
+    if md5 and md5sum(dest) != md5.lower():
+        _say(f"{dest} is there but its checksum does not match: downloading it again", log)
+        Path(dest).unlink()
+        return False
+    _say(f"{dest} is complete already" + (" (checksum OK)" if md5 else ""), log)
+    return True
 
 
 def md5_from_list(text: str, name: str) -> str:
@@ -141,14 +161,22 @@ def from_sra(run: str, mate: int, dest: str, threads: int = 1, runner: Callable 
         if mate:
             (cache / f"{run}.fastq").unlink(missing_ok=True)    # unpaired reads of a paired run: not used
         done.touch()
+    if not mate and (cache / f"{run}_1.fastq").exists():
+        # FIX [AUDIT-2026-11-26-M2]: a single-end request (ignore_paired_end, mixed layouts) of a paired run took
+        # run.fastq, which --split-3 fills with the few reads whose mate is missing: use the first mate
+        mate = 1
+        for other in (cache / f"{run}_2.fastq", cache / f"{run}.fastq"):
+            other.unlink(missing_ok=True)
     fastq = cache / (f"{run}_{mate}.fastq" if mate else f"{run}.fastq")
     if not fastq.is_file():
         made = ", ".join(sorted(p.name for p in cache.glob("*.fastq"))) or "nothing"
         raise DownloadError(f"{SRA_TOOL} {run} did not write {fastq.name} (it wrote {made})")
     compressor = ["pigz", "-p", str(threads)] if shutil.which("pigz") else ["gzip"]
-    with open(dest, "wb") as out:
+    part = dest + ".part"                                       # renamed when complete (audit M4)
+    with open(part, "wb") as out:
         if runner([*compressor, "-c", str(fastq)], stdout=out).returncode != 0:
             raise DownloadError(f"could not compress {fastq}")
+    Path(part).replace(dest)
     fastq.unlink()
     if not list(cache.glob("*.fastq")):                         # every mate taken
         shutil.rmtree(cache, ignore_errors=True)
@@ -165,6 +193,8 @@ def download(url: str, dest: str, md5: str = "", downloader: tuple = ("wget",), 
     Path(dest).parent.mkdir(parents=True, exist_ok=True)
     if md5_url and not md5:
         md5 = checksum_from_url(md5_url, dest, list(downloader), tries, wait, runner, sleep, log)
+    if already_complete(dest, md5, log):
+        return "archive"
     use_sra = sra and RUN_ACCESSION.fullmatch(run or "") is not None
     if use_sra and (_sra_cache(dest, run) / ".complete").exists():
         _say(f"{run} was already taken from the SRA for its other mate: using that", log)   # skip the failing archive
