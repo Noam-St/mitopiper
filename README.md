@@ -1001,7 +1001,8 @@ Please cite Numt Parser when you use this preset.
 
 * `heteroplasmy` runs once per experiment, after all samples: `mitopiper mt heteroplasmy` gathers the calls of every
   sample into `heteroplasmy/heteroplasmy_sites.tsv` (one row per heteroplasmy or variant) and
-  `heteroplasmy/heteroplasmy_matrix.tsv` (the minor allele frequency of every called position in every sample).
+  `heteroplasmy/heteroplasmy_matrix.tsv` (the minor allele frequency of every called position in every sample). A sample
+  whose table is missing is listed in `heteroplasmy/left_out.txt`, and the job fails (the others are still collected).
 
 Compared with `process_pileup.py`, pandas and Biopython are no longer needed, and three things are corrected:
 * read starts are counted even when the mapping-quality character after `^` is a letter or digit;

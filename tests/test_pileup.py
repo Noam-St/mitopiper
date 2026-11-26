@@ -91,13 +91,17 @@ def test_heteroplasmy_collects_sites_and_matrix(tmp_path, capsys):
                                                     + "." * (10 - g)), (2, "C", 60, "t" * 60)])
         pileup.annotate_pileup(tmp_path / f"{name}.pileup", tmp_path / f"{name}.tsv", sample=name)
         tables.append(str(tmp_path / f"{name}.tsv"))
-    assert main(["mt", "heteroplasmy", *tables, str(tmp_path / "missing.tsv"), "-o", str(tmp_path / "out")]) == 0
+    # AUDIT-2026-11-26-H7: a missing table fails the step (the others are still collected), listed in left_out.txt
+    assert main(["mt", "heteroplasmy", *tables, str(tmp_path / "missing.tsv"), "-o", str(tmp_path / "out")]) == 1
     assert "missing.tsv does not exist" in capsys.readouterr().err
+    assert (tmp_path / "out" / "left_out.txt").read_text() == f"{tmp_path / 'missing.tsv'}\n"
     sites = rows(tmp_path / "out" / "heteroplasmy_sites.tsv")
     assert [(s["sample"], s["position"], s["type"]) for s in sites] == [
         ("S1", "1", "heteroplasmy"), ("S1", "2", "variant"), ("S2", "2", "variant")]
     matrix = rows(tmp_path / "out" / "heteroplasmy_matrix.tsv")
     assert [(m["position"], m["S1"], m["S2"]) for m in matrix] == [("1", "0.1", "0"), ("2", "0", "0")]
+    assert main(["mt", "heteroplasmy", *tables, "-o", str(tmp_path / "out")]) == 0
+    assert not (tmp_path / "out" / "left_out.txt").exists()          # all there now: the old list goes
 
 
 def test_annotate_cli(tmp_path, capsys):

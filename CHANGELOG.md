@@ -29,6 +29,10 @@
 - Downloads go to `<file>.part` and are renamed when complete and checked, so a job killed mid-download leaves nothing at the path the next steps read; a multi-run sample is concatenated the same way. A file already complete with the right checksum is not downloaded again.
 - A single-end request of a paired SRA run (the SRA fallback) takes mate 1: it took `<run>.fastq`, the few reads `fasterq-dump --split-3` leaves without a mate.
 - `presets set <preset> ignore_paired_end=no` (also `yes`, `on`, `off`) stores a boolean: `no` was stored as text, which counted as true.
+- **A rerun's experiment job did not wait for the samples still queued or running**: it waited only for the rerun samples, while the experiment job it replaced (cancelled) waited for all, so the cohort tables missed samples or read half-written ones and the job ended DONE. It now also waits for them (array tasks included, in each scheduler's syntax) and checks that all of them finished. `rerun` says which, and warns when failed samples it does not run will make the experiment job fail.
+- `mt heteroplasmy` fails when a sample's table is missing (listed in `heteroplasmy/left_out.txt`; the others are still collected): it only warned, and the cohort matrix silently lacked the sample.
+- **An array rerun rewrote the task list (`a_<exp>.list`) that queued tasks of the original array still read**: they ran another sample's script, or nothing. Each rerun now has its own list and wrapper (`a_<exp>.rerun_<time>.list/.array`). Queued array tasks are cancelled too (`scancel 20_3`, `bkill '20[3]'`, `qdel -t 3 20`): with `--include-pending` a sample ran twice at once. The wrapper fails loudly when its task has no line in the list.
+- The wrapper of an array rerun asks for the rerun's resources (`--memory`, `--walltime`, automatic fixes, the largest of its samples'): it asked for the build's, while the sample scripts it runs asked for more.
 
 ## 2.0.1 (2026-11-25)
 

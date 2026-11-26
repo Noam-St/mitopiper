@@ -498,24 +498,27 @@ def max_running(workflow: Workflow) -> int:
 
 
 def write_array(scripts_dir: Path, experiment: str, exp: str, sample_scripts: list, workflow: Workflow,
-                scheduler: str, resources: JobResources) -> str:
+                scheduler: str, resources: JobResources, tag: str = "") -> str:
     """Array job ``a_<exp>.array`` whose task *i* runs the *i*-th sample script of ``a_<exp>.list``.
 
     Each sample script keeps its own status tracking and log files, so the monitor, diagnosis and
-    rerun work per sample as before.
+    rerun work per sample as before. ``tag`` (a rerun's): files ``a_<exp><tag>.list/.array`` of their own.
     """
     limit = max_running(workflow)
     name = f"a_{experiment}"
-    listing = scripts_dir / f"{name}.list"
+    # FIX [AUDIT-2026-11-26-H8]: a rerun rewrote a_<exp>.list, which the tasks of the original array still queued
+    # read when they start: they ran another sample's script, or nothing (an empty line, exit 127)
+    listing = scripts_dir / f"{name}{tag}.list"
     listing.write_text("".join(f"{s}\n" for s in sample_scripts), encoding="utf-8")
     shell = str(workflow.general("environment", "bash") or "bash")
     body = (
         'task="${SLURM_ARRAY_TASK_ID:-${SGE_TASK_ID:-${LSB_JOBINDEX:-}}}"\n'
         f'script=$(sed -n "${{task}}p" "{listing}")\n'
+        f'[ -n "$script" ] || {{ echo "[mitopiper] task $task: no line $task in {listing}" >&2; exit 1; }}\n'
         'name=$(basename "$script" .sh)\n'
         f'exec /bin/{shell} "$script" > "{exp}/stdout/$name.out" 2> "{exp}/stderr/$name.err"\n'
     )
-    path = scripts_dir / f"{name}.array"
+    path = scripts_dir / f"{name}{tag}.array"
     _write_script(path, header(scheduler, name, exp, replace(resources, shell="bash"), (len(sample_scripts), limit)) + body)
     return str(path)
 

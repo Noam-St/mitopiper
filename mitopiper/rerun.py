@@ -37,7 +37,10 @@ from .monitor import (
     DONE, FAILED, KILLED, PENDING, RUNNING, SKIPPED, UNKNOWN, ErrorScanner, collect, default_experiments, stranded,
 )
 from .references import ReferenceSet, prepare_job_lines, uses_placeholder
-from .schedulers import STAGES, ExperimentJobs, check_resources, header, job_name, master_script, stage_dependencies
+from .schedulers import (
+    STAGES, ExperimentJobs, JobResources, check_resources, header, job_name, master_script, memory_mb, stage_dependencies,
+    walltime_seconds,
+)
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +77,9 @@ class RerunJob:
     clean: bool = False
     script: str = ""
     suggestions: list = field(default_factory=list)
+    # experiment job: sample jobs of the earlier submission still queued or running, (name, job id)
+    active: list = field(default_factory=list)
+    left_out: list = field(default_factory=list)   # experiment job: failed samples this rerun does not run
 
 
 def _apply_overrides(workflow: Workflow, overrides: dict, free_form: list) -> Workflow:
@@ -176,8 +182,17 @@ def plan(workspace: Workspace, experiments: Optional[list] = None, options: Opti
             earliest = min(STAGES.index(j.kind) for j in chosen)
             chosen += [j for j in jobs if STAGES.index(j.kind) > earliest and j.state not in (DONE, RUNNING)
                        and j not in chosen]
+        # FIX [AUDIT-2026-11-26-H7]: the experiment job of a rerun waited only for the rerun samples, while the one
+        # it replaces waited for all: samples still queued or running were left out of the cohort tables, or read
+        # half-written
+        active = [(j.name, j.job_id) for j in jobs if j.kind == "sample" and j.state in (PENDING, RUNNING)
+                  and j not in chosen]
+        left_out = [j.name for j in jobs if j.kind == "sample" and j.state != DONE and j not in chosen
+                    and j.state not in (PENDING, RUNNING)]
         for job in chosen:
             item = RerunJob(exp, job.name, job.kind, job.state, job.step, job.job_id)
+            if job.kind == "experiment":
+                item.active, item.left_out = active, left_out
             item.suggestions = diagnose(job, ctx) if job.state in RERUN_STATES or stranded(job) else []
             auto = merged_rerun_options(item.suggestions) if options.auto_fix else {}
             if job.kind == "sample":
@@ -252,6 +267,14 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
                    for kind in ("check", "prepare", "download")}
         waits = stage_dependencies(present["check"], present["prepare"], tuple(n for n in by_job if n in rerun_names),
                                    present["download"])
+        experiment_item = next((i for i in items if i.experiment == exp and i.kind == "experiment"), None)
+        if experiment_item and experiment_item.active:   # audit H7: its check requires these DONE too
+            rerun_samples = [n for n in by_job if n in rerun_names]
+            waits["experiment"] = rerun_samples + [n for n, _ in experiment_item.active if n not in rerun_samples]
+            jobs.experiment_after = list(dict.fromkeys(
+                d for _, job_id in experiment_item.active for d in [dependency_id(scheduler, job_id)] if d))
+        stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        sample_resources = []
         for item in (i for i in items if i.experiment == exp):
             wf = _apply_overrides(base, item.overrides, options.free_form)
             path = scripts / f"{item.name}.sh"
@@ -307,6 +330,8 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
             fixed = {"memory": "memory", "walltime": "walltime", "threads": "threads", "queue": "queue"}
             res = replace(res, **{field: (int(item.overrides[key]) if key == "threads" else item.overrides[key])
                                   for key, field in fixed.items() if item.overrides.get(key) not in (None, "")})
+            if item.kind == "sample":
+                sample_resources.append(res)
             if item.kind == "check":
                 res = check_resources(res)
             elif item.kind == "download":
@@ -316,8 +341,10 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
             _write_script(path, content)
             item.script = str(path)
         if jobs.samples and uses_array(base, scheduler):
-            sample_steps = [s for s in steps if step_scope(base, s) == "sample"]
-            jobs.array = write_array(scripts, exp, exp_s, jobs.samples, base, scheduler, job_resources(base, sample_steps))
+            # FIX [AUDIT-2026-11-26-M15]: the array wrapper, the job actually submitted, asked for the build's
+            # resources: --memory, --walltime and the automatic fixes reached only the sample scripts it runs
+            jobs.array = write_array(scripts, exp, exp_s, jobs.samples, base, scheduler, largest(sample_resources),
+                                     tag=f".rerun_{stamp}")
             jobs.array_limit = max_running(base)
         experiments.append(jobs)
         record = {"created": _dt.datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -325,7 +352,6 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
                            for i in items if i.experiment == exp],
                   "free_form": options.free_form, "preset": options.preset}
         (exp_dir / "manifests").mkdir(exist_ok=True)
-        stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
         (exp_dir / "manifests" / f"rerun_{stamp}.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
 
     text = master_script(scheduler, experiments, shell=shell)
@@ -333,15 +359,58 @@ def write(workspace: Workspace, items: list, options: Optional[RerunOptions] = N
     resets = [f"rm -f {shlex.quote(str(workspace.experiment_dir(i.experiment) / 'status' / (i.name + '.status')))}"
               for i in items]
     # Jobs still queued (e.g. waiting forever on a failed dependency) are cancelled before resubmitting.
-    cancel = {"slurm": "scancel", "sge": "qdel", "lsf": "bkill"}.get(scheduler)
-    queued = [i.job_id for i in items if i.state == PENDING and i.job_id.isdigit()]
-    if cancel and queued:
-        resets.append(f"{cancel} {' '.join(queued)} || true")
+    # FIX [AUDIT-2026-11-26-H8]: array tasks (<id>_<task>) too, in each scheduler's syntax: they were left queued,
+    # and with --include-pending a sample then ran twice at once
+    resets += [line for i in items if i.state == PENDING for line in [cancel_command(scheduler, i.job_id)] if line]
     text = text.replace("set -euo pipefail\n", "set -euo pipefail\n" + "\n".join(resets) + "\n", 1)
     text = text.replace("# Generated by mitopiper - submits all jobs of this build.", "# Generated by 'mitopiper rerun' - resubmits the selected jobs.")
     path = workspace.root / "rerun.sh"
     _write_script(path, text)
     return path
+
+
+def largest(resources: list) -> JobResources:
+    """One job's resources covering all of ``resources``: the most threads, memory and time."""
+    first = resources[0]
+    memory = max((r.memory for r in resources if r.memory), key=lambda m: memory_mb(m) or 0, default=first.memory)
+    walltime = max((r.walltime for r in resources if r.walltime), key=lambda w: walltime_seconds(w) or 0,
+                   default=first.walltime)
+    return replace(first, threads=max(r.threads for r in resources), memory=memory, walltime=walltime)
+
+
+def _array_task(job_id: str) -> tuple:
+    """``("123", "4")`` for a task recorded as ``123_4``, ``("123", "")`` for a job id, ``("", "")`` otherwise."""
+    head, _, task = job_id.partition("_")
+    if head.isdigit() and (not task or task.isdigit()):
+        return head, task
+    return "", ""
+
+
+def dependency_id(scheduler: str, job_id: str) -> str:
+    """How another job names ``job_id`` in a dependency: Slurm takes the task itself, LSF ``123[4]``, Grid Engine
+    only the whole array."""
+    head, task = _array_task(job_id)
+    if not head or scheduler == "local":
+        return ""
+    if task and scheduler == "lsf":
+        return f"{head}[{task}]"
+    if task and scheduler == "slurm":
+        return f"{head}_{task}"
+    return head
+
+
+def cancel_command(scheduler: str, job_id: str) -> str:
+    """The command that cancels ``job_id`` (an array task ``123_4`` included), or ``""``."""
+    head, task = _array_task(job_id)
+    if not head:
+        return ""
+    if scheduler == "slurm":
+        return f"scancel {head}_{task} || true" if task else f"scancel {head} || true"
+    if scheduler == "lsf":
+        return f"bkill '{head}[{task}]' || true" if task else f"bkill {head} || true"
+    if scheduler == "sge":
+        return f"qdel -t {task} {head} || true" if task else f"qdel {head} || true"
+    return ""
 
 
 def describe(items: list) -> str:
@@ -367,6 +436,13 @@ def rerun(workspace: Workspace, experiments: Optional[list] = None, options: Opt
         stream.write("Nothing to rerun: no failed, killed or never-submitted jobs (name others with --job).\n")
         return 0
     stream.write(f"{len(items)} job(s) to rerun:\n{describe(items)}\n")
+    for item in items:
+        if item.active:
+            stream.write(f"Note: {item.name} also waits for {len(item.active)} sample job(s) still queued or running: "
+                         + ", ".join(n for n, _ in item.active) + "\n")
+        if item.left_out:
+            stream.write(f"Warning: {item.name} needs the tables of failed samples this rerun does not run "
+                         f"({', '.join(item.left_out)}): it will fail. Rerun them too, or leave them out of the build.\n")
     for item in items:
         for s in item.suggestions:
             stream.write(f"    - {item.name}: {s.cause}\n")

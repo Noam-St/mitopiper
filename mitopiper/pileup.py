@@ -562,11 +562,20 @@ def run(args) -> int:
         print(f"[mitopiper] {summary['records']} VCF records ({summary['numt']} filtered as numt){left}", file=sys.stderr)
     else:
         tables = [t for t in args.tables if Path(t).exists()]
-        for missing in sorted(set(args.tables) - set(tables)):
-            print(f"[mitopiper] warning: {missing} does not exist (failed sample?) - left out", file=sys.stderr)
+        missing = sorted(set(args.tables) - set(tables))
+        for table in missing:
+            print(f"[mitopiper] error: {table} does not exist (failed sample?) - left out", file=sys.stderr)
         if not tables:
             print("[mitopiper] no annotated tables to collect", file=sys.stderr)
             return 1
         per_sample = collect_heteroplasmy(tables, args.outdir)
         print("[mitopiper] sites per sample: " + ", ".join(f"{s} {n}" for s, n in per_sample.items()), file=sys.stderr)
+        left_out = Path(args.outdir) / "left_out.txt"
+        if missing:
+            # FIX [AUDIT-2026-11-26-H7]: a cohort matrix without some samples ended DONE, with only a warning in the log
+            left_out.write_text("".join(f"{t}\n" for t in missing), encoding="utf-8")
+            print(f"[mitopiper] {len(missing)} table(s) missing, listed in {left_out}: the tables of the others are "
+                  "written, but this step fails", file=sys.stderr)
+            return 1
+        left_out.unlink(missing_ok=True)
     return 0

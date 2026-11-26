@@ -140,6 +140,10 @@ def test_rerun_options_from_start_clean_and_overrides(tmp_path):
     opts = RerunOptions(jobs=["s_a_0"], from_start=True, clean=True, memory="64G", walltime="2-00:00:00")
     items = plan(ws, options=opts)
     assert [(i.name, i.start_step) for i in items] == [("s_a_0", "wget"), ("e_demo", "")]
+    assert items[1].left_out == ["s_b_1"]          # failed, not rerun: the experiment job will say it is missing
+    out = io.StringIO()
+    assert rerun(ws, options=opts, dry_run=True, stream=out) == 0
+    assert "e_demo needs the tables of failed samples this rerun does not run (s_b_1)" in out.getvalue()
     write(ws, items, RerunOptions(scheduler="slurm"))
     script = (ws.output_dir / "demo" / "scripts" / "s_a_0.sh").read_text()
     assert "#SBATCH --mem=64G" in script and "#SBATCH --time=2-00:00:00" in script
@@ -329,3 +333,94 @@ def test_last_used_is_not_recorded_as_the_preset_of_a_build(registered, data_dir
                  "-p", "last_used"]) == 0
     manifest = json.loads((ws.output_dir / "ena_runs" / "mitopiper_manifest.json").read_text())
     assert manifest["preset"] is None
+
+
+# ------------------------------------------------------- AUDIT-2026-11-26 H7, H8, M15: reruns of array builds
+import json  # noqa: E402
+
+from mitopiper.rerun import cancel_command, dependency_id  # noqa: E402
+
+
+def array_run(tmp_path, scheduler):
+    """make_ws as an array build on ``scheduler``: task 1 (s_a_0) killed for memory, task 2 (s_b_1) still running,
+    the experiment job queued behind them."""
+    ws = make_ws(tmp_path)
+    exp = ws.output_dir / "demo"
+    rows = (exp / "jobs.tsv").read_text().replace("s_a_0\ts_a_0", "20_1\ts_a_0").replace("s_b_1\ts_b_1", "20_2\ts_b_1") \
+        .replace("e_demo\te_demo", "21\te_demo")
+    (exp / "jobs.tsv").write_text(rows)
+    (exp / "status" / "s_a_0.status").write_text("RUNNING count 1 2 -\n")
+    (exp / "status" / "s_b_1.status").write_text("RUNNING count 1 2 -\n")
+    (exp / "status" / "e_demo.status").unlink()
+    manifest = json.loads((exp / "mitopiper_manifest.json").read_text())
+    manifest["scheduler"] = scheduler
+    manifest["workflow"]["general_settings"]["array_jobs"][0] = True
+    (exp / "mitopiper_manifest.json").write_text(json.dumps(manifest))
+    query = lambda s, ids: {"20_1": (mon.KILLED, "OUT_OF_MEMORY"), "20_2": (mon.RUNNING, "RUNNING"),  # noqa: E731
+                            "21": (mon.PENDING, "PENDING")}
+    return ws, exp, query
+
+
+@pytest.mark.parametrize("scheduler, after, cancel", [
+    ("slurm", "20_2", "scancel 21 || true"), ("lsf", "'20[2]'", "bkill 21 || true"), ("sge", "20", "qdel 21 || true")])
+def test_a_rerun_experiment_job_waits_for_the_samples_still_running(tmp_path, scheduler, after, cancel):
+    """H7: the rerun's e_demo waited only for s_a_0, and the cohort tables missed s_b_1 (or read it half-written)."""
+    ws, exp, query = array_run(tmp_path, scheduler)
+    items = {i.name: i for i in plan(ws, options=RerunOptions(auto_fix=True), query=query)}
+    assert set(items) == {"s_a_0", "e_demo"}
+    assert items["e_demo"].active == [("s_b_1", "20_2")]
+    write(ws, list(items.values()))
+    master = (ws.root / "rerun.sh").read_text()
+    experiment_line = next(line for line in master.splitlines() if "e_demo.sh" in line and "submit" in line)
+    assert f" {after})" in experiment_line and "without the earlier jobs" in experiment_line
+    assert cancel in master
+    assert "for pm_dep in s_a_0 s_b_1;" in (exp / "scripts" / "e_demo.sh").read_text()   # its own check too
+    subprocess.run(["bash", "-n", str(ws.root / "rerun.sh")], check=True)
+
+
+def test_an_array_rerun_has_its_own_task_list_and_the_rerun_resources(tmp_path):
+    """H8 and M15: the rerun rewrote a_demo.list under the original array's queued tasks, and its wrapper asked for
+    the build's memory (30G) while the sample script it runs asked for 60G."""
+    ws, exp, query = array_run(tmp_path, "slurm")
+    original = exp / "scripts" / "a_demo.list"
+    original.write_text("/x/s_a_0.sh\n/x/s_b_1.sh\n")
+    write(ws, plan(ws, options=RerunOptions(auto_fix=True), query=query))
+    assert original.read_text() == "/x/s_a_0.sh\n/x/s_b_1.sh\n"
+    (wrapper,) = (exp / "scripts").glob("a_demo.rerun_*.array")
+    listing = wrapper.with_suffix(".list")
+    assert listing.read_text() == f"{exp / 'scripts' / 's_a_0.sh'}\n"
+    text = wrapper.read_text()
+    assert "#SBATCH --mem=60G" in text and "#SBATCH --job-name=a_demo" in text
+    assert str(wrapper) in (ws.root / "rerun.sh").read_text()
+    # a task with no line in the list fails loudly instead of running "" (exit 127)
+    result = subprocess.run(["bash", str(wrapper)], env={"SLURM_ARRAY_TASK_ID": "5", "PATH": "/usr/bin:/bin"},
+                            capture_output=True, text=True)
+    assert result.returncode == 1 and "no line 5" in result.stderr
+
+
+def test_queued_array_tasks_are_cancelled_in_each_schedulers_syntax():
+    """H8: '20_3'.isdigit() is false, so queued array tasks were never cancelled."""
+    assert cancel_command("slurm", "20_3") == "scancel 20_3 || true"
+    assert cancel_command("lsf", "20_3") == "bkill '20[3]' || true"
+    assert cancel_command("sge", "20_3") == "qdel -t 3 20 || true"
+    assert cancel_command("sge", "20") == "qdel 20 || true"
+    assert cancel_command("local", "20_3") == "" and cancel_command("slurm", "login") == ""
+    assert [dependency_id(s, "20_3") for s in ("slurm", "lsf", "sge", "local")] == ["20_3", "20[3]", "20", ""]
+
+
+def test_an_experiment_rerun_falls_back_when_an_earlier_job_is_forgotten(tmp_path):
+    """H7: a sample job that finished between the plan and the submission may be unknown to the scheduler."""
+    ws, exp, query = array_run(tmp_path, "slurm")
+    write(ws, plan(ws, options=RerunOptions(auto_fix=True), query=query))
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "sbatch").write_text('#!/bin/sh\ncase "$*" in *20_2*) echo "Job dependency problem" >&2; exit 1;; esac\n'
+                                    'echo $$\n')
+    (bin_dir / "scancel").write_text("#!/bin/sh\n")
+    for tool in ("sbatch", "scancel"):
+        (bin_dir / tool).chmod(0o755)
+    result = subprocess.run(["bash", str(ws.root / "rerun.sh")], capture_output=True, text=True,
+                            env={"PATH": f"{bin_dir}:/usr/bin:/bin"})
+    assert result.returncode == 0, result.stderr
+    assert "submitting again without the earlier jobs" in result.stderr
+    assert "\te_demo\t" in (exp / "jobs.tsv").read_text().split("21\te_demo", 1)[1]

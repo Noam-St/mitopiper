@@ -14,7 +14,7 @@ import re
 import shlex
 import shutil
 import subprocess
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Optional
 
 SCHEDULERS = ("sge", "slurm", "lsf", "local")
@@ -259,6 +259,8 @@ class ExperimentJobs:
     array_limit: int = 0             # max_running of the array (0 = no limit)
     download: Optional[str] = None   # staged downloads (download_mode "login" or "queue")
     download_mode: str = "job"
+    # Jobs of an earlier submission the experiment job also waits for (a rerun: samples still queued or running)
+    experiment_after: list = field(default_factory=list)
 
     def scripts(self) -> list:
         """Every script of the experiment, in stage order."""
@@ -393,7 +395,16 @@ def master_script(scheduler: str, experiments: list, delay: float = 0.5, shell: 
         if exp.experiment:
             if not exp.samples:
                 lines.append('jobs=(${prep[@]+"${prep[@]}"})')
-            lines.append(f"jid=$(submit {shlex.quote(exp.experiment)} ${{jobs[@]+\"${{jobs[@]}}\"}})")
+            if exp.experiment_after:
+                # FIX [AUDIT-2026-11-26-H7]: a rerun's experiment job also waits for the samples still queued or
+                # running. A job the scheduler has forgotten meanwhile (it finished) makes the submission fail:
+                # then without them; the job's own check still requires every one of them DONE.
+                after = " ".join(shlex.quote(j) for j in exp.experiment_after)
+                lines.append(f"jid=$(submit {shlex.quote(exp.experiment)} ${{jobs[@]+\"${{jobs[@]}}\"}} {after}) || "
+                             f"{{ echo '[mitopiper] submitting again without the earlier jobs ({after})' >&2; "
+                             f"jid=$(submit {shlex.quote(exp.experiment)} ${{jobs[@]+\"${{jobs[@]}}\"}}); }}")
+            else:
+                lines.append(f"jid=$(submit {shlex.quote(exp.experiment)} ${{jobs[@]+\"${{jobs[@]}}\"}})")
             lines.append(f"record \"$jid\" {shlex.quote(exp.experiment)} experiment")
         lines.append('rm -f "$marker"')
         count = f"{len(exp.samples)} sample job(s)" if exp.array else "${#jobs[@]} sample job(s)"
