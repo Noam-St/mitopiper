@@ -21,6 +21,12 @@ from mitopiper.local_samples import make_tsv
 from mitopiper.references import ReferenceRegistry, ReferenceSet
 from conftest import MITOPIPER_SHIM
 
+
+def derived_file(ws, pattern):
+    """The one derived reference matching ``pattern`` (the names carry a key of their sources: audit H6)."""
+    (path,) = (ws.references_dir / "derived" / "Homo_sapiens").glob(pattern)
+    return path
+
 REPO = Path(__file__).resolve().parent.parent
 MT = "ACGT" * 7 + "AC"  # 30 bases
 
@@ -108,8 +114,8 @@ def test_mt_variants_merges_the_rotated_alignment_around_the_origin(cluster):
     assert run_preset(ws, tmp_path, "mt-variants", steps) == 0
     states = {j.name: j.state for j in mon.collect(ws, ["exp"], mon.ErrorScanner(), lambda s, i: None)}
     assert all(s == mon.DONE for s in states.values()), states
-    rotated = ws.references_dir / "derived" / "Homo_sapiens" / "mt.rotated5.fa"
-    assert mtdna.sequence_length(rotated) == 30 and (rotated.parent / "mt.rotated5.fa.bwt").exists()
+    rotated = derived_file(ws, "mt.*.rotated5.fa")
+    assert mtdna.sequence_length(rotated) == 30 and rotated.with_name(rotated.name + ".bwt").exists()
     depths = merged_depths(ws)
     assert [p for p, d in depths.items() if d == 2] == [1, 2, 3, 28, 29, 30]   # next to the origin: rotated alignment
     with open(ws.output_dir / "exp" / "annotated" / "a_0_HS.annotated.tsv") as handle:
@@ -143,11 +149,11 @@ def test_mt_variants_numt_aligns_to_nuclear_plus_mt(cluster, shell):
     ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath=str(tmp_path / "mt.fa"), nuc_refpath=str(tmp_path / "nuc.fa")))
     steps = ["wget", "align-combined", "index-combined", "mt-reads", "index-mt", "mpileup"] + CIRCULAR
     assert run_preset(ws, tmp_path, "mt-variants-numt", steps, shell) == 0
-    combined = ws.references_dir / "derived" / "Homo_sapiens" / "mt.with_nuclear.fa"
+    combined = derived_file(ws, "mt.*.with_nuclear.fa")
     assert mtdna.contigs(combined) == ["chr1", "NC_012920.1"]               # the nuclear chrM copy was left out
     script = (ws.output_dir / "exp" / "scripts" / "s_a_0.sh").read_text()
     assert "-q 20 -o" in script and f"`mitopiper mt contigs {tmp_path}/mt.fa`" in script
-    assert "samtools fastq" in script and "mt.rotated5.fa -" in script    # the rotated realignment uses the mt reads
+    assert "samtools fastq" in script and ".rotated5.fa -" in script    # the rotated realignment uses the mt reads
     depths = merged_depths(ws)
     assert [p for p, d in depths.items() if d == 2] == [1, 2, 3, 28, 29, 30]
 
@@ -164,9 +170,9 @@ def test_numt_preset_reuses_an_indexed_assembly_that_holds_the_mtdna(cluster):
     ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath=str(tmp_path / "mt.fa"), nuc_refpath=str(tmp_path / "nuc.fa")))
     steps = ["wget", "align-combined", "index-combined", "mt-reads", "index-mt", "mpileup"] + CIRCULAR
     assert run_preset(ws, tmp_path, "mt-variants-numt", steps) == 0
-    combined = ws.references_dir / "derived" / "Homo_sapiens" / "mt.with_nuclear.fa"
+    combined = derived_file(ws, "mt.*.with_nuclear.fa")
     assert combined.is_symlink() and combined.resolve() == (tmp_path / "nuc.fa").resolve()
-    assert (combined.parent / "mt.with_nuclear.fa.sa").is_symlink()
+    assert combined.with_name(combined.name + ".sa").is_symlink()
     assert not any(line.startswith("index") and "with_nuclear" in line for line in calls.read_text().splitlines())
     assert (tmp_path / "nuc.fa.sa").read_text() == "index"            # the user's index is untouched
 
@@ -190,9 +196,9 @@ def test_numt_parser_preset_finds_numts_in_the_nuclear_genome(cluster, shell):
                       shell) == 0
     states = {j.name: j.state for j in mon.collect(ws, ["exp"], mon.ErrorScanner(), lambda s, i: None)}
     assert all(s == mon.DONE for s in states.values()), states
-    derived = ws.references_dir / "derived" / "Homo_sapiens"
-    assert (derived / "mt.numt_search.regions.txt").read_text() == "chr1:1-10\n"   # hit at 3..62, flanked, clipped
-    assert (derived / "mt.numts.fa.bwt").exists() and (derived / "mt.with_nuclear.fa.bwt").exists()
+    assert derived_file(ws, "mt.*.numt_search.regions.txt").read_text() == "chr1:1-10\n"   # hit at 3..62, flanked
+    numts = derived_file(ws, "mt.*.numts.fa")
+    assert numts.with_name(numts.name + ".bwt").exists() and derived_file(ws, "mt.*.with_nuclear.fa.bwt").exists()
     assert not (tmp_path / "nuc.fa.bwt").exists()        # nothing is written next to the user's genome
     out = ws.output_dir / "exp"
     # intermediates marked temporary are gone once the job finished; what the results need is kept
@@ -202,14 +208,15 @@ def test_numt_parser_preset_finds_numts_in_the_nuclear_genome(cluster, shell):
     assert (numt / "a_0_HS.cymt_reads.txt").read_text() == "r1\n"                 # both mates of r3 must be cymt
     script = (ws.output_dir / "exp" / "scripts" / "s_a_0.sh").read_text()
     # haplotype-aware: Numt Parser compares the reads with the sample's own mtDNA, which is kept
-    assert (f"numt_parser.py --mt-fasta {numt}/a_0_HS.consensus.fa --numt-fasta {derived}/mt.numts.fa "
+    assert (f"numt_parser.py --mt-fasta {numt}/a_0_HS.consensus.fa --numt-fasta {numts} "
             f"--mt-sam {numt}/a_0_HS.consensus.sam") in script
     assert (numt / "a_0_HS.consensus.fa").read_text().startswith(">")
     assert f"-N {numt}/a_0_HS.cymt_reads.txt" in script and "-h -F 0x904" in script
     assert [p for p, d in merged_depths(ws).items() if d == 2] == [1, 2, 3, 28, 29, 30]
     # the NUMT alleles table is made once by the reference job and flags the heteroplasmies
-    assert (derived / "mt.numts.fa.alleles.tsv").read_text().startswith("chrom\tposition\tref\tnumt_bases")
-    assert f"--numt-alleles {derived}/mt.numts.fa.alleles.tsv" in script
+    alleles = derived_file(ws, "mt.*.numts.fa.*.alleles.tsv")
+    assert alleles.read_text().startswith("chrom\tposition\tref\tnumt_bases")
+    assert f"--numt-alleles {alleles}" in script
     assert "numt_minor" in (out / "annotated" / "a_0_HS.annotated.tsv").read_text().splitlines()[0]
 
 
@@ -226,7 +233,7 @@ def test_numt_parser_preset_uses_a_given_numt_reference(cluster, caplog):
     assert "numt-regions" not in prep and f'bwa index "{tmp_path}/numts.fa"' in prep
     assert run_preset(ws, tmp_path, "mt-variants-numtparser", NUMT_PARSER + CIRCULAR + ["annotate"]) == 0
     prep = next((ws.output_dir / "exp" / "scripts").glob("prep_*")).read_text()
-    assert f'mt numt-alleles "{ws.references_dir}/derived/Homo_sapiens/numts.fa.alleles.tsv.sam"' in prep
+    assert f'mt numt-alleles "{ws.references_dir}/derived/Homo_sapiens/numts.fa.' in prep and '.alleles.tsv.sam"' in prep
 
 
 def test_bundled_presets_are_written_once(tmp_path):
@@ -272,7 +279,9 @@ def test_references_you_add_get_their_missing_indices(tmp_path):
     (tmp_path / "mt.fa.fai").write_text("m\t4\t3\t4\t5\n")                       # already there
     commands = prepare_commands(ReferenceSet(refpath=str(fasta)), "Homo_sapiens", str(ws.root), wf, csh=False,
                                 steps=["bwa-align"])
-    assert commands == [f'if [ ! -s "{fasta}.sa" ]; then bwa index "{fasta}"; fi']
+    # also rebuilt when the FASTA is newer than its index (audit H5)
+    assert commands == [f'if [ ! -s "{fasta}.sa" ] || {{ [ ! -L "{fasta}.sa" ] && [ "{fasta}" -nt "{fasta}.sa" ]; }}; '
+                        f'then bwa index "{fasta}"; fi']
     elsewhere = ReferenceSet(refpath="/cluster/only/mt.fa")                       # not on this machine: left to you
     assert prepare_commands(elsewhere, "Homo_sapiens", str(ws.root), wf, csh=False, steps=["bwa-align"]) == []
 
@@ -347,7 +356,7 @@ def test_reference_jobs_of_parallel_builds_take_turns(tmp_path, monkeypatch):
         scripts.append(subprocess.Popen([shell, str(tmp_path / f"prep{i}.sh")], stdout=subprocess.DEVNULL))
     assert [p.wait() for p in scripts] == [0] * len(scripts)
     assert not (ws.references_dir / "derived" / "Homo_sapiens" / ".prepare.lock.d").exists()      # released
-    rotated = ws.references_dir / "derived" / "Homo_sapiens" / "mt.rotated5.fa"
+    rotated = derived_file(ws, "mt.*.rotated5.fa")
     for log in (tmp_path / "mt.fa.log", rotated.with_name(rotated.name + ".log")):
         assert log.read_text().split() == ["start"], log      # indexed once, never two at the same time
 

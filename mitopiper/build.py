@@ -151,6 +151,14 @@ def mt_reference_size_ok(organism: str, ref) -> bool:
     """False (with an error) when the mtDNA reference of an mt workflow is far too large to be an mtDNA, e.g.
     a whole genome registered as ``--fasta`` (seen on BGU: hg38 rotated and indexed for 1.6 h); a warning
     when it is merely large."""
+    # FIX [AUDIT-2026-11-26-M5]: a genome set (refs fetch-genome, active by default) passed as the "mtDNA" while its
+    # FASTA was not downloaded yet: the reference job then rotated chr1. Its size is known from NCBI.
+    planned = int((getattr(ref, "downloads", {}).get(ref.refpath) or {}).get("length") or 0)
+    if getattr(ref, "source", "") == "ncbi_genome" or planned > MT_MAX_BYTES:
+        log.error("Skipping samples of %s: its active reference set is a whole genome (%s), not an mtDNA. Use an mtDNA "
+                  "set (refs fetch-mt %s, then refs use %s mt), or attach the genome to it as the nuclear FASTA "
+                  "(refs fetch-genome %s --nuclear-of mt).", organism, ref.refpath, organism, organism, organism)
+        return False
     try:
         size = Path(ref.refpath).stat().st_size
     except (OSError, TypeError):

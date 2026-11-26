@@ -130,6 +130,8 @@ def build_parser() -> argparse.ArgumentParser:
     rg.add_argument("--nuclear-of", metavar="SET",
                     help="instead of a new set, use the genome as the nuclear FASTA (_fasta_nuc) of reference set SET")
     rg.add_argument("--no-activate", action="store_true")
+    rg.add_argument("--activate", action="store_true",
+                    help="make the new set the active one even when the organism has one (e.g. its mtDNA)")
     rg.add_argument("-y", "--yes", action="store_true", help="do not ask for confirmation after the size warning")
 
     c = sub.add_parser("cleanup", help="remove temporary files (logs, scripts) from experiments")
@@ -451,8 +453,15 @@ def cmd_refs(ws: Workspace, args) -> int:
             print(f"'{args.nuclear_of}' now has the nuclear genome {genome.accession} as _fasta_nuc (its FASTA only: "
                   f"the set keeps its own annotation)")
         else:
-            registry.add(organism, ref, args.name, activate=not args.no_activate)
+            # FIX [AUDIT-2026-11-26-M5]: the genome set replaced the active (mtDNA) set, and the next build of an mt
+            # preset used the whole genome as the mtDNA. It takes over only an organism without a set, or with --activate.
+            current = registry.active_name(organism)
+            activate = not args.no_activate and (args.activate or current in (None, args.name))
+            registry.add(organism, ref, args.name, activate=activate)
             print(f"Registered '{args.name}' = {genome.accession} ({genome.assembly_name})")
+            if not activate and current and not args.no_activate:
+                print(f"'{current}' stays the active set of {organism}. For gene counts with this genome: "
+                      f"mitopiper refs use {organism} {args.name} (or build --reference {args.name}).")
         print(f"The files will be downloaded to {ref.refpath.rsplit('/', 1)[0]} by the reference job of the next build.")
     elif args.action == "fetch-mt":
         organism = args.organism.replace(" ", "_")

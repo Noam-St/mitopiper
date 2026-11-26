@@ -1016,7 +1016,9 @@ With RNA-seq, apparent heteroplasmy can also come from RNA modifications and edi
 mitochondrial tRNA processing. Treat calls at tRNA and rRNA positions with care.
 
 The rotated and the nuclear + mtDNA references are built and indexed once, by the reference job,
-under `references/derived/<organism>/`. The helpers run inside the jobs, so mitopiper must be
+under `references/derived/<organism>/`. Their names carry a short key of the files they are made from
+(e.g. `chrM.1a2b3c4d.rotated8285.fa`), so another mtDNA or nuclear FASTA gets files of its own; a file
+that is newer than what was made from it (a reference fetched again) makes the job build it again. The helpers run inside the jobs, so mitopiper must be
 installed in the job environment (the tool check verifies this). They are also available directly:
 
 ```bash
@@ -1065,8 +1067,12 @@ organism, you get an error, and the interactive mode offers to enter a path by h
 Nothing large is downloaded when you run the command. The first build that uses the reference
 downloads the FASTA and GFF in its reference job (`prep_<exp>.sh`), checks them against NCBI's
 `md5checksums.txt` (with the retries of [When downloads fail](#when-downloads-fail), without the SRA
-fallback), unpacks them into `references/genome/<organism>/` and indexes them, all before
-any sample job starts. Later builds reuse the files. In the interactive mode, the same download is
+fallback), unpacks them into `references/genome/<organism>/<accession>/` and indexes them, all before
+any sample job starts. Only the primary assembly is kept: the alt loci and patches (GRCh38.p14 has 514),
+which make reads of the HLA and similar regions map to several places, are left out using the
+assembly report. A new genome set becomes the active set only when the organism has none, so it
+does not take the place of the mtDNA set the mt presets use: switch with `refs use`, pass
+`build --reference genome`, or add `--activate`. Later builds reuse the files. In the interactive mode, the same download is
 offered when an organism has no reference, and under *configuration → manage references*.
 
 ### Where references come from

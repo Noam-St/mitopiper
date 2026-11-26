@@ -2,6 +2,7 @@ import gzip
 import hashlib
 import subprocess
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -63,7 +64,8 @@ def test_fetching_only_plans_the_download(tmp_path):
     assert ref.source == "ncbi_genome" and ref.needs_indexing and ref.refpath.endswith("GCF_000002035.6_GRCz11_genomic.fna")
     assert set(ref.downloads) == {ref.refpath, ref.gtfpath} and not (ws.references_dir / "genome").exists()
     cmds = index_commands(ref, Workflow.default())
-    assert cmds[0].startswith("sh -c 'set -e;") and "mitopiper download --md5-url" in cmds[0] and "--no-sra" in cmds[0]
+    assert cmds[0].startswith("sh -c 'set -e;") and "--no-sra --md5-url" in cmds[0]
+    assert "mt primary-assembly" in cmds[0] and ref.downloads[ref.refpath]["primary_only"].endswith("_assembly_report.txt")
     assert any("bwa index" in c for c in cmds)
     # attached as the nuclear FASTA of the mitochondrial set: downloaded and indexed, but STAR indexes only refpath
     mt = ReferenceSet(refpath=str(tmp_path / "mt.fa"), source="ncbi_mt")
@@ -87,7 +89,13 @@ def fake_ncbi(tmp_path, name, corrupt=False):
     fasta_gz = server / f"{name}_genomic.fna.gz"
     gff_gz = server / f"{name}_genomic.gff.gz"
     with gzip.open(fasta_gz, "wt") as h:
-        h.write(">chr1\nACGTACGT\n")
+        h.write(">chr1\nACGTACGT\n>chr1_alt1\nACGA\n")
+    # AUDIT-2026-11-26-M6: the assembly report names the alt locus, which the reference job leaves out
+    (server / f"{name}_assembly_report.txt").write_text(
+        "# Assembly name:  test\n# Sequence-Name\tSequence-Role\tAssigned-Molecule\tAssigned-Molecule-Location/Type\t"
+        "GenBank-Accn\tRelationship\tRefSeq-Accn\tAssembly-Unit\tSequence-Length\tUCSC-style-name\n"
+        "1\tassembled-molecule\t1\tChromosome\tCM1.1\t=\tchr1\tPrimary Assembly\t8\tna\n"
+        "ALT1\talt-scaffold\t1\tChromosome\tKI1.1\t=\tchr1_alt1\tALT_REF_LOCI_1\t4\tna\n")
     with gzip.open(gff_gz, "wt") as h:
         h.write("##gff-version 3\n")
     md5 = lambda p: hashlib.md5(p.read_bytes()).hexdigest()  # noqa: E731
@@ -124,7 +132,8 @@ def test_reference_job_downloads_verifies_and_indexes_the_genome(tmp_path, monke
     assert main(["-w", str(ws.root), "build", "--no-check", str(tmp_path / "exp.tsv"), "-s", "local", "-p", "t"]) == 0
     subprocess.run(["bash", str(ws.root / "master.sh")], check=True, capture_output=True)
     states = {j.name: j.state for j in mon.collect(ws, ["exp"], mon.ErrorScanner(), lambda s, i: None)}
-    fasta = ws.references_dir / "genome" / "Danio_rerio" / "GCF_000002035.6_GRCz11_genomic.fna"
+    # AUDIT-2026-11-26-H6: a folder per assembly (STAR's index is the FASTA's folder)
+    fasta = ws.references_dir / "genome" / "Danio_rerio" / "GCF_000002035.6" / "GCF_000002035.6_GRCz11_genomic.fna"
     if corrupt:
         assert states["prep_exp"] == mon.FAILED and states["s_a_0"] == mon.SKIPPED
         assert not fasta.exists()
@@ -132,7 +141,8 @@ def test_reference_job_downloads_verifies_and_indexes_the_genome(tmp_path, monke
         assert err.count("checksum failed") == 2 and "download failed 2 times" in err      # retried, then gave up
     else:
         assert states["prep_exp"] == mon.DONE and states["s_a_0"] == mon.DONE
-        assert fasta.read_text().startswith(">chr1") and fasta.with_suffix(".fna.bwt").exists()
+        assert fasta.read_text() == ">chr1\nACGTACGT\n" and fasta.with_suffix(".fna.bwt").exists()
+        assert not list(fasta.parent.glob("*.gz")) and not list(fasta.parent.glob("*.part"))
         assert (fasta.parent / "GCF_000002035.6_GRCz11_genomic.gff").read_text().startswith("##gff-version 3")
 
 
@@ -185,3 +195,65 @@ def test_a_small_genome_needs_no_confirmation(tmp_path, monkeypatch, capsys):
     assert main(["-w", str(ws.root), "refs", "fetch-genome", "Danio rerio"]) == 0
     out = capsys.readouterr().out
     assert "12.2 Mb of sequence: a small download" in out and "Registered 'genome'" in out
+
+
+# ---------------------------------------------------------------- AUDIT-2026-11-26 M5, M6
+def test_a_genome_set_does_not_replace_the_active_mtdna_set(tmp_path, monkeypatch, capsys):
+    """M5: fetch-genome made the genome active, and the next mt build rotated chr1 as the "mtDNA"."""
+    ws = Workspace(tmp_path / "ws")
+    fake = FakeClient([report("GCF_000002035.6", "GRCz11", "reference genome")])
+    monkeypatch.setattr(refs_mod.NCBIClient, "genome_reports", lambda self, *a, **k: fake.genome_reports(*a, **k))
+    registry = ReferenceRegistry(ws)
+    registry.add("Danio_rerio", ReferenceSet(refpath="/mt.fa", source="ncbi_mt"), "mt")
+    assert main(["-w", str(ws.root), "refs", "fetch-genome", "Danio rerio", "--yes"]) == 0
+    assert ReferenceRegistry(ws).active_name("Danio_rerio") == "mt"
+    assert "'mt' stays the active set of Danio_rerio" in capsys.readouterr().out
+    assert main(["-w", str(ws.root), "refs", "fetch-genome", "Danio rerio", "--yes", "--name", "g2", "--activate"]) == 0
+    assert ReferenceRegistry(ws).active_name("Danio_rerio") == "g2"
+
+
+def test_a_genome_set_is_refused_as_mtdna_before_it_is_downloaded(tmp_path, caplog):
+    """M5: the 50 MB check passed while the genome's FASTA was not there yet."""
+    from mitopiper.build import mt_reference_size_ok
+
+    ws = Workspace(tmp_path / "ws")
+    ref, _ = fetch_genome_reference(ws, "Danio_rerio", client=FakeClient([report("GCF_000002035.6", "GRCz11",
+                                                                                  "reference genome")]))
+    assert not Path(ref.refpath).exists()
+    assert not mt_reference_size_ok("Danio_rerio", ref)
+    assert "is a whole genome" in caplog.text
+    assert mt_reference_size_ok("Danio_rerio", ReferenceSet(refpath=str(tmp_path / "not_here_yet.fa")))
+
+
+def test_removing_the_active_set_does_not_pick_another_silently(tmp_path, caplog):
+    """M5: the first other set by name became active (e.g. 'genome' before 'mt2')."""
+    registry = ReferenceRegistry(Workspace(tmp_path / "ws"))
+    for name in ("mt", "genome", "mt2"):
+        registry.add("Danio_rerio", ReferenceSet(refpath=f"/{name}.fa"), name, activate=name == "mt")
+    registry.remove("Danio_rerio", "mt")
+    assert registry.active_name("Danio_rerio") is None and registry.get("Danio_rerio") is None
+    assert "choose one of genome, mt2" in caplog.text
+    registry.remove("Danio_rerio", "genome")
+    registry.use("Danio_rerio", "mt2")
+    registry.add("Danio_rerio", ReferenceSet(refpath="/x.fa"), "x", activate=False)
+    registry.remove("Danio_rerio", "mt2")
+    assert registry.active_name("Danio_rerio") == "x" and "'x' is now the active reference set" in caplog.text
+
+
+def test_primary_assembly_leaves_out_alt_loci_and_patches(tmp_path):
+    """M6: GRCh38.p14's 514 alt and patch scaffolds made reads of HLA and similar regions multi-mapped."""
+    from mitopiper.mtdna import primary_assembly
+
+    fasta, report_file, out = tmp_path / "g.fna", tmp_path / "report.txt", tmp_path / "out.fna"
+    fasta.write_text(">NC_1.1 chr1\nACGT\nACGT\n>NT_U.1 unplaced\nGG\n>NW_ALT.1 alt\nCC\n>NW_FIX.1 patch\nTT\n"
+                     ">NC_MT.1 mito\nAAAA\n")
+    rows = [("1", "assembled-molecule", "CM1.1", "NC_1.1"), ("U", "unplaced-scaffold", "KN1.1", "NT_U.1"),
+            ("ALT", "alt-scaffold", "KI1.1", "NW_ALT.1"), ("FIX", "fix-patch", "ML1.1", "NW_FIX.1"),
+            ("MT", "assembled-molecule", "J01415.2", "NC_MT.1")]
+    report_file.write_text("# header\n" + "".join(f"{n}\t{role}\tx\tx\t{gb}\t=\t{rs}\tunit\t1\tna\n"
+                                                  for n, role, gb, rs in rows))
+    assert primary_assembly(fasta, report_file, out) == (3, 2)
+    assert out.read_text() == ">NC_1.1 chr1\nACGT\nACGT\n>NT_U.1 unplaced\nGG\n>NC_MT.1 mito\nAAAA\n"
+    # names the report does not know (another naming): everything is kept rather than nothing
+    fasta.write_text(">chr1\nACGT\n>chr1_alt\nCC\n")
+    assert primary_assembly(fasta, report_file, out) == (2, 0) and out.read_text() == fasta.read_text()

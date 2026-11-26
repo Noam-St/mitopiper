@@ -291,7 +291,13 @@ class Menus:
                     ref = fetch_genome_interactive(self.ws, org, self.input)
                     if ref is not None:
                         name = ask("Name of this reference set", "genome" if ref.source == "ncbi_genome" else "default", self.input)
-                        registry.add(org, ref, name, activate=True)
+                        current = registry.active_name(org)
+                        # audit M5: a downloaded genome does not replace the active (mtDNA) set by itself
+                        activate = ref.source != "ncbi_genome" or current in (None, name)
+                        registry.add(org, ref, name, activate=activate)
+                        if not activate:
+                            print(f"'{current}' stays the active set of {org}; switch with 'switch active reference' "
+                                  f"for gene counts with '{name}'.")
                 elif action == 2:
                     org = ask("Organism (e.g. Homo_sapiens)", input_fn=self.input).replace(" ", "_")
                     acc = ask("RefSeq accession (leave empty to search NCBI)", input_fn=self.input)

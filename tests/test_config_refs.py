@@ -1,4 +1,8 @@
 import json
+import os
+import subprocess
+import time
+from pathlib import Path
 
 import pytest
 
@@ -194,3 +198,55 @@ def test_downloaded_record_of_another_organism_is_reported(workspace, caplog):
     caplog.set_level("INFO")
     fetch_mt_reference(workspace, "Homo_sapiens", accession="NC_013993.1", client=Wrong())
     assert "Downloaded: NC_013993.1 Homo sp. Altai" in caplog.text and "does not name Homo sapiens" in caplog.text
+
+
+# ---------------------------------------------------------------- AUDIT-2026-11-26 H5, H6
+def test_each_mtdna_accession_has_its_own_folder(workspace):
+    """H5: every accession was written to one <org>.fasta, whose old indexes were then reused."""
+    first = fetch_mt_reference(workspace, "Danio_rerio", accession="NC_002333.2", client=FakeClient())
+    second = fetch_mt_reference(workspace, "Danio_rerio", accession="NC_OTHER.1", client=FakeClient())
+    assert first.refpath != second.refpath
+    assert Path(first.refpath).parent.name == "NC_002333.2" and Path(second.refpath).is_file()
+
+
+@pytest.mark.parametrize("shell", ["sh", "bash"])
+def test_an_index_older_than_its_fasta_is_built_again(tmp_path, shell):
+    """H5: the guards tested only that the index was there (htslib then read new bytes at the old offsets)."""
+    from mitopiper.references import _unless_exists
+
+    fasta, index = tmp_path / "mt.fa", tmp_path / "mt.fa.fai"
+    fasta.write_text(">a\nACGT\n")
+    command = _unless_exists(str(index), f'echo built >> "{tmp_path}/log"; touch "{index}"; echo x > "{index}"',
+                             False, (str(fasta),))
+    run = lambda: subprocess.run([shell, "-c", command], check=True)   # noqa: E731
+    run()
+    run()                                                    # current: kept
+    os.utime(fasta, (time.time() + 60, time.time() + 60))    # fetched again (newer)
+    run()
+    assert (tmp_path / "log").read_text().split() == ["built", "built"]
+    # an index linked from a shared assembly is not built again, even when its FASTA is newer
+    shared = tmp_path / "shared.fai"
+    shared.write_text("x\n")
+    index.unlink()
+    index.symlink_to(shared)
+    os.utime(fasta, (time.time() + 120, time.time() + 120))
+    run()
+    assert (tmp_path / "log").read_text().split() == ["built", "built"] and shared.read_text() == "x\n"
+
+
+def test_derived_references_are_named_by_what_they_are_made_from(tmp_path):
+    """H6: named by the mtDNA file's name only, another chrM.fa or another nuclear genome reused the first's files."""
+    from mitopiper.references import derived_paths
+
+    one = ReferenceSet(refpath="/refs/hg19/chrM.fa", nuc_refpath="/refs/hg19/genome.fa")
+    other_mt = ReferenceSet(refpath="/refs/hg38/chrM.fa", nuc_refpath="/refs/hg19/genome.fa")
+    other_nuc = ReferenceSet(refpath="/refs/hg19/chrM.fa", nuc_refpath="/refs/hg38/genome.fa")
+    paths = [derived_paths(r, "Homo_sapiens", "/ws", 8000) for r in (one, other_mt, other_nuc)]
+    assert len({p["rotated"] for p in paths}) == 2                # the nuclear genome does not change the rotation
+    assert paths[0]["rotated"] == paths[2]["rotated"] and paths[0]["rotated"] != paths[1]["rotated"]
+    for key in ("combined", "numt", "numt_work", "numt_alleles"):
+        assert len({p[key] for p in paths}) == 3, key
+    assert paths[0] == derived_paths(one, "Homo_sapiens", "/ws", 8000)    # stable
+    given = derived_paths(ReferenceSet(refpath="/refs/hg19/chrM.fa", numt_refpath="/a/numts.fa"), "Homo_sapiens", "/ws", 1)
+    again = derived_paths(ReferenceSet(refpath="/refs/hg19/chrM.fa", numt_refpath="/b/numts.fa"), "Homo_sapiens", "/ws", 1)
+    assert given["numt_alleles"] != again["numt_alleles"]

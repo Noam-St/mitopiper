@@ -28,9 +28,11 @@ search for the organism's complete RefSeq mitochondrial genome.
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import logging
 import math
+import os
 import re
 import shlex
 import time
@@ -155,7 +157,15 @@ class ReferenceRegistry:
         if not refs:
             del self._data[organism]
         elif self._data[organism].get("active") == name:
-            self._data[organism]["active"] = sorted(refs)[0]
+            # FIX [AUDIT-2026-11-26-M5]: the first other set by name became active, silently (a genome set
+            # could become the "mtDNA" of the next build). Only an only remaining set takes over, and it says so.
+            if len(refs) == 1:
+                (self._data[organism]["active"],) = refs
+                log.warning("%s: '%s' is now the active reference set", organism, self._data[organism]["active"])
+            else:
+                self._data[organism]["active"] = None
+                log.warning("%s has no active reference set now: choose one of %s with 'mitopiper refs use %s NAME'",
+                            organism, ", ".join(sorted(refs)), organism)
         self.save()
 
     def update(self, organism: str, name: str, **fields) -> None:
@@ -361,7 +371,9 @@ def fetch_mt_reference(
     if not accession:
         raise RefError(f"No RefSeq mitochondrial genome found for {organism}")
 
-    out_dir = workspace.references_dir / "mtDNA" / organism
+    # FIX [AUDIT-2026-11-26-H5]: every accession went to the same <org>.fasta, whose old .fai, bwa index and
+    # rotated copy were then reused for the new sequence (htslib reads new bytes at the old offsets, silently)
+    out_dir = workspace.references_dir / "mtDNA" / organism / re.sub(r"[^A-Za-z0-9._-]", "_", accession)
     out_dir.mkdir(parents=True, exist_ok=True)
     fasta = out_dir / f"{organism}.fasta"
     gff = out_dir / f"{organism}.gff3"
@@ -408,7 +420,7 @@ class GenomeInfo:
             raise RefError(f"'{self.accession}' is not an NCBI assembly accession (GCF_/GCA_)")
         base = f"{GENOMES_FTP}/{match.group(1)}/{match.group(2)}/{match.group(3)}/{match.group(4)}/{self.ftp_name}"
         return {"fasta": f"{base}/{self.ftp_name}_genomic.fna.gz", "gff": f"{base}/{self.ftp_name}_genomic.gff.gz",
-                "md5": f"{base}/md5checksums.txt"}
+                "md5": f"{base}/md5checksums.txt", "report": f"{base}/{self.ftp_name}_assembly_report.txt"}
 
     #: Below this, a genome is quick to download and index: no warning.
     SMALL = 500_000_000
@@ -489,12 +501,16 @@ def fetch_genome_reference(workspace: Workspace, organism: str, accession: Optio
         client = NCBIClient(email, api_key)
     genome = find_genome(organism, accession, client)
     urls = genome.urls()
-    out_dir = workspace.references_dir / "genome" / organism
+    # FIX [AUDIT-2026-11-26-H6]: a folder per assembly: STAR's index is the folder of the FASTA, which two
+    # assemblies of one organism shared
+    out_dir = workspace.references_dir / "genome" / organism / genome.accession
     fasta = str(out_dir / f"{genome.ftp_name}_genomic.fna")
     gff = str(out_dir / f"{genome.ftp_name}_genomic.gff")
     ref = ReferenceSet(refpath=fasta, gtfpath=gff, source="ncbi_genome", accession=genome.accession,
-                       # the length (from NCBI) sizes STAR's index before the FASTA is downloaded
-                       downloads={fasta: {"url": urls["fasta"], "md5_url": urls["md5"], "length": genome.total_length},
+                       # the length (from NCBI) sizes STAR's index before the FASTA is downloaded; the assembly
+                       # report keeps only the primary assembly (audit M6)
+                       downloads={fasta: {"url": urls["fasta"], "md5_url": urls["md5"], "length": genome.total_length,
+                                          "primary_only": urls["report"]},
                                   gff: {"url": urls["gff"], "md5_url": urls["md5"]}})
     return ref, genome
 
@@ -519,21 +535,40 @@ def download_commands(ref: ReferenceSet, workflow=None) -> list:
         folder, name = local.rsplit("/", 1)
         remote = spec["url"].rsplit("/", 1)[1]
         checksum = f'--md5-url "{spec["md5_url"]}" ' if spec.get("md5_url") else ""
-        fetch = [f'echo "Downloading {remote}"',
-                 f'mitopiper download {checksum}--tries {tries} --wait {wait} --no-sra "{spec["url"]}" "{remote}" '
-                 "-- wget -c -q"]
+        get = f"mitopiper download --tries {tries} --wait {wait} --no-sra"
+        fetch = [f'echo "Downloading {remote}"', f'{get} {checksum}"{spec["url"]}" "{remote}" -- wget -c -q']
+        # unpacked next to the final file, which appears only when complete (a job killed while unpacking left a
+        # partial FASTA that the guard then took for done)
         if remote.endswith(".gz"):
-            fetch.append(f'gunzip -f "{remote}"')
+            fetch.append(f'gunzip -c "{remote}" > "{name}.part"')
+        else:
+            fetch.append(f'mv "{remote}" "{name}.part"')
+        if spec.get("primary_only"):
+            # FIX [AUDIT-2026-11-26-M6]: the assembly's alt loci and patches (GRCh38.p14: 514 scaffolds) made reads of
+            # HLA and similar regions multi-mapped, lost to the NUMT search and the gene counts
+            report = spec["primary_only"].rsplit("/", 1)[1]
+            fetch += [f'{get} "{spec["primary_only"]}" "{report}" -- wget -c -q',       # small: no checksum
+                      f'mitopiper mt primary-assembly "{name}.part" "{report}" "{name}.primary" && '
+                      f'mv "{name}.primary" "{name}.part"']
+        fetch.append(f'mv "{name}.part" "{name}"')
+        if remote.endswith(".gz"):
+            fetch.append(f'rm -f "{remote}"')
         script = f'set -e; mkdir -p "{folder}"; cd "{folder}"; if [ ! -s "{name}" ]; then {"; ".join(fetch)}; fi'
         commands.append(f"sh -c '{script}'")
     return commands
 
 
-def _unless_exists(path: str, command: str, csh: bool) -> str:
-    """Run ``command`` only if ``path`` is missing or empty, in the job's shell syntax."""
+def _unless_exists(path: str, command: str, csh: bool, sources: tuple = ()) -> str:
+    """Run ``command`` only if ``path`` is missing or empty, or older than one of ``sources`` (the files it is made
+    from), in the job's shell syntax (csh has no age test: there, missing or empty only).
+
+    FIX [AUDIT-2026-11-26-H5]: the guards tested only that the file was there, so an index or derived reference
+    made from an earlier version of its source (a FASTA fetched again) was reused. A link (an index borrowed from a
+    shared, indexed assembly) is never built again: that would write through it into the other folder."""
     if csh:
         return f'if ( ! -e "{path}" || -z "{path}" ) {command}'
-    return f'if [ ! -s "{path}" ]; then {command}; fi'
+    stale = "".join(f' || {{ [ ! -L "{path}" ] && [ "{source}" -nt "{path}" ]; }}' for source in sources if source)
+    return f'if [ ! -s "{path}" ]{stale}; then {command}; fi'
 
 
 @lru_cache(maxsize=64)
@@ -607,7 +642,7 @@ def _fasta_index_commands(fasta: str, workflow, csh: bool, star: bool, skip_pres
             f'{star_bin} --runMode genomeGenerate --genomeDir "{fasta_dir}" '
             f'--runThreadN {step_threads(workflow, star_steps[0])} --outTmpDir "{fasta_dir}/_STARtmp.$$" '
             f'--genomeFastaFiles "{fasta}" --genomeSAindexNbases {_sa_index_nbases(fasta, known_length)}')))
-    return [_unless_exists(path, command(), csh) for path, command in wanted
+    return [_unless_exists(path, command(), csh, (fasta,)) for path, command in wanted
             if not (skip_present and _present(path))]
 
 
@@ -685,20 +720,32 @@ def uses_placeholder(workflow, name: str, steps: Optional[list] = None) -> bool:
     return False
 
 
+def source_key(*paths: str) -> str:
+    """A short key naming the files something is made from (their absolute paths)."""
+    text = "\0".join(os.path.abspath(p) if p else "" for p in paths)
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
+
+
 def derived_paths(ref: ReferenceSet, organism: str, workspace_dir: str, shift: int) -> dict:
     """Where the references derived from ``ref`` are kept: the rotated mtDNA, the nuclear + mtDNA
-    reference, and the NUMT reference for Numt Parser (``ref.numt_refpath`` when given)."""
+    reference, and the NUMT reference for Numt Parser (``ref.numt_refpath`` when given).
+
+    FIX [AUDIT-2026-11-26-H6]: the names carry a key of the files each is made from. Named after the mtDNA FASTA's
+    name only, another chrM.fa, a switched nuclear genome or another --numt-fasta reused the files of the first
+    (a rotated hg19 chrM with hg38 shifts every position of the control region). A file fetched again at the same
+    path is rebuilt by the age test of the guards (audit H5)."""
     stem = Path(ref.refpath).name
     for ext in (".gz", ".fasta", ".fa", ".fna", ".fas"):
         stem = stem[: -len(ext)] if stem.endswith(ext) else stem
     folder = f"{workspace_dir}/references/derived/{organism}"
-    numt = ref.numt_refpath or (f"{folder}/{stem}.numts.fa" if ref.nuc_refpath else "")
-    return {"rotated": f"{folder}/{stem}.rotated{shift}.fa",
-            "combined": f"{folder}/{stem}.with_nuclear.fa" if ref.nuc_refpath else "",
+    mt, with_nuclear = source_key(ref.refpath), source_key(ref.refpath, ref.nuc_refpath)
+    numt = ref.numt_refpath or (f"{folder}/{stem}.{with_nuclear}.numts.fa" if ref.nuc_refpath else "")
+    return {"rotated": f"{folder}/{stem}.{mt}.rotated{shift}.fa",
+            "combined": f"{folder}/{stem}.{with_nuclear}.with_nuclear.fa" if ref.nuc_refpath else "",
             "numt": numt,
-            "numt_work": f"{folder}/{stem}.numt_search",
-            # named after the NUMT reference it was made from, so another --numt-fasta gets its own table
-            "numt_alleles": f"{folder}/{Path(numt).name}.alleles.tsv" if numt else ""}
+            "numt_work": f"{folder}/{stem}.{with_nuclear}.numt_search",
+            # made from the NUMT reference and the mtDNA: another --numt-fasta gets its own table
+            "numt_alleles": f"{folder}/{Path(numt).name}.{source_key(numt, ref.refpath)}.alleles.tsv" if numt else ""}
 
 
 def mt_shift(workflow) -> str:
@@ -715,7 +762,7 @@ def derived_commands(ref: ReferenceSet, organism: str, workspace_dir: str, workf
     commands = []
     if uses_placeholder(workflow, "fasta_rotated", steps):
         commands.append(_unless_exists(paths["rotated"], f'mitopiper mt rotate "{ref.refpath}" "{paths["rotated"]}" '
-                                                         f"--shift {mt_shift(workflow)}", csh))
+                                                         f"--shift {mt_shift(workflow)}", csh, (ref.refpath,)))
         commands += _fasta_index_commands(paths["rotated"], workflow, csh, star=False)
     # The NUMT search uses the nuclear + mtDNA reference too: one genome index in the workspace, shared
     # with mt-variants-numt, and nothing written next to the user's nuclear FASTA.
@@ -724,7 +771,8 @@ def derived_commands(ref: ReferenceSet, organism: str, workspace_dir: str, workf
     numt_search = (wants_numts and paths["numt"] and not ref.numt_refpath and not Path(paths["numt"]).is_file())
     if (uses_placeholder(workflow, "fasta_combined", steps) or numt_search) and paths["combined"]:
         commands.append(_unless_exists(paths["combined"], f'mitopiper mt combine-references "{ref.nuc_refpath}" '
-                                                          f'"{ref.refpath}" "{paths["combined"]}"', csh))
+                                                          f'"{ref.refpath}" "{paths["combined"]}"', csh,
+                                       (ref.nuc_refpath, ref.refpath)))
         commands += _fasta_index_commands(paths["combined"], workflow, csh, star=False)
     if wants_numts and paths["numt"]:
         if numt_search:
@@ -741,12 +789,13 @@ def numt_allele_commands(ref: ReferenceSet, paths: dict, workflow, csh: bool) ->
     work, table = paths["numt_work"], paths["numt_alleles"]
     bwa_steps = _steps_running(workflow, "bwa")
     bwa = (workflow.pipeline[bwa_steps[0]].get("path") or "bwa") if bwa_steps else "bwa"
-    lines = [_unless_exists(f"{work}.fragments.fa", f'mitopiper mt fragments "{ref.refpath}" "{work}.fragments.fa"', csh)]
+    lines = [_unless_exists(f"{work}.fragments.fa", f'mitopiper mt fragments "{ref.refpath}" "{work}.fragments.fa"', csh,
+                            (ref.refpath,))]
     if not bwa_steps:                               # the NUMT reference is indexed only for presets that run bwa
-        lines.append(_unless_exists(f'{paths["numt"]}.sa', f'{bwa} index "{paths["numt"]}"', csh))
+        lines.append(_unless_exists(f'{paths["numt"]}.sa', f'{bwa} index "{paths["numt"]}"', csh, (paths["numt"],)))
     lines.append(_unless_exists(table, f'{bwa} mem -a "{paths["numt"]}" "{work}.fragments.fa" > "{table}.sam" && '
                                        f'mitopiper mt numt-alleles "{table}.sam" "{ref.refpath}" "{table}" && '
-                                       f'rm -f "{table}.sam"', csh))
+                                       f'rm -f "{table}.sam"', csh, (paths["numt"], ref.refpath)))
     return lines
 
 
@@ -758,11 +807,15 @@ def numt_reference_commands(ref: ReferenceSet, paths: dict, workflow, csh: bool)
     bwa_steps = _steps_running(workflow, "bwa")
     bwa = (workflow.pipeline[bwa_steps[0]].get("path") or "bwa") if bwa_steps else "bwa"
     return [
-        _unless_exists(f"{work}.fragments.fa", f'mitopiper mt fragments "{ref.refpath}" "{work}.fragments.fa"', csh),
-        _unless_exists(f"{work}.sam", f'{bwa} mem -a "{genome}" "{work}.fragments.fa" > "{work}.sam"', csh),
+        _unless_exists(f"{work}.fragments.fa", f'mitopiper mt fragments "{ref.refpath}" "{work}.fragments.fa"', csh,
+                       (ref.refpath,)),
+        _unless_exists(f"{work}.sam", f'{bwa} mem -a "{genome}" "{work}.fragments.fa" > "{work}.sam"', csh,
+                       (f"{genome}.sa", f"{work}.fragments.fa")),
         _unless_exists(f"{work}.regions.txt",
-                       f'mitopiper mt numt-regions "{work}.sam" "{ref.refpath}" "{work}.regions.txt"', csh),
-        _unless_exists(paths["numt"], f'samtools faidx "{genome}" -r "{work}.regions.txt" -o "{paths["numt"]}"', csh),
+                       f'mitopiper mt numt-regions "{work}.sam" "{ref.refpath}" "{work}.regions.txt"', csh,
+                       (f"{work}.sam",)),
+        _unless_exists(paths["numt"], f'samtools faidx "{genome}" -r "{work}.regions.txt" -o "{paths["numt"]}"', csh,
+                       (f"{work}.regions.txt",)),
     ]
 
 

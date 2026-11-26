@@ -70,6 +70,40 @@ def contigs(fasta) -> list:
         return [line[1:].split()[0] for line in handle if line.startswith(">") and line[1:].strip()]
 
 
+#: Sequence roles of an NCBI assembly report that belong to the primary assembly (the others: alt loci, patches)
+PRIMARY_ROLES = ("assembled-molecule", "unlocalized-scaffold", "unplaced-scaffold")
+
+
+def primary_assembly(fasta, report, output) -> tuple:
+    """Copy the sequences of ``fasta`` that NCBI's assembly ``report`` gives a primary-assembly role
+    (:data:`PRIMARY_ROLES`) to ``output``, streaming; ``(kept, dropped)``. A FASTA whose names the report does not
+    know is copied whole (``dropped`` 0) rather than emptied."""
+    keep, known = set(), set()
+    with open(report, encoding="utf-8") as handle:
+        for line in handle:
+            fields = line.rstrip("\n").split("\t")
+            if line.startswith("#") or len(fields) < 7:
+                continue
+            names = {fields[0], fields[4], fields[6]} - {"na", ""}       # name, GenBank and RefSeq accessions
+            known |= names
+            if fields[1] in PRIMARY_ROLES:
+                keep |= names
+    kept = dropped = 0
+    with open(fasta, encoding="utf-8") as handle:
+        names = [line[1:].split()[0] for line in handle if line.startswith(">") and line[1:].strip()]
+    filter_names = bool(known & set(names))
+    with open(fasta, encoding="utf-8") as handle, open(output, "w", encoding="utf-8") as out:
+        writing = True
+        for line in handle:
+            if line.startswith(">"):
+                name = line[1:].split()[0] if line[1:].strip() else ""
+                writing = not filter_names or name in keep
+                kept, dropped = (kept + 1, dropped) if writing else (kept, dropped + 1)
+            if writing:
+                out.write(line)
+    return kept, dropped
+
+
 def sequence_length(fasta) -> int:
     """Length of the first sequence of a FASTA file."""
     with open(fasta, encoding="utf-8") as handle:
@@ -550,6 +584,11 @@ def add_parser(sub) -> None:
     pileup.add_parsers(msub)
     names = msub.add_parser("contigs", help="print the sequence names of a FASTA")
     names.add_argument("fasta")
+    prim = msub.add_parser("primary-assembly", help="keep the primary-assembly sequences of an NCBI genome FASTA "
+                                                    "(no alt loci or patches), by its assembly report")
+    prim.add_argument("fasta")
+    prim.add_argument("report", help="<assembly>_assembly_report.txt")
+    prim.add_argument("output")
 
 
 def run(args) -> int:
@@ -588,4 +627,8 @@ def run(args) -> int:
               + f"; reads (pairs) kept: {kept}", file=sys.stderr)
     elif args.action == "contigs":
         print(" ".join(contigs(args.fasta)))
+    elif args.action == "primary-assembly":
+        kept, dropped = primary_assembly(args.fasta, args.report, args.output)
+        print(f"[mitopiper] primary assembly: {kept} sequence(s) kept, {dropped} alt-locus/patch sequence(s) left out",
+              file=sys.stderr)
     return 0
