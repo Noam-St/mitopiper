@@ -353,8 +353,9 @@ def build_experiment(
                 skipped.append(organism)
                 del refs[organism]
     samples = [s for s in samples if s.organism in refs]
-    for problem in gene_attribute_problems(workflow, steps, refs):
-        log.error(problem)
+    problems = gene_attribute_problems(workflow, steps, refs)
+    if problems:                      # every sample would fail at the counting step, hours in: stop now
+        raise BuildError("\n".join(problems))
     if not workflow.flag("keep_reads", True) and not deletes_reads(workflow):
         log.warning("keep_reads is false, but the reads are kept: they are deleted only by jobs that stop at the first "
                     "failing command (fail_fast on, environment bash, zsh or ksh)")

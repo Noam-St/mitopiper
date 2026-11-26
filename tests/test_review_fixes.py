@@ -438,3 +438,22 @@ def test_a_403_before_a_later_failure_is_not_the_diagnosis():
     early = mon.JobStatus("E", "s_a_0", state=mon.FAILED, exit_code=8, step="wget",
                           errors=[mon.ErrorLine(1, "ERROR 403: Forbidden.")])
     assert "403" in diagnose(early)[0].cause
+
+
+def test_build_with_a_wrong_counting_attribute_stops(tmp_path):
+    gff = tmp_path / "GCF_genomic.gff"
+    gff.write_text(NCBI_GFF3)
+    (tmp_path / "g.fa").write_text(">c\nACGT\n")
+    ws = Workspace(tmp_path / "ws")
+    ws.initialise()
+    wf = ws.load_workflow("rnaseq-expression")
+    wf.settings["featureCounts"]["attribute"]["value"] = "gene_id"
+    ws.write_workflow(wf, "rnaseq-expression")
+    ReferenceRegistry(ws).add("Homo_sapiens", ReferenceSet(refpath=str(tmp_path / "g.fa"), gtfpath=str(gff)))
+    fq = tmp_path / "fq"
+    fq.mkdir()
+    (fq / "a.fastq").write_text("@r\nACGT\n+\nIIII\n")
+    make_tsv(fq, "Homo sapiens", tmp_path / "s.tsv")
+    assert main(["-w", str(ws.root), "build", "--no-check", str(tmp_path / "s.tsv"), "-p", "rnaseq-expression",
+                 "-s", "local"]) != 0
+    assert not (ws.root / "master.sh").exists()
