@@ -28,7 +28,7 @@ import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from .defaults import CONFIG_FILES, default_config
 
@@ -276,10 +276,15 @@ class Workspace:
         self.copy_preset(preset, "current")
         return self.load_workflow("current")
 
-    def save_preset(self, name: str, source: str = "current") -> None:
+    def save_preset(self, name: str, source: str = "current", summary: Optional[str] = None) -> None:
+        """Copy ``source`` to ``name``; ``summary``: its one-line description (None keeps the source's)."""
         if not name or name in RESERVED_PRESETS or name == "default" or os.sep in name:
             raise ConfigError(f"Invalid preset name '{name}'")
         self.copy_preset(source, name)
+        if summary is not None:
+            workflow = self.load_workflow(name)
+            workflow.set_general("preset_summary", summary.strip())
+            self.write_workflow(workflow, name)
 
     # ----------------------------------------------------------- credentials
     def ncbi_credentials(self) -> tuple:

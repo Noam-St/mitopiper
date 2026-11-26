@@ -303,8 +303,9 @@ class Menus:
     # --------------------------------------------------------- presets
     def save_current_settings(self) -> None:
         name = ask("Name for the new preset", input_fn=self.input)
+        summary = ask("One sentence on what it is for (shown when choosing a preset; empty: none)", "", self.input)
         try:
-            self.ws.save_preset(name)
+            self.ws.save_preset(name, summary=summary)
             print(f"Preset '{name}' saved.\n")
         except ConfigError as exc:
             print(f"Error: {exc}\n")
@@ -601,7 +602,17 @@ def run_interactive(workspace: Workspace, input_fn: Callable = input, session_fa
     metadata_files = _choose_metadata(workspace, input_fn)
 
     presets = [p for p in workspace.list_presets() if p != "current"]
-    pidx = choose("Choose a workflow preset:", presets, allow_exit=False, input_fn=input_fn)
+    from .defaults import preset_summary
+
+    summaries = []
+    for name in presets:
+        try:
+            summaries.append(preset_summary(workspace.load_workflow(name), name))
+        except Exception:                         # an unreadable preset: listed without a summary
+            summaries.append("")
+    width = max(len(p) for p in presets) + 2 if presets else 0
+    pidx = choose("Choose a workflow preset:", [p.ljust(width) + s for p, s in zip(presets, summaries)],
+                  allow_exit=False, input_fn=input_fn)
     workspace.activate(presets[pidx])
 
     preset = presets[pidx]

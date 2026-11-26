@@ -86,3 +86,20 @@ def test_interactive_session_from_a_fastq_folder(tmp_path, monkeypatch):
 def test_the_start_menu_can_be_left_with_q(tmp_path, data_dir):
     ws = Workspace(tmp_path / "ws")
     assert run_interactive(ws, scripted(["q"])) == 0                 # scheduler question of a new workspace
+
+
+def test_the_preset_menu_shows_what_each_preset_is_for(tmp_path, data_dir, capsys):
+    ws = Workspace(tmp_path / "ws")
+    answers = iter(["1", str(data_dir / "ena_runs.tsv")])          # scheduler, metadata: then the preset menu
+
+    def fake_input(prompt=""):
+        return next(answers)                                         # runs out at the preset question
+
+    try:
+        run_interactive(ws, fake_input)
+    except StopIteration:
+        pass
+    out = capsys.readouterr().out
+    menu = out[out.index("Choose a workflow preset:"):]
+    assert "mt-variants-numt" in menu and "NUMT reads removed by mapping quality" in menu
+    assert "NUMT reads removed with Numt Parser" in menu

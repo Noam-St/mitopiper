@@ -2,7 +2,11 @@
 
 ## 2.0.2 (unreleased)
 
+### Added
+- One-line summaries of the presets, shown where a workflow is chosen (interactive menu) and by `presets list`; the two NUMT-aware presets now say how they remove NUMT reads (mapping quality vs Numt Parser). Your own presets take one with `presets save NAME --description "..."` or at the interactive save prompt (general setting `preset_summary`).
+
 ### Fixed
+- **NUMT-aware presets: the rotated alignment treated paired-end reads as single-end** (`samtools fastq` of the position-sorted `.mt.bam` into `bwa mem` without `-p`): where two mates overlap, mpileup counted the overlap twice in the 400 positions on each side of the origin (the D-loop), raising depth and per-strand support there. The reads are now grouped by pair (`samtools collate`) and aligned as pairs (`bwa mem -p`). Paired-end samples of `mt-variants-numt` and `mt-variants-numtparser` get different depths and allele counts near the origin; workspaces made before need `mitopiper presets reset mt-variants-numt mt-variants-numtparser`.
 - A gzipped annotation (Ensembl ships `.gtf.gz`) crashed `mitopiper mt annotate` near the end of every mt sample job (`'utf-8' codec can't decode byte 0x8b`); annotations are now read gzipped or not.
 - `refs add` refuses a gzipped `--fasta`, `--nuc-fasta` or `--numt-fasta` (e.g. Ensembl's `*.dna.primary_assembly.fa.gz`): samtools faidx, STAR and the mtDNA tools need a plain FASTA, and the reference job failed.
 - `rnaseq-expression` counts `exon,CDS` features for a GFF3 annotation (placeholder `_count_features`): NCBI's annotation gives the 13 mtDNA protein-coding genes only `gene` and `CDS` lines, so `-t exon` left ND1 ... CYB out of the counts. A GTF is still counted by `exon`.

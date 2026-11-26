@@ -98,6 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     psave = psub.add_parser("save", help="copy a preset (default: last_used) to a new name")
     psave.add_argument("name")
     psave.add_argument("--from", dest="source", default="last_used")
+    psave.add_argument("--description", default=None, help="one sentence on what it is for, shown when a preset is chosen")
 
     r = sub.add_parser("refs", help="manage reference genomes")
     rsub = r.add_subparsers(dest="action", required=True)
@@ -297,8 +298,16 @@ def cmd_build(ws: Workspace, args) -> int:
 def cmd_presets(ws: Workspace, args) -> int:
     ws.initialise()
     if args.action == "list":
-        for name in ws.list_presets():
-            print(name)
+        from .defaults import preset_summary
+
+        names = ws.list_presets()
+        width = max((len(n) for n in names), default=0) + 2
+        for name in names:
+            try:
+                summary = preset_summary(ws.load_workflow(name), name)
+            except Exception:                     # an unreadable preset: listed without a summary
+                summary = ""
+            print(f"{name.ljust(width)}{summary}".rstrip())
     elif args.action == "show":
         wf = ws.load_workflow(args.name)
         if args.json:
@@ -329,7 +338,7 @@ def cmd_presets(ws: Workspace, args) -> int:
             ws.write_workflow(Workflow(**bundled[name]), name)
             print(f"Reset preset '{name}' to this version of mitopiper" + (f" (previous copy: '{old}')" if name in ws.list_presets() else ""))
     elif args.action == "save":
-        ws.save_preset(args.name, args.source)
+        ws.save_preset(args.name, args.source, summary=args.description)
         print(f"Saved preset '{args.name}' from '{args.source}'")
     return 0
 

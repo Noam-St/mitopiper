@@ -170,3 +170,14 @@ def test_refs_add_stores_absolute_paths(tmp_path, monkeypatch):
     from mitopiper.references import ReferenceRegistry
     ref = ReferenceRegistry(ws).get("Homo_sapiens")
     assert ref.refpath == str(tmp_path / "ref" / "mt.fa") and ref.gtfpath == str(tmp_path / "ref" / "mt.gff3")
+
+
+def test_presets_list_and_save_show_one_line_summaries(tmp_path, capsys):
+    ws = Workspace(tmp_path / "ws")
+    assert run(ws, "presets", "list") == 0
+    out = capsys.readouterr().out
+    assert "NUMT reads removed by mapping quality" in out and "NUMT reads removed with Numt Parser" in out
+    assert run(ws, "presets", "save", "mine", "--from", "mt-variants", "--description", "Our lab's mtDNA run") == 0
+    capsys.readouterr()
+    assert run(ws, "presets", "list") == 0
+    assert any(line.startswith("mine") and "Our lab's mtDNA run" in line for line in capsys.readouterr().out.splitlines())

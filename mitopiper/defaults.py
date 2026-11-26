@@ -249,7 +249,27 @@ DEFAULT_ORDER = ["wget", "fastqc_pre", "trim", "fastqc", "bwa-align", "view", "s
 
 # general_settings entries are stored as [value, description] for backwards
 # compatibility with configs written by the original maker.py.
+#: One line per bundled preset, shown where a workflow is chosen (the NUMT-aware presets differ only in how they
+#: remove NUMT reads, which their names do not say).
+PRESET_SUMMARIES = {
+    "default": "General workflow: trim, align with bwa and pile up (the original maker.py workflow, no mtDNA analysis)",
+    "mt-variants": "mtDNA heteroplasmy and variants, reads aligned to the mtDNA only (fast; NUMT reads not removed)",
+    "mt-variants-numt": "mtDNA heteroplasmy and variants, NUMT reads removed by mapping quality against nuclear "
+                        "genome + mtDNA (needs the nuclear genome)",
+    "mt-variants-numtparser": "mtDNA heteroplasmy and variants, NUMT reads removed with Numt Parser against each "
+                              "sample's own mtDNA (most thorough, slowest; needs the nuclear genome or NUMT FASTA)",
+    "rnaseq-expression": "Gene expression: STAR alignment and featureCounts gene counts (nuclear genome)",
+}
+
+
+def preset_summary(workflow, name: str = "") -> str:
+    """The preset's own one-line summary, or the bundled one for a bundled name (workspaces made before keep
+    their own copies of the presets, without it)."""
+    return str(workflow.general("preset_summary", "") or "") or PRESET_SUMMARIES.get(name, "")
+
+
 DEFAULT_MAIN = {
+    "preset_summary": ["", "one line shown when a preset is chosen (presets save NAME --description TEXT)"],
     "ignore_paired_end": [False, "Ignore paired-end reads"],
     "qsub_queue": ["", "choose which cluster queue/partition to send the jobs into (empty = scheduler default)"],
     "environment": ["bash", "choose the linux shell to run the job scripts with"],
@@ -475,9 +495,13 @@ def _mt_variants(numt: str = "") -> dict:
             ("numt alleles", "Flag heteroplasmies whose minor allele a NUMT carries (numt_minor column); the table is "
                              "made by the reference job", "--numt-alleles", "_numt_alleles")))
         pipe["mpileup"]["input_ext"] = ".mt.bam"
-        # The rotated alignment realigns only the reads kept above, so it is NUMT-aware too.
+        # The rotated alignment realigns only the reads kept above, so it is NUMT-aware too. The kept BAM is sorted by
+        # position: collate puts the mates of each pair next to each other and bwa mem -p pairs them (single-end reads
+        # and mates whose partner was filtered out stay single). Without it every read was aligned as single-end, and
+        # mpileup counted the overlap of the two mates twice in the window next to the origin.
         pipe["align-rotated"].update(inputdir="alignment", input_ext=".mt.bam",
-                                     structure="samtools \\fastq input | key settings _fasta_rotated - | samtools sort -o output -")
+                                     structure="samtools \\collate -u -O input | samtools \\fastq - | key settings -p "
+                                               "_fasta_rotated - | samtools sort -o output -")
     active = order + circ_order + ann_order + ["multiqc"]
     for name, step in pipe.items():
         step["switch"] = name in active
@@ -517,6 +541,9 @@ def _rnaseq_expression() -> dict:
 
 def bundled_presets() -> dict:
     """Curated workflows written to every workspace that does not have them yet."""
-    return {"mt-variants": _mt_variants(), "mt-variants-numt": _mt_variants("mapq"),
-            "mt-variants-numtparser": _mt_variants("parser"),
-            "rnaseq-expression": _rnaseq_expression()}
+    presets = {"mt-variants": _mt_variants(), "mt-variants-numt": _mt_variants("mapq"),
+               "mt-variants-numtparser": _mt_variants("parser"),
+               "rnaseq-expression": _rnaseq_expression()}
+    for name, config in presets.items():
+        config["general_settings"]["preset_summary"] = [PRESET_SUMMARIES[name], "one line shown when a preset is chosen"]
+    return presets

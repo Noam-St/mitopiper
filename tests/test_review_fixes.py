@@ -508,3 +508,20 @@ def test_star_index_of_a_genome_not_downloaded_yet_is_sized_from_ncbi():
 
     assert _sa_index_nbases("/not/yet/yeast_genomic.fna", 12_157_105) == 11      # STAR: min(14, log2(L)/2 - 1)
     assert _sa_index_nbases("/not/yet/genomic.fna") == 14
+
+
+def test_the_rotated_alignment_of_the_numt_presets_pairs_the_mates():
+    """Review of the presets' commands: the coordinate-sorted .mt.bam went to bwa mem as single-end reads, so mpileup
+    counted the overlap of two mates twice in the window next to the origin."""
+    from mitopiper.builder import build_sample_job
+    from mitopiper.config import Workflow
+    from mitopiper.defaults import bundled_presets
+    from mitopiper.metadata import Run, Sample
+
+    sample = Sample(index=0, accession="S", organism="Homo_sapiens", runs=[Run("R", ["/f_1.fq.gz", "/f_2.fq.gz"])])
+    for preset in ("mt-variants-numt", "mt-variants-numtparser"):
+        wf = Workflow(**bundled_presets()[preset])
+        job = build_sample_job(sample, wf, "/w/output/E", ReferenceSet(refpath="/r/mt.fa", nuc_refpath="/r/g.fa"))
+        (line,) = next(s for s in job.steps if s.step == "align-rotated").lines
+        assert line.startswith("samtools collate -u -O /w/output/E/alignment/S_0_HS.mt.bam | samtools fastq - | bwa mem")
+        assert " -p " in line
