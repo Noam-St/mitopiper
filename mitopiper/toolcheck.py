@@ -103,8 +103,14 @@ def executables(line: str) -> list:
         words = []
     if len(words) > 3 and "sh" in words[1:-1] and words[words.index("sh", 1) + 1] == "-c" \
             and os.path.basename(words[0]) not in ("sh", "bash"):
-        # a step in its container or conda environment (builder.in_environment): only the runtime runs here,
-        # what it runs is inside the environment
+        # a step in its container or conda environment (builder.in_environment): only the runtime runs here, what it
+        # runs is inside the environment. FIX (custom presets test, WEXAC): the tools of a conda_env step were not
+        # checked at all (a missing MACS3 showed only when the sample job failed): they are looked up in it.
+        at = words.index("sh", 1)
+        inner = words[at + 4] if len(words) > at + 4 and words[at + 3] == "mitopiper" else words[at + 2]
+        if os.path.basename(words[0]) in ("conda", "mamba", "micromamba") and words[1:2] == ["run"]:
+            where = " ".join(shlex.quote(w) for w in words[:at])
+            return [words[0]] + [f"{tool}{IN_ENV}{where})" for tool in executables(inner)]
         return [words[0]]
     found = []
     for segment in re.split(r"\|\||&&|\||;", line):
@@ -127,16 +133,21 @@ def executables(line: str) -> list:
     return found
 
 
+#: A tool looked up inside a conda environment: "macs3 (in conda run --no-capture-output -n peaks)"
+IN_ENV = " (in "
+
+
 def required_tools(step_lines: dict) -> dict:
     """``{step: [command lines]}`` -> ``{tool: [steps]}`` (keywords and core utilities left out)."""
     tools: dict = {}
     for step, lines in step_lines.items():
         for line in lines:
             for exe in executables(line):
-                base = os.path.basename(exe)
-                if base in IGNORED or exe.startswith("$"):
+                tool, inside, where = exe.partition(IN_ENV)
+                base = os.path.basename(tool)
+                if base in IGNORED or tool.startswith("$"):
                     continue
-                name = exe if exe.startswith("/") else base
+                name = (tool if tool.startswith("/") else base) + (inside + where if inside else "")
                 tools.setdefault(name, set()).add(step)
                 for dep in HIDDEN_DEPENDENCIES.get(base, []):
                     tools.setdefault(dep, set()).add(f"{step} (via {base})")
@@ -173,13 +184,18 @@ def lookup_script(tools: dict, versions_file: Optional[str] = None) -> str:
         quoted_file = shlex.quote(versions_file)
         lines += [_VERSION_OF, f"printf 'tool\\tpath\\tversion\\n' > {quoted_file}"]
     for tool, steps in tools.items():
-        quoted = shlex.quote(tool)
+        name, inside, where = tool.partition(IN_ENV)
+        quoted = shlex.quote(name)
+        # in a conda environment: looked up there (the runtime prefix, e.g. conda run --no-capture-output -n peaks)
+        lookup = f"{where[:-1]} sh -c {shlex.quote('command -v ' + quoted)}" if inside else f"command -v {quoted}"
         found = ""
         if versions_file:
-            found = (f' && printf "%s\\t%s\\t%s\\n" {quoted} "$(command -v {quoted})" "$(v {quoted})" '
+            version = f'"$({where[:-1]} {quoted} --version 2>&1 | head -n1)"' if inside else f'"$(v {quoted})"'
+            found = (f' && printf "%s\\t%s\\t%s\\n" {shlex.quote(tool)} "$({lookup})" {version} '
                      f">> {quoted_file}")
-        lines.append(f'{{ command -v {quoted} >/dev/null 2>&1{found}; }} || '
-                     f'{{ echo "MISSING {tool} (used by: {", ".join(steps)})" >&2; m="$m {tool}"; }}')
+        shown = tool.replace('"', "'")
+        lines.append(f'{{ {lookup} >/dev/null 2>&1{found}; }} || '
+                     f'{{ echo "MISSING {shown} (used by: {", ".join(steps)})" >&2; m="$m {name}"; }}')
     lines.append('if [ -n "$m" ]; then echo "[mitopiper] not found:$m - load or install them (general setting free_form), then rerun" >&2; exit 1; fi')
     lines.append(f'echo "[mitopiper] all {len(tools)} tools found"')
     return "; ".join(lines)
@@ -224,8 +240,13 @@ def check_here(tools: dict, workflow: Workflow, runner: Callable = subprocess.ru
         return CheckResult(tools, checked=False, reason=str(exc))
     finally:
         os.unlink(path)
-    missing = [line.split()[1] for line in result.stderr.splitlines() if line.startswith("MISSING ")]
-    return CheckResult(tools, missing=missing)
+    missing = [m.group(1) for m in re.finditer(r"^MISSING (.+?) \(used by: ", result.stderr, re.M)]
+    return CheckResult(tools, missing=[_key(tool, tools) for tool in missing])
+
+
+def _key(shown: str, tools: dict) -> str:
+    """The tool of ``tools`` a MISSING line names (its quotes were changed for the shell)."""
+    return next((tool for tool in tools if tool.replace('"', "'") == shown), shown)
 
 
 # ----------------------------------------------------------------- install
@@ -251,7 +272,14 @@ def install_plan(missing: list, env: Optional[dict] = None, which: Callable = sh
     manager = next((m for m in ("mamba", "micromamba", "conda") if which(m)), None) if prefix else None
     manual, conda_pkgs, pip_pkgs = {}, [], []
     for tool in missing:
-        if tool.startswith("/"):
+        name, inside, where = tool.partition(IN_ENV)
+        if inside:                                   # a step's own conda environment, not the active one
+            words = shlex.split(where[:-1])
+            target = " ".join(" ".join(words[words.index(flag):words.index(flag) + 2]) for flag in ("-n", "-p")
+                              if flag in words)
+            manual[tool] = (f"install it into the step's environment: conda install {target or '-n ENV'} -c conda-forge "
+                            f"-c bioconda {CONDA_PACKAGES.get(name, name.lower())}")
+        elif tool.startswith("/"):
             manual[tool] = "an absolute path that does not exist - fix the step's 'path' setting"
         elif tool in MANUAL_INSTALL:
             manual[tool] = MANUAL_INSTALL[tool]

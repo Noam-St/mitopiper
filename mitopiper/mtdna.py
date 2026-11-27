@@ -104,6 +104,36 @@ def primary_assembly(fasta, report, output) -> tuple:
     return kept, dropped
 
 
+#: Sequence names that are the mtDNA in common assemblies (UCSC chrM, Ensembl MT, ...)
+MT_NAMES = {"chrm", "mt", "m", "chrmt", "mito", "mitochondrion"}
+
+
+def mt_contigs(fasta) -> list:
+    """The mtDNA sequence names of ``fasta``: those named like the mtDNA (``chrM``, ``MT``) or described as one
+    (NCBI: ``NC_024511.2 Drosophila melanogaster mitochondrion, complete genome``). A FASTA of small sequences only
+    (an mtDNA FASTA with any name) gives all of them. Raises ValueError for a genome without a recognisable mtDNA.
+
+    Custom presets test (WEXAC): ``mt contigs`` of a whole genome gave its 1,870 contigs, so a preset had to name the
+    fly mtDNA (NC_024511.2) itself."""
+    named, sizes, name = [], {}, None
+    with open(fasta, encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if line.startswith(">"):
+                header = line[1:].strip()
+                name = header.split()[0] if header else ""
+                sizes[name] = 0
+                if name.lower() in MT_NAMES or re.search(r"\bmitochondri(on|al)\b", header, re.I):
+                    named.append(name)
+            elif name is not None:
+                sizes[name] += len(line.strip())
+    if named:
+        return named
+    if sizes and max(sizes.values()) < 1_000_000:
+        return list(sizes)
+    raise ValueError(f"{fasta}: no sequence is named or described as the mtDNA (chrM, MT, '... mitochondrion'); "
+                     "name it in the step instead")
+
+
 def sequence_length(fasta) -> int:
     """Length of the first sequence of a FASTA file."""
     with open(fasta, encoding="utf-8") as handle:
@@ -584,6 +614,8 @@ def add_parser(sub) -> None:
     pileup.add_parsers(msub)
     names = msub.add_parser("contigs", help="print the sequence names of a FASTA")
     names.add_argument("fasta")
+    names.add_argument("--mt", action="store_true", help="only the mtDNA (named chrM/MT/..., or described as "
+                                                          "mitochondrion; all of a FASTA of small sequences)")
     prim = msub.add_parser("primary-assembly", help="keep the primary-assembly sequences of an NCBI genome FASTA "
                                                     "(no alt loci or patches), by its assembly report")
     prim.add_argument("fasta")
@@ -626,7 +658,14 @@ def run(args) -> int:
         print("[mitopiper] Numt Parser: read mates labelled " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items()))
               + f"; reads (pairs) kept: {kept}", file=sys.stderr)
     elif args.action == "contigs":
-        print(" ".join(contigs(args.fasta)))
+        if args.mt:
+            try:
+                print(" ".join(mt_contigs(args.fasta)))
+            except ValueError as exc:
+                print(f"[mitopiper] {exc}", file=sys.stderr)
+                return 1
+        else:
+            print(" ".join(contigs(args.fasta)))
     elif args.action == "primary-assembly":
         kept, dropped = primary_assembly(args.fasta, args.report, args.output)
         print(f"[mitopiper] primary assembly: {kept} sequence(s) kept, {dropped} alt-locus/patch sequence(s) left out",

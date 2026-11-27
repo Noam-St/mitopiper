@@ -300,6 +300,8 @@ DEFAULT_MAIN = {
     "download_mode": ["job", "where the FASTQ files are downloaded: 'job' (in each sample job), 'login' (by master.sh "
                              "on the machine it runs on, before the samples are submitted) or 'queue' (one download job, "
                              "see download_queue)"],
+    "download_memory": ["2G", "memory of the download job with download_mode 'queue' (it uses little; the SRA fallback, "
+                        "fasterq-dump, more)"],
     "download_queue": ["", "queue/partition of the download job with download_mode 'queue' (empty: qsub_queue)"],
     "array_jobs": [False, "submit the sample jobs of an experiment as one array job"],
     "max_running": [0, "run at most this many sample jobs at the same time (0 = no limit; uses an array job)"],

@@ -28,6 +28,7 @@ lookup.
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 import posixpath
 import re
 import shlex
@@ -173,7 +174,7 @@ def sample_variables(sample: Sample, workflow: Workflow, exp_dir: str, ref: Refe
         "numt_fasta": derived["numt"],
         "numt_alleles": derived["numt_alleles"],
         # Names of the mtDNA sequences, looked up when the job runs (works in sh and csh).
-        "mt_contigs": f"`mitopiper mt contigs {fasta}`" if fasta else "",
+        "mt_contigs": f"`mitopiper mt contigs --mt {fasta}`" if fasta else "",
         "mt_shift": str(mt_shift(workflow)),
         "mt_window": str(workflow.general("mt_junction_window", 400) or 400),
         "mt_mapq": str(workflow.general("numt_min_mapq", 20) or 20),
@@ -226,6 +227,16 @@ def output_exts(conf: dict) -> dict:
 
 def first_ext(conf: dict) -> str:
     return next(iter(output_exts(conf).values()))
+
+
+#: Step names with a built-in command, and the structures that mean "use it" (empty, or the bundled one)
+BUILTIN_STEPS = {"wget": ("",), "trim": ("", "key settings fastq_pre"), "fastqc": ("",), "fastqc_pre": ("",),
+                 "alignment": ("",)}
+
+
+@lru_cache(maxsize=None)
+def _warn_once(message: str) -> None:
+    log.warning(message)
 
 
 #: Name of the last step of a sample job when some steps are marked temporary.
@@ -456,8 +467,18 @@ def build_sample_job(
         pre = lambda *parts: " ".join(p for p in parts if p)  # noqa: E731
 
         raw_dir = base["fastq_pre_dir"]
+        # Steps named trim, fastqc, fastqc_pre and alignment have built-in commands (trim_galore's outputs, the raw
+        # FASTQ of wget); a structure of your own is used instead (custom presets test: a step 'trim' with cutadapt's
+        # structure got trim_galore's command, without a word). wget is always the download.
+        own = step in BUILTIN_STEPS and step != "wget" and \
+            " ".join(str(conf.get("structure", "") or "").split()) not in BUILTIN_STEPS[step]
         if step == "wget":
+            if str(conf.get("structure", "") or "").strip():
+                _warn_once(f"Step 'wget' downloads the reads; its structure ('{conf['structure']}') is not used. Name a "
+                           "step of your own otherwise.")
             lines = download_lines(sample, key, settings, _join(exp_dir, outdir), workflow)
+        elif own:
+            lines = [render_structure(conf["structure"], variables, lookups)]
         elif step == "trim":
             lines = [pre(key, settings, "--paired" if paired else "", base["fastq_pre"])]
         elif step == "fastqc":

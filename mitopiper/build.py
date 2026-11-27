@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import platform
+import re
 import shutil
 import sys
 from dataclasses import dataclass, field, replace
@@ -276,11 +277,29 @@ def job_resources(workflow: Workflow, steps: Optional[list] = None) -> JobResour
 STAR_INDEX_EXTRA_MB = 0
 
 
+def _star_index_current(line: str) -> bool:
+    """Whether the STAR index a reference-job line would build exists on this machine and is newer than its FASTA (the
+    job then skips it: the guard of references._unless_exists)."""
+    found = re.search(r'if \[ ! -s "([^"]*/SA)" \]', line)
+    if not found:
+        return False
+    index = Path(found.group(1))
+    fasta = re.search(r'--genomeFastaFiles "([^"]+)"', line)
+    try:
+        built = index.stat().st_size > 0
+        return built and not (fasta and Path(fasta.group(1)).stat().st_mtime > index.stat().st_mtime)
+    except OSError:
+        return False
+
+
 def prep_resources(workflow: Workflow, resources: JobResources, prep_lines: list) -> JobResources:
     """Resources of the reference job: the general ones, or more when it builds a STAR index, which runs with the STAR
     step's threads and needs more memory than aligning (BGU/LSF test: 4 STAR threads in a 1-slot job on a site that
     enforces CPU, and 26 of 30 GB used while indexing GRCh38)."""
     if not any("--runMode genomeGenerate" in line for line in prep_lines):
+        return resources
+    if all(_star_index_current(line) for line in prep_lines if "--runMode genomeGenerate" in line):
+        # custom presets test (WEXAC): 4 x 1.5 GB reserved for a reference job that found the index built
         return resources
     star_steps = [s for s in workflow.active_order() if "STAR" in str(workflow.pipeline.get(s, {}).get("key", ""))]
     if not star_steps:
@@ -494,7 +513,9 @@ def split_downloads(workflow: Workflow, sample_jobs: list) -> list:
 def download_resources(workflow: Workflow, resources: JobResources) -> JobResources:
     """Downloads need one thread and little memory, possibly on a transfer queue."""
     queue = str(workflow.general("download_queue", "") or "") or resources.queue
-    return replace(resources, threads=1, memory="2G" if resources.memory else "", queue=queue)
+    # custom presets test (WEXAC): 2 GB was fixed, for jobs using 25-41 MB for an hour or more
+    memory = str(workflow.general("download_memory", "2G") or "2G")
+    return replace(resources, threads=1, memory=memory if resources.memory else "", queue=queue)
 
 
 def uses_array(workflow: Workflow, scheduler: str) -> bool:

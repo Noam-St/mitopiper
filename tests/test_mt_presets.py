@@ -153,7 +153,7 @@ def test_mt_variants_numt_aligns_to_nuclear_plus_mt(cluster, shell):
     combined = derived_file(ws, "mt.*.with_nuclear.fa")
     assert mtdna.contigs(combined) == ["chr1", "NC_012920.1"]               # the nuclear chrM copy was left out
     script = (ws.output_dir / "exp" / "scripts" / "s_a_0.sh").read_text()
-    assert "-q 20 -o" in script and f"`mitopiper mt contigs {tmp_path}/mt.fa`" in script
+    assert "-q 20 -o" in script and f"`mitopiper mt contigs --mt {tmp_path}/mt.fa`" in script
     assert "samtools fastq" in script and ".rotated5.fa -" in script    # the rotated realignment uses the mt reads
     depths = merged_depths(ws)
     assert [p for p, d in depths.items() if d == 2] == [1, 2, 3, 28, 29, 30]
@@ -321,6 +321,27 @@ def test_the_reference_job_gets_the_threads_and_memory_of_a_star_index(tmp_path,
     assert (res.threads, res.memory) == (8, "40G")                              # STAR step: 8 threads, 32G + 8G
     assert prep_resources(wf, general, ['bwa index "/r/g.fa"']) is general       # no STAR index: as before
     assert prep_resources(wf, JobResources(threads=16, memory="64G"), star) == JobResources(threads=16, memory="64G")
+    # custom presets test (WEXAC): the index was there, but the job still asked for STAR's 4 x 1.5 GB
+    (tmp_path / "g.fa").write_text(">c\nACGT\n")
+    (tmp_path / "SA").write_text("index")
+    built = [f'if [ ! -s "{tmp_path}/SA" ] || {{ [ ! -L "{tmp_path}/SA" ] && [ "{tmp_path}/g.fa" -nt "{tmp_path}/SA" ]; }}; '
+             f'then STAR --runMode genomeGenerate --genomeFastaFiles "{tmp_path}/g.fa" ...; fi']
+    assert prep_resources(wf, general, built) is general
+    import os
+    os.utime(tmp_path / "g.fa", (os.path.getmtime(tmp_path / "SA") + 60,) * 2)    # FASTA newer: built again
+    assert prep_resources(wf, general, built).threads == 8
+
+
+def test_the_download_job_memory_is_a_setting():
+    from mitopiper.build import download_resources
+    from mitopiper.config import Workflow
+    from mitopiper.schedulers import JobResources
+
+    wf = Workflow.default()
+    general = JobResources(threads=4, memory="8G", queue="short")
+    assert (download_resources(wf, general).memory, download_resources(wf, general).threads) == ("2G", 1)
+    wf.set_general("download_memory", "256M")
+    assert download_resources(wf, general).memory == "256M"
 
 
 SLOW_BWA = r"""#!/bin/sh

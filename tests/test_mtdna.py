@@ -239,3 +239,22 @@ def test_combine_references_copies_otherwise(tmp_path, assembly, copy):
     out = tmp_path / "combined.fa"
     mtdna.combine_references(nuclear, mt, out, io.StringIO(), reuse=not copy)
     assert not out.is_symlink() and mtdna.contigs(out) == ["chr1", "NC_012920.1"]
+
+
+def test_the_mtdna_of_a_whole_genome_is_found_by_its_name_or_description(tmp_path):
+    """Custom presets test (WEXAC): 'mt contigs' of the fly genome gave all 1,870 contigs (_mt_contigs too)."""
+    from mitopiper.mtdna import mt_contigs
+
+    genome = tmp_path / "g.fna"
+    genome.write_text(">NC_004354.4 Drosophila melanogaster chromosome X\n" + "A" * 60 + "\n"
+                      ">NC_024511.2 Drosophila melanogaster mitochondrion, complete genome\nACGT\n")
+    assert mt_contigs(genome) == ["NC_024511.2"]
+    genome.write_text(">chr1\nACGT\n>chrM\nACGT\n>MT_like_scaffold\nAC\n")
+    assert mt_contigs(genome) == ["chrM"]
+    (tmp_path / "mt.fa").write_text(">synthMT\nACGTACGT\n")                    # an mtDNA FASTA, any name
+    assert mt_contigs(tmp_path / "mt.fa") == ["synthMT"]
+    big = tmp_path / "big.fa"
+    big.write_text(">chr1\n" + "A" * 1_000_001 + "\n>chr2\nACGT\n")
+    with pytest.raises(ValueError, match="no sequence is named or described as the mtDNA"):
+        mt_contigs(big)
+    assert main(["mt", "contigs", "--mt", str(big)]) == 1

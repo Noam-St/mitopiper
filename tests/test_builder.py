@@ -283,3 +283,17 @@ def test_a_sample_is_never_left_with_its_first_run_only(tmp_path):
     for line in lines:
         subprocess.run(["sh", "-c", line], cwd=tmp_path, check=True)
     assert (tmp_path / "out" / "S_0_HS.fastq.gz").read_text() == "first run\nsecond run\n"
+
+
+def test_a_step_named_like_a_built_in_one_runs_its_own_structure(caplog):
+    """Custom presets test (WEXAC): a step 'trim' with cutadapt's structure got trim_galore's command, silently."""
+    wf = Workflow.default()
+    wf.pipeline["trim"]["key"] = "cutadapt"
+    job = build_sample_job(pe_sample(), wf, EXP, REF, ["trim"])
+    assert job.steps[0].lines[0].startswith("cutadapt") and "--paired" in job.steps[0].lines[0]   # bundled structure
+    wf.pipeline["trim"]["structure"] = "key -a AGATCGGAAGAGC -o out1.fq.gz -p out2.fq.gz _fastq_pre"
+    (line,) = build_sample_job(pe_sample(), wf, EXP, REF, ["trim"]).steps[0].lines
+    assert line.startswith("cutadapt -a AGATCGGAAGAGC -o out1.fq.gz -p out2.fq.gz") and "--paired" not in line
+    wf.pipeline["wget"]["structure"] = "curl -O input"
+    build_sample_job(pe_sample(), wf, EXP, REF, ["wget"])
+    assert "Step 'wget' downloads the reads; its structure ('curl -O input') is not used" in caplog.text

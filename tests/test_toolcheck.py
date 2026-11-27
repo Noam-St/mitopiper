@@ -237,3 +237,33 @@ def test_container_failures_are_diagnosed():
 def test_numt_parser_install_hint_points_to_its_repository():
     plan = toolcheck.install_plan(["numt_parser.py"], env={"CONDA_PREFIX": "/env"}, which=lambda m: "/bin/" + m)
     assert not plan.commands and "github.com/adeflamingh/NuMt_parser" in plan.manual["numt_parser.py"]
+
+
+def test_the_tools_of_a_conda_env_step_are_looked_up_in_it(tmp_path, monkeypatch):
+    """Custom presets test (WEXAC): the tool check skipped the tools of conda_env steps (MACS3, deepTools): a missing
+    one showed only when the sample job failed."""
+    from mitopiper.builder import in_environment
+    from mitopiper.toolcheck import check_here, install_plan, required_tools
+
+    wf = Workflow.default()
+    (line,) = in_environment({"conda_env": "peaks"}, ["macs3 callpeak -t x.bam | gzip -c > p.gz"], wf, [], "/m")
+    tools = required_tools({"peaks": [line]})
+    key = "macs3 (in conda run --no-capture-output -n peaks)"
+    gzip = "gzip (in conda run --no-capture-output -n peaks)"
+    assert set(tools) == {key, gzip} and tools[key] == ["peaks"]
+    bin_dir, env_bin = tmp_path / "bin", tmp_path / "envs" / "peaks" / "bin"
+    bin_dir.mkdir()
+    env_bin.mkdir(parents=True)
+    (bin_dir / "conda").write_text('#!/bin/sh\n# conda run [--no-capture-output] -n ENV CMD...\n'
+                                   'shift; [ "$1" = --no-capture-output ] && shift; env=$2; shift 2\n'
+                                   f'PATH="{tmp_path}/envs/$env/bin:$PATH" exec "$@"\n')
+    (bin_dir / "conda").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    (env_bin / "gzip").symlink_to(__import__("shutil").which("gzip"))
+    result = check_here(tools, wf)
+    assert result.checked and result.missing == [key]
+    advice = install_plan(result.missing, env={}).manual[key]
+    assert "conda install -n peaks" in advice and "macs3" in advice
+    (env_bin / "macs3").write_text("#!/bin/sh\necho macs3 3.0.1\n")
+    (env_bin / "macs3").chmod(0o755)
+    assert check_here(tools, wf).missing == []

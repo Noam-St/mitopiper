@@ -742,7 +742,7 @@ on login or transfer nodes, so the general setting `download_mode` can move the 
 | --- | --- |
 | `job` (default) | in each sample job |
 | `login` | in `master.sh`, on the machine it runs on (the login node), before the samples are submitted |
-| `queue` | in one download job (`dl_<exp>.sh`), on `download_queue` if set, e.g. a transfer partition |
+| `queue` | in one download job (`dl_<exp>.sh`), on `download_queue` if set, e.g. a transfer partition; one core and `download_memory` (default 2G; downloads use tens of MB, the SRA fallback more) |
 
 Either way the downloads are a stage of their own (`dl_<exp>`), with a status and a log. Every
 sample waits for it and skips itself if a download failed. `rerun` downloads again what is missing.
@@ -828,7 +828,7 @@ plain dictionary lookup; no user text is ever evaluated as code.
 | `_sample`, `_org_name` | sample file stem, organism |
 | `_fasta`, `_fasta_dir`, `_fasta_nuc`, `_fasta_nuc_dir`, `_gtf`, `_chrominfo` | reference files |
 | `_fastq_pre`, `_fastq_pre_dir`, `_fastq_sample_path_no_ext` | raw FASTQ (one or two files) |
-| `_fastq`, `_fastq1`, `_fastq2`, `_fastq_dir` | trimmed FASTQ |
+| `_fastq`, `_fastq1`, `_fastq2`, `_fastq_dir` | trimmed FASTQ, as Trim Galore names it (`<sample>_1_val_1.fq.gz`, `_2_val_2`; single-end `<sample>_trimmed.fq.gz`). With another trimmer, refer to its outputs: `output_<step>[:<name>]` |
 | `_sam`, `_bam`, `_STAR_out`, `_STAR_final_log` | alignment outputs |
 | `_command_input`, `_command_output`, `_command_input_dir_path`, `_command_output_dir_path` | this step's input/output |
 | `_tsv_dir`, `_threads` | experiment directory, job threads |
@@ -837,7 +837,12 @@ plain dictionary lookup; no user text is ever evaluated as code.
 | `_if_SE`, `_if_PE` | flag switched on only for single-/paired-end samples |
 
 In `structure`, the tokens `key`, `settings`, `input`, `output` and `output_pipe` (`> output`) are
-also available, e.g. `key settings fasta fastq output_pipe`. A word that happens to be a variable name
+also available, e.g. `key settings fasta fastq output_pipe`.
+
+Five step names have a built-in command: `wget` downloads (or links) the reads, and `trim` (Trim Galore),
+`fastqc`, `fastqc_pre` and `alignment` are written by mitopiper from the reads' names. A step with one of
+the last four names that has a `structure` of your own runs that structure instead. `wget` is always the
+download; a structure given to it is ignored, with a warning. A word that happens to be a variable name
 can be written literally with a backslash: `samtools \fastq input` runs `samtools fastq`.
 
 ### Steps with several output files
@@ -1028,7 +1033,7 @@ installed in the job environment (the tool check verifies this). They are also a
 mitopiper mt rotate mt.fa mt.rotated.fa            # --shift half (default) or a number of bases
 mitopiper mt combine-pileups normal.pileup rotated.pileup merged.pileup --reference mt.fa --window 400
 mitopiper mt combine-references genome.fa mt.fa genome_with_mt.fa
-mitopiper mt contigs mt.fa
+mitopiper mt contigs mt.fa                          # --mt: the mtDNA only (chrM, MT, "... mitochondrion")
 mitopiper mt fragments mt.fa fragments.fa --size 100 --step 20
 mitopiper mt numt-regions fragments_vs_genome.sam mt.fa regions.txt   # then: samtools faidx genome.fa -r regions.txt
 mitopiper mt numt-reads sample.numt_parser.tsv keep.txt --keep cymt --pairs all
@@ -1038,7 +1043,8 @@ mitopiper mt heteroplasmy annotated/*.annotated.tsv -o heteroplasmy/
 ```
 
 Step placeholders for your own workflows: `_fasta_rotated`, `_fasta_combined`, `_mt_contigs` (the
-mtDNA sequence names, looked up when the job runs), `_mt_shift`, `_mt_window`, `_mt_mapq` and `_numt_fasta` (the NUMT reference).
+mtDNA sequence names, looked up when the job runs: sequences named `chrM`/`MT`/... or described as
+"mitochondrion", which also works with a whole-genome reference, e.g. to drop mtDNA reads in ATAC-seq), `_mt_shift`, `_mt_window`, `_mt_mapq` and `_numt_fasta` (the NUMT reference).
 
 ## References
 
