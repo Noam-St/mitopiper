@@ -108,7 +108,7 @@ probably adds the `defaults` channel with flexible priority. Use only the channe
 
 ```bash
 pip install .
-mitopiper --version          # e.g. mitopiper 2.0.2 (commit 9f5526d, 2026-11-26)
+mitopiper --version          # e.g. mitopiper 2.0.3 (commit e5c5eb3, 2026-11-28)
 ```
 
 **Which version do I have?** `mitopiper --version` names the commit the installed copy was made from. The

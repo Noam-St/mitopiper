@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2.0.3 (2026-11-28)
 
-Fixes of a second review of the 2026-11-26 audit fixes. **Upgrading:** `mitopiper presets reset default` for the
+Fixes of a second review of the 2026-11-26 audit fixes, and of a test of custom RNA-seq, ChIP-seq and ATAC-seq presets; presets and their run order shown as tables in interactive mode. **Upgrading:** `mitopiper presets reset default` for the
 htseq-count settings.
 
 ### Fixed
